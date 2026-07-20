@@ -1,0 +1,9 @@
+node_modules/
+.next/
+dist/
+backend/.env
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/prisma/*.db
+*.log
+.DS_Store
