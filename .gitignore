@@ -7,3 +7,6 @@ backend/uploads/*
 backend/prisma/*.db
 *.log
 .DS_Store
+
+.vercel
+.env*
