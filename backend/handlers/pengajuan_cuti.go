@@ -206,6 +206,7 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("DELETE /api/pengajuan-cuti/{id}", anyRole(func(w http.ResponseWriter, r *http.Request) { deletePengajuan(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-cuti/{id}/approve", approverRoles(func(w http.ResponseWriter, r *http.Request) { approvePengajuan(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-cuti/{id}/reject", approverRoles(func(w http.ResponseWriter, r *http.Request) { rejectPengajuan(w, r, db) }))
+	mux.Handle("PUT /api/pengajuan-cuti/{id}/kembalikan", approverRoles(func(w http.ResponseWriter, r *http.Request) { kembalikanPengajuan(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-cuti/{id}/return", approverRoles(func(w http.ResponseWriter, r *http.Request) { returnPengajuan(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-cuti/{id}/dokumen/{jenis}", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenPengajuan(w, r, db) }))
 }
@@ -493,7 +494,7 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
 		return
 	}
-	if (claims.RoleName == "pegawai") && item.Status != models.StatusPending {
+	if (claims.RoleName == "pegawai") && item.Status != models.StatusPending && item.Status != models.StatusDikembalikan {
 		utils.Error(w, http.StatusBadRequest, "pengajuan yang sudah diproses tidak dapat diubah")
 		return
 	}
@@ -564,7 +565,7 @@ func deletePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
 		return
 	}
-	if claims.RoleName == "pegawai" && item.Status != models.StatusPending {
+	if claims.RoleName == "pegawai" && item.Status != models.StatusPending && item.Status != models.StatusDikembalikan {
 		utils.Error(w, http.StatusBadRequest, "pengajuan yang sudah diproses tidak dapat dihapus")
 		return
 	}
@@ -651,6 +652,47 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	preloadPengajuan(db).First(&item, item.ID)
 	utils.Success(w, "pengajuan cuti telah ditolak", item)
+}
+
+// kembalikanPengajuan sends a still-pending pengajuan back to the pegawai for
+// correction (e.g. some uploaded documents don't match/aren't valid) instead
+// of rejecting it outright. Unlike a rejection, the pegawai can then edit or
+// delete-and-resubmit it (see updatePengajuan/deletePengajuan), and a reason
+// is mandatory so the pegawai knows what to fix.
+func kembalikanPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.PengajuanCuti
+	if err := db.Preload("Pegawai").First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessPengajuan(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda hanya dapat memproses pengajuan cuti bawahan anda")
+		return
+	}
+	if item.Status != models.StatusPending {
+		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya")
+		return
+	}
+	var p approvalPayload
+	_ = json.NewDecoder(r.Body).Decode(&p)
+	if strings.TrimSpace(p.Catatan) == "" {
+		utils.Error(w, http.StatusBadRequest, "alasan pengembalian wajib diisi (misal: ada berkas yang tidak sesuai)")
+		return
+	}
+
+	now := time.Now()
+	item.Status = models.StatusDikembalikan
+	item.IDAtasanApprove = claims.IDPegawai
+	item.TglApproval = &now
+	item.CatatanApproval = p.Catatan
+	if err := db.Save(&item).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengembalikan pengajuan: "+err.Error())
+		return
+	}
+	preloadPengajuan(db).First(&item, item.ID)
+	utils.Success(w, "pengajuan cuti dikembalikan ke pegawai untuk diperbaiki", item)
 }
 
 // returnPengajuan reverts a pengajuan that was already disetujui/ditolak back

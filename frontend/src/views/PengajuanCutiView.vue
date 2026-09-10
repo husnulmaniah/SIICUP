@@ -84,6 +84,7 @@ const statusFilterOptions = [
   { label: 'Menunggu', value: 'pending' },
   { label: 'Disetujui', value: 'disetujui' },
   { label: 'Ditolak', value: 'ditolak' },
+  { label: 'Dikembalikan', value: 'dikembalikan' },
 ]
 
 const isManage = computed(() => auth.isAdministrator || auth.isAdmin)
@@ -93,6 +94,7 @@ const isPegawai = computed(() => auth.isPegawai)
 function statusSeverity(status) {
   if (status === 'disetujui') return 'success'
   if (status === 'ditolak') return 'danger'
+  if (status === 'dikembalikan') return 'contrast'
   return 'warn'
 }
 
@@ -325,13 +327,27 @@ function openApproval(row) {
 }
 
 async function processApproval(action) {
+  if (action === 'kembalikan' && !approvalNote.value.trim()) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Alasan wajib diisi',
+      detail: 'Isi Catatan dengan alasan pengembalian (misal: ada berkas yang tidak sesuai)',
+      life: 4000,
+    })
+    return
+  }
   approvalLoading.value = true
   try {
     await http.put(`/pengajuan-cuti/${approvalRow.value.id}/${action}`, { catatan_approval: approvalNote.value })
+    const messages = {
+      approve: 'Pengajuan cuti disetujui',
+      reject: 'Pengajuan cuti ditolak',
+      kembalikan: 'Pengajuan cuti dikembalikan ke pegawai untuk diperbaiki',
+    }
     toast.add({
       severity: action === 'approve' ? 'success' : 'warn',
       summary: 'Berhasil',
-      detail: action === 'approve' ? 'Pengajuan cuti disetujui' : 'Pengajuan cuti ditolak',
+      detail: messages[action] || 'Berhasil diproses',
       life: 3000,
     })
     approvalDialog.value = false
@@ -510,7 +526,7 @@ onMounted(() => {
                   label="Kembalikan"
                   @click="confirmReturn(data)"
                 />
-                <template v-if="(isPegawai && data.status === 'pending') || isManage">
+                <template v-if="(isPegawai && (data.status === 'pending' || data.status === 'dikembalikan')) || isManage">
                   <Button icon="pi pi-pencil" size="small" severity="secondary" rounded text @click="openEdit(data)" />
                   <Button icon="pi pi-trash" size="small" severity="danger" rounded text @click="confirmDelete(data)" />
                 </template>
@@ -623,9 +639,10 @@ onMounted(() => {
         </div>
         <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
       </div>
-      <label class="field-label">Catatan (opsional)</label>
-      <Textarea v-model="approvalNote" rows="2" style="width: 100%" placeholder="Catatan untuk pegawai..." />
+      <label class="field-label">Catatan (wajib diisi untuk Tolak/Kembalikan)</label>
+      <Textarea v-model="approvalNote" rows="2" style="width: 100%" placeholder="Catatan untuk pegawai... (mis. ada berkas yang tidak sesuai)" />
       <template #footer>
+        <Button label="Kembalikan" severity="warn" outlined :loading="approvalLoading" @click="processApproval('kembalikan')" />
         <Button label="Tolak" severity="danger" outlined :loading="approvalLoading" @click="processApproval('reject')" />
         <Button label="Setujui" severity="success" :loading="approvalLoading" @click="processApproval('approve')" />
       </template>

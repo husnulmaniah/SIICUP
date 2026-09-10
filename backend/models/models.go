@@ -87,23 +87,23 @@ func (TglMerah) TableName() string { return "tgl_merah" }
 // ============================================================
 
 type Pegawai struct {
-	ID           uint       `json:"id" gorm:"primaryKey"`
-	NIP          string     `json:"nip" gorm:"column:nip;size:30;not null;unique"`
-	Nama         string     `json:"nama" gorm:"size:150;not null"`
-	IDJabatan    *uint      `json:"id_jabatan" gorm:"column:id_jabatan"`
-	Jabatan      *Jabatan   `json:"jabatan,omitempty" gorm:"foreignKey:IDJabatan;references:ID"`
-	IDUnitKerja  *uint      `json:"id_unit_kerja" gorm:"column:id_unit_kerja"`
-	UnitKerja    *UnitKerja `json:"unit_kerja,omitempty" gorm:"foreignKey:IDUnitKerja;references:ID"`
-	IDPangkatGol *uint      `json:"id_pangkat_gol" gorm:"column:id_pangkat_gol"`
+	ID           uint        `json:"id" gorm:"primaryKey"`
+	NIP          string      `json:"nip" gorm:"column:nip;size:30;not null;unique"`
+	Nama         string      `json:"nama" gorm:"size:150;not null"`
+	IDJabatan    *uint       `json:"id_jabatan" gorm:"column:id_jabatan"`
+	Jabatan      *Jabatan    `json:"jabatan,omitempty" gorm:"foreignKey:IDJabatan;references:ID"`
+	IDUnitKerja  *uint       `json:"id_unit_kerja" gorm:"column:id_unit_kerja"`
+	UnitKerja    *UnitKerja  `json:"unit_kerja,omitempty" gorm:"foreignKey:IDUnitKerja;references:ID"`
+	IDPangkatGol *uint       `json:"id_pangkat_gol" gorm:"column:id_pangkat_gol"`
 	PangkatGol   *PangkatGol `json:"pangkat_gol,omitempty" gorm:"foreignKey:IDPangkatGol;references:ID"`
-	TempatTgs    string     `json:"tempat_tgs" gorm:"column:tempat_tgs;size:150"`
-	TMT          *time.Time `json:"tmt" gorm:"column:tmt;type:date"`
-	NoHP         string     `json:"no_hp" gorm:"column:no_hp;size:20"`
-	IDStatus     *uint      `json:"id_status" gorm:"column:id_status"`
-	Status       *Status    `json:"status,omitempty" gorm:"foreignKey:IDStatus;references:ID"`
-	IDAtasan     *uint      `json:"id_atasan" gorm:"column:id_atasan"`
-	Atasan       *Pegawai   `json:"atasan,omitempty" gorm:"foreignKey:IDAtasan;references:ID"`
-	Email        string     `json:"email" gorm:"size:100"`
+	TempatTgs    string      `json:"tempat_tgs" gorm:"column:tempat_tgs;size:150"`
+	TMT          *time.Time  `json:"tmt" gorm:"column:tmt;type:date"`
+	NoHP         string      `json:"no_hp" gorm:"column:no_hp;size:20"`
+	IDStatus     *uint       `json:"id_status" gorm:"column:id_status"`
+	Status       *Status     `json:"status,omitempty" gorm:"foreignKey:IDStatus;references:ID"`
+	IDAtasan     *uint       `json:"id_atasan" gorm:"column:id_atasan"`
+	Atasan       *Pegawai    `json:"atasan,omitempty" gorm:"foreignKey:IDAtasan;references:ID"`
+	Email        string      `json:"email" gorm:"size:100"`
 
 	// Dokumen kepegawaian (disimpan langsung di database sebagai bytea agar
 	// tidak hilang saat container backend di-redeploy/restart).
@@ -159,30 +159,31 @@ func (j JatahCuti) Sisa() int {
 // ============================================================
 
 const (
-	StatusPending  = "pending"
-	StatusDisetuju = "disetujui"
-	StatusDitolak  = "ditolak"
+	StatusPending      = "pending"
+	StatusDisetuju     = "disetujui"
+	StatusDitolak      = "ditolak"
+	StatusDikembalikan = "dikembalikan" // dikembalikan ke pegawai untuk diperbaiki (mis. berkas tidak sesuai), bukan ditolak final
 )
 
 type PengajuanCuti struct {
-	ID                 uint           `json:"id" gorm:"primaryKey"`
-	IDPegawai          uint           `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
-	Pegawai            *Pegawai       `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
-	IDJenisCuti        uint           `json:"id_jenis_cuti" gorm:"column:id_jenis_cuti;not null"`
-	JenisCuti          *JenisCuti     `json:"jenis_cuti,omitempty" gorm:"foreignKey:IDJenisCuti;references:ID"`
-	TglMulai           time.Time      `json:"tgl_mulai" gorm:"column:tgl_mulai;type:date;not null"`
-	TglSelesai         time.Time      `json:"tgl_selesai" gorm:"column:tgl_selesai;type:date;not null"`
-	IDPolaHariKerja    *uint          `json:"id_pola_hari_kerja" gorm:"column:id_pola_hari_kerja"`
-	PolaHariKerja      *PolaHariKerja `json:"pola_hari_kerja,omitempty" gorm:"foreignKey:IDPolaHariKerja;references:ID"`
-	AlasanCuti         string         `json:"alasan_cuti" gorm:"column:alasan_cuti;size:255"`
-	AlamatSelamaCuti   string         `json:"alamat_selama_cuti" gorm:"column:alamat_selama_cuti;size:255"`
-	JumlahHari         int            `json:"jumlah_hari" gorm:"column:jumlah_hari;default:0"`
-	Status             string         `json:"status" gorm:"size:20;default:pending"`
-	IDAtasanApprove    *uint          `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
-	AtasanApprove      *Pegawai       `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
-	TglApproval        *time.Time     `json:"tgl_approval" gorm:"column:tgl_approval"`
-	CatatanApproval    string         `json:"catatan_approval" gorm:"column:catatan_approval;size:255"`
-	CreatedAt          time.Time      `json:"created_at"`
+	ID               uint           `json:"id" gorm:"primaryKey"`
+	IDPegawai        uint           `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai          *Pegawai       `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	IDJenisCuti      uint           `json:"id_jenis_cuti" gorm:"column:id_jenis_cuti;not null"`
+	JenisCuti        *JenisCuti     `json:"jenis_cuti,omitempty" gorm:"foreignKey:IDJenisCuti;references:ID"`
+	TglMulai         time.Time      `json:"tgl_mulai" gorm:"column:tgl_mulai;type:date;not null"`
+	TglSelesai       time.Time      `json:"tgl_selesai" gorm:"column:tgl_selesai;type:date;not null"`
+	IDPolaHariKerja  *uint          `json:"id_pola_hari_kerja" gorm:"column:id_pola_hari_kerja"`
+	PolaHariKerja    *PolaHariKerja `json:"pola_hari_kerja,omitempty" gorm:"foreignKey:IDPolaHariKerja;references:ID"`
+	AlasanCuti       string         `json:"alasan_cuti" gorm:"column:alasan_cuti;size:255"`
+	AlamatSelamaCuti string         `json:"alamat_selama_cuti" gorm:"column:alamat_selama_cuti;size:255"`
+	JumlahHari       int            `json:"jumlah_hari" gorm:"column:jumlah_hari;default:0"`
+	Status           string         `json:"status" gorm:"size:20;default:pending"`
+	IDAtasanApprove  *uint          `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
+	AtasanApprove    *Pegawai       `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
+	TglApproval      *time.Time     `json:"tgl_approval" gorm:"column:tgl_approval"`
+	CatatanApproval  string         `json:"catatan_approval" gorm:"column:catatan_approval;size:255"`
+	CreatedAt        time.Time      `json:"created_at"`
 
 	// Dokumen kelengkapan yang diupload saat pengajuan dibuat (wajib untuk
 	// pengajuan mandiri oleh pegawai/atasan, opsional bila dibuatkan oleh admin).
