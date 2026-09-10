@@ -26,6 +26,7 @@ func Migrate(db *gorm.DB) {
 		&models.JatahCuti{},
 		&models.PengajuanCuti{},
 		&models.PengajuanDokumen{},
+		&models.PengaturanSurat{},
 	)
 	if err != nil {
 		log.Fatalf("gagal migrasi database: %v", err)

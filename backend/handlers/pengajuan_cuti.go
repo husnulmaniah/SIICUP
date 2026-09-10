@@ -209,6 +209,10 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/pengajuan-cuti/{id}/kembalikan", approverRoles(func(w http.ResponseWriter, r *http.Request) { kembalikanPengajuan(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-cuti/{id}/return", approverRoles(func(w http.ResponseWriter, r *http.Request) { returnPengajuan(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-cuti/{id}/dokumen/{jenis}", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenPengajuan(w, r, db) }))
+	// formulir cetak -- hanya bisa diunduh setelah pengajuan disetujui, lihat
+	// loadApprovedPengajuanForForm di formulir.go.
+	mux.Handle("GET /api/pengajuan-cuti/{id}/form/rekomendasi", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormRekomendasi(w, r, db) }))
+	mux.Handle("GET /api/pengajuan-cuti/{id}/form/cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormCuti(w, r, db) }))
 }
 
 // dokumenContentType maps a stored filename's extension to a real MIME type

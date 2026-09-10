@@ -212,4 +212,21 @@ type PengajuanDokumen struct {
 	PerluPerbaikan bool `json:"perlu_perbaikan" gorm:"column:perlu_perbaikan;default:false"`
 }
 
+// ============================================================
+// PENGATURAN SURAT (data penandatangan Kepala Dinas untuk formulir cetak)
+// ============================================================
+
+// PengaturanSurat menyimpan data Kepala Dinas yang dicetak sebagai
+// penandatangan pada "Surat Rekomendasi Izin Cuti" dan "Formulir Permintaan
+// dan Pemberian Cuti" begitu pengajuan disetujui. Selalu ada tepat satu baris
+// (ID = 1) -- lihat database.EnsurePengaturanSurat -- dan hanya diubah lewat
+// halaman Pengaturan Formulir (admin/administrator), bukan lewat CRUD daftar.
+type PengaturanSurat struct {
+	ID              uint   `json:"id" gorm:"primaryKey"`
+	NamaKepalaDinas string `json:"nama_kepala_dinas" gorm:"column:nama_kepala_dinas;size:150"`
+	NipKepalaDinas  string `json:"nip_kepala_dinas" gorm:"column:nip_kepala_dinas;size:30"`
+}
+
+func (PengaturanSurat) TableName() string { return "pengaturan_surat" }
+
 func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }

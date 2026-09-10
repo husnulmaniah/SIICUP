@@ -48,12 +48,12 @@ const navSections = computed(() => {
     })
   }
 
-  if (auth.isAdministrator) {
+  if (auth.canManageMaster) {
     sections.push({
       header: 'Administrasi',
       items: [
-        { label: 'Role', icon: 'pi pi-shield', to: '/master/role' },
-        { label: 'Akun Pengguna', icon: 'pi pi-user', to: '/master/user' },
+        ...(auth.isAdministrator ? [{ label: 'Role', icon: 'pi pi-shield', to: '/master/role' }, { label: 'Akun Pengguna', icon: 'pi pi-user', to: '/master/user' }] : []),
+        { label: 'Pengaturan Formulir', icon: 'pi pi-file-edit', to: '/pengaturan-formulir' },
       ],
     })
   }

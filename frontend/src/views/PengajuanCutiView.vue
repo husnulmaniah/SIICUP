@@ -552,10 +552,30 @@ onMounted(() => {
           <Column header="Status" style="width: 130px">
             <template #body="{ data }"><Tag :value="data.status" :severity="statusSeverity(data.status)" /></template>
           </Column>
-          <Column header="Aksi" style="width: 230px">
+          <Column header="Aksi" style="width: 300px">
             <template #body="{ data }">
               <div style="display: flex; gap: 0.35rem; flex-wrap: wrap">
                 <Button icon="pi pi-eye" size="small" severity="secondary" rounded text @click="openDetail(data)" />
+                <template v-if="data.status === 'disetujui'">
+                  <Button
+                    icon="pi pi-file-pdf"
+                    size="small"
+                    severity="info"
+                    rounded
+                    text
+                    title="Unduh Surat Rekomendasi"
+                    @click="downloadFile(`/pengajuan-cuti/${data.id}/form/rekomendasi`, `surat_rekomendasi_${data.id}.pdf`)"
+                  />
+                  <Button
+                    icon="pi pi-file-pdf"
+                    size="small"
+                    severity="help"
+                    rounded
+                    text
+                    title="Unduh Formulir Cuti"
+                    @click="downloadFile(`/pengajuan-cuti/${data.id}/form/cuti`, `formulir_cuti_${data.id}.pdf`)"
+                  />
+                </template>
                 <Button
                   v-if="(isAtasan || isManage) && data.status === 'pending'"
                   icon="pi pi-check-square"
@@ -679,6 +699,25 @@ onMounted(() => {
           </div>
         </div>
         <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
+        <div v-if="detailRow.status === 'disetujui'" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
+          <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Cetak</div>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+            <Button
+              icon="pi pi-file-pdf"
+              size="small"
+              outlined
+              label="Surat Rekomendasi"
+              @click="downloadFile(`/pengajuan-cuti/${detailRow.id}/form/rekomendasi`, `surat_rekomendasi_${detailRow.id}.pdf`)"
+            />
+            <Button
+              icon="pi pi-file-pdf"
+              size="small"
+              outlined
+              label="Formulir Cuti"
+              @click="downloadFile(`/pengajuan-cuti/${detailRow.id}/form/cuti`, `formulir_cuti_${detailRow.id}.pdf`)"
+            />
+          </div>
+        </div>
       </div>
       <template #footer>
         <Button label="Tutup" severity="secondary" outlined @click="detailDialog = false" />

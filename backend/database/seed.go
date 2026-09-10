@@ -160,3 +160,25 @@ func EnsureJenisCuti(db *gorm.DB) {
 		}
 	}
 }
+
+// EnsurePengaturanSurat memastikan selalu ada tepat satu baris pengaturan
+// (ID=1) berisi data Kepala Dinas yang dicetak sebagai penandatangan pada
+// formulir cetak (Surat Rekomendasi & Formulir Permintaan/Pemberian Cuti).
+// Idempotent -- hanya membuat baris default sekali; setelah itu nilainya
+// hanya diubah lewat halaman Pengaturan Formulir (admin/administrator).
+func EnsurePengaturanSurat(db *gorm.DB) {
+	var count int64
+	db.Model(&models.PengaturanSurat{}).Count(&count)
+	if count > 0 {
+		return
+	}
+	if err := db.Create(&models.PengaturanSurat{
+		ID:              1,
+		NamaKepalaDinas: "MOH. RIDWAN DM. S.Ag",
+		NipKepalaDinas:  "19740111 199803 1 004",
+	}).Error; err != nil {
+		log.Printf("gagal membuat pengaturan surat default: %v", err)
+	} else {
+		log.Println("pengaturan surat default dibuat (bisa diubah dari menu Pengaturan Formulir)")
+	}
+}

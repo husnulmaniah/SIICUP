@@ -7,6 +7,7 @@ import AppLayout from '../layouts/AppLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
 import PengajuanCutiView from '../views/PengajuanCutiView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
+import PengaturanFormulirView from '../views/PengaturanFormulirView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -19,6 +20,7 @@ const routes = [
       { path: 'dashboard', name: 'dashboard', component: DashboardView },
       { path: 'pengajuan-cuti', name: 'pengajuan-cuti', component: PengajuanCutiView },
       { path: 'master/:tableKey', name: 'master', component: MasterDataView },
+      { path: 'pengaturan-formulir', name: 'pengaturan-formulir', component: PengaturanFormulirView, meta: { roles: ['administrator', 'admin'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },
@@ -43,6 +45,9 @@ router.beforeEach((to) => {
     if (!cfg || !cfg.roles.includes(auth.role)) {
       return { name: 'dashboard' }
     }
+  }
+  if (to.meta.roles && !to.meta.roles.includes(auth.role)) {
+    return { name: 'dashboard' }
   }
   return true
 })
