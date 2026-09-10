@@ -57,6 +57,12 @@ const remoteOptions = reactive({})
 
 // ---- detail dialog (khusus tabel Data Pegawai) ----
 const isPegawaiTable = computed(() => props.config.endpoint === '/pegawai')
+
+// ---- generate akun otomatis dari data pegawai (khusus tabel Akun Pengguna) ----
+const isUserTable = computed(() => props.config.endpoint === '/user')
+const generateDialogVisible = ref(false)
+const generating = ref(false)
+const generateResult = ref(null)
 const detailDialogVisible = ref(false)
 const detailLoading = ref(false)
 const detailItem = ref(null)
@@ -455,6 +461,26 @@ async function doImport() {
   }
 }
 
+function openGenerateDialog() {
+  generateResult.value = null
+  generateDialogVisible.value = true
+}
+
+async function submitGenerate() {
+  generating.value = true
+  generateResult.value = null
+  try {
+    const { data } = await http.post('/user/generate-from-pegawai')
+    generateResult.value = data.data
+    toast.add({ severity: 'success', summary: 'Selesai', detail: data.message, life: 4000 })
+    fetchList()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal generate akun', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    generating.value = false
+  }
+}
+
 onMounted(() => {
   fetchList()
   loadRemoteOptions()
@@ -489,6 +515,7 @@ const canManage = computed(() => true) // route guard already restricts page acc
           <Button icon="pi pi-download" label="Template" severity="secondary" outlined @click="downloadTemplate" />
           <Button icon="pi pi-upload" label="Import" severity="secondary" outlined @click="openImportDialog" />
           <Button icon="pi pi-file-export" label="Export" severity="secondary" outlined @click="isPegawaiTable ? openExportFilterDialog() : exportData()" />
+          <Button v-if="isUserTable" icon="pi pi-users" label="Generate Akun dari Pegawai" severity="help" outlined @click="openGenerateDialog" />
         </div>
       </div>
 
@@ -615,6 +642,68 @@ const canManage = computed(() => true) // route guard already restricts page acc
       <template #footer>
         <Button label="Tutup" severity="secondary" outlined @click="importDialogVisible = false" />
         <Button label="Upload & Import" icon="pi pi-upload" :loading="importing" :disabled="!importFile" @click="submitImport" />
+      </template>
+    </Dialog>
+
+    <!-- Generate akun otomatis dari Data Pegawai (khusus tabel Akun Pengguna) -->
+    <Dialog v-model:visible="generateDialogVisible" modal header="Generate Akun dari Data Pegawai" :style="{ width: '34rem', maxWidth: '95vw' }">
+      <Message severity="info" :closable="false" style="margin-bottom: 1rem">
+        Sistem akan membuat akun untuk setiap pegawai di Data Pegawai yang belum terhubung ke akun manapun, dengan aturan:
+        username = NIP pegawai, nama = nama pegawai, role = <strong>pegawai</strong>, password = <strong>123456</strong>,
+        dan otomatis terhubung ke data pegawai masing-masing. Pegawai yang sudah punya akun tidak akan dibuatkan akun baru.
+      </Message>
+
+      <div v-if="generateResult" style="margin-top: 1rem">
+        <Message :severity="generateResult.skipped_count ? 'warn' : 'success'" :closable="false">
+          {{ generateResult.created_count }} akun berhasil dibuat, {{ generateResult.skipped_count }} pegawai dilewati.
+        </Message>
+
+        <div v-if="generateResult.created?.length" style="margin-top: 0.75rem">
+          <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem">Akun yang dibuat</div>
+          <div class="responsive-table-wrap" style="max-height: 200px; overflow-y: auto">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 0.4rem; border-bottom: 1px solid #e2e8f0">Nama</th>
+                  <th style="text-align: left; padding: 0.4rem; border-bottom: 1px solid #e2e8f0">Username (NIP)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(c, idx) in generateResult.created" :key="'c' + idx">
+                  <td style="padding: 0.4rem; border-bottom: 1px solid #f1f5f9">{{ c.nama }}</td>
+                  <td style="padding: 0.4rem; border-bottom: 1px solid #f1f5f9">{{ c.username }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div v-if="generateResult.skipped?.length" style="margin-top: 0.75rem">
+          <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem">Pegawai yang dilewati</div>
+          <div class="responsive-table-wrap" style="max-height: 200px; overflow-y: auto">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 0.4rem; border-bottom: 1px solid #e2e8f0">Nama</th>
+                  <th style="text-align: left; padding: 0.4rem; border-bottom: 1px solid #e2e8f0">NIP</th>
+                  <th style="text-align: left; padding: 0.4rem; border-bottom: 1px solid #e2e8f0">Alasan</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(s, idx) in generateResult.skipped" :key="'s' + idx">
+                  <td style="padding: 0.4rem; border-bottom: 1px solid #f1f5f9">{{ s.nama }}</td>
+                  <td style="padding: 0.4rem; border-bottom: 1px solid #f1f5f9">{{ s.nip || '-' }}</td>
+                  <td style="padding: 0.4rem; border-bottom: 1px solid #f1f5f9">{{ s.reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <Button label="Tutup" severity="secondary" outlined @click="generateDialogVisible = false" />
+        <Button label="Generate Akun" icon="pi pi-users" :loading="generating" @click="submitGenerate" />
       </template>
     </Dialog>
 

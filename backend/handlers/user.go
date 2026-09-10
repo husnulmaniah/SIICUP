@@ -80,6 +80,7 @@ func RegisterUserRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/user/export", protect(func(w http.ResponseWriter, r *http.Request) { exportUsers(w, r, db) }))
 	mux.Handle("GET /api/user/template", protect(func(w http.ResponseWriter, r *http.Request) { templateCrud(w, handlers2Cfg(db)) }))
 	mux.Handle("POST /api/user/import", protect(func(w http.ResponseWriter, r *http.Request) { importUsers(w, r, db) }))
+	mux.Handle("POST /api/user/generate-from-pegawai", protect(func(w http.ResponseWriter, r *http.Request) { generateUsersFromPegawai(w, r, db) }))
 	mux.Handle("GET /api/user/{id}", protect(func(w http.ResponseWriter, r *http.Request) { getUser(w, r, db) }))
 	mux.Handle("POST /api/user", protect(func(w http.ResponseWriter, r *http.Request) { createUser(w, r, db) }))
 	mux.Handle("PUT /api/user/{id}", protect(func(w http.ResponseWriter, r *http.Request) { updateUser(w, r, db) }))
@@ -282,5 +283,103 @@ func importUsers(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		Success: len(rowErrors) == 0,
 		Message: fmt.Sprintf("%d baris berhasil diimport, %d baris gagal", successCount, len(rowErrors)),
 		Data:    map[string]interface{}{"success_count": successCount, "failed_rows": rowErrors},
+	})
+}
+
+// generateUsersFromPegawai membuat akun user (role "pegawai") secara otomatis
+// untuk setiap data pegawai yang belum terhubung ke akun user manapun.
+// Aturan: username = NIP pegawai, nama = nama pegawai, password default
+// "123456" (di-hash), role dipaksa "pegawai", dan langsung dihubungkan
+// (id_pegawai) ke pegawai bersangkutan.
+func generateUsersFromPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	const defaultPassword = "123456"
+
+	var pegawaiRole models.Role
+	if err := db.Where("role ILIKE ?", "pegawai").First(&pegawaiRole).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "role 'pegawai' tidak ditemukan di database")
+		return
+	}
+
+	hash, err := utils.HashPassword(defaultPassword)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal memproses password default")
+		return
+	}
+
+	var pegawaiList []models.Pegawai
+	if err := db.Order("nama asc").Find(&pegawaiList).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pegawai")
+		return
+	}
+
+	// kumpulkan id_pegawai yang sudah punya akun, dan username yang sudah dipakai,
+	// supaya tidak membuat akun duplikat.
+	var existingUsers []models.User
+	if err := db.Find(&existingUsers).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data user")
+		return
+	}
+	linkedPegawaiIDs := map[uint]bool{}
+	usedUsernames := map[string]bool{}
+	for _, u := range existingUsers {
+		if u.IDPegawai != nil {
+			linkedPegawaiIDs[*u.IDPegawai] = true
+		}
+		usedUsernames[strings.ToLower(strings.TrimSpace(u.Username))] = true
+	}
+
+	type skipped struct {
+		Nama   string `json:"nama"`
+		NIP    string `json:"nip"`
+		Reason string `json:"reason"`
+	}
+	type created struct {
+		Nama     string `json:"nama"`
+		Username string `json:"username"`
+	}
+	var createdList []created
+	var skippedList []skipped
+
+	for _, peg := range pegawaiList {
+		if linkedPegawaiIDs[peg.ID] {
+			skippedList = append(skippedList, skipped{Nama: peg.Nama, NIP: peg.NIP, Reason: "sudah terhubung ke akun user"})
+			continue
+		}
+		nip := strings.TrimSpace(peg.NIP)
+		if nip == "" {
+			skippedList = append(skippedList, skipped{Nama: peg.Nama, NIP: peg.NIP, Reason: "NIP kosong, tidak bisa dijadikan username"})
+			continue
+		}
+		if usedUsernames[strings.ToLower(nip)] {
+			skippedList = append(skippedList, skipped{Nama: peg.Nama, NIP: peg.NIP, Reason: "username (NIP) sudah dipakai akun lain"})
+			continue
+		}
+
+		pegID := peg.ID
+		user := models.User{
+			Username:  nip,
+			Pass:      hash,
+			Nama:      peg.Nama,
+			IDRole:    pegawaiRole.ID,
+			IDPegawai: &pegID,
+		}
+		if err := db.Create(&user).Error; err != nil {
+			skippedList = append(skippedList, skipped{Nama: peg.Nama, NIP: peg.NIP, Reason: "gagal menyimpan: " + err.Error()})
+			continue
+		}
+		usedUsernames[strings.ToLower(nip)] = true
+		createdList = append(createdList, created{Nama: peg.Nama, Username: nip})
+	}
+
+	utils.JSON(w, http.StatusOK, utils.APIResponse{
+		Success: true,
+		Message: fmt.Sprintf("%d akun berhasil dibuat, %d pegawai dilewati", len(createdList), len(skippedList)),
+		Data: map[string]interface{}{
+			"created_count":    len(createdList),
+			"skipped_count":    len(skippedList),
+			"created":          createdList,
+			"skipped":          skippedList,
+			"default_password": defaultPassword,
+		},
 	})
 }
