@@ -283,9 +283,12 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	p.Text(contentX+pad+55, rowTop+57, ": "+unitNama)
 	y = rowBottom(rowTop, rowH, "I")
 
-	// Row II: Jenis Cuti yang di ambil
+	// Row II: Jenis Cuti yang di ambil -- dirender sebagai tabel bergrid
+	// penuh (kolom kosong tipis | nomor | label | kotak centang, diulang
+	// untuk kelompok kiri 1-3 dan kanan 4-6, dengan garis horizontal di
+	// antara tiap baris) supaya semirip mungkin dengan formulir cetak asli.
 	rowTop = y
-	rowH = 54.0
+	rowH = 60.0
 	p.SetFont(true, 9)
 	p.Text(contentX+pad, rowTop+13, "Jenis Cuti yang di ambil")
 	p.SetFont(false, 8.5)
@@ -304,25 +307,49 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 		label string
 	}{{4, "Cuti Besar"}, {5, "Cuti Melahirkan"}, {6, "Cuti di Luar Tanggungan Negara"}}
 	midX := contentX + contentW*0.52
-	boxSize := 8.0
+	checkSize := 9.0
+	blankColW := 6.0
+	checkColW := 22.0
+	trailColW := 6.0
+	leftNumX := contentX + blankColW
+	leftLabelX := leftNumX + 14.0
+	leftCheckX := midX - checkColW
+	rightNumX := midX + blankColW
+	rightLabelX := rightNumX + 14.0
+	rightCheckX := rightX - trailColW - checkColW
+
+	gridTop := rowTop + 20.0
+	itemH := (rowH - 20.0) / 3.0
 	for i := 0; i < 3; i++ {
-		ly := rowTop + 27 + float64(i)*13
+		cellTop := gridTop + itemH*float64(i)
+		ly := cellTop + itemH*0.75
 		l := leftLabels[i]
-		p.Text(contentX+pad, ly, fmt.Sprintf("%d", l.num))
-		p.Text(contentX+pad+14, ly, l.label)
-		p.Rect(midX-16, ly-8, boxSize, boxSize)
+		p.Text(leftNumX+2, ly, fmt.Sprintf("%d", l.num))
+		p.Text(leftLabelX+3, ly, l.label)
+		// Kotak centang di formulir asli bukan kotak kecil terpisah -- sel
+		// tabelnya sendiri berfungsi sebagai "kotak", jadi tanda centang
+		// digambar langsung di tengah sel tanpa kotak tambahan.
 		if selected == l.num {
-			p.Cross(midX-16, ly-8, boxSize)
+			p.Checkmark(leftCheckX+(checkColW-checkSize)/2, cellTop+(itemH-checkSize)/2, checkSize)
 		}
 		r := rightLabels[i]
-		p.Text(midX+4, ly, fmt.Sprintf("%d", r.num))
-		p.Text(midX+18, ly, r.label)
-		p.Rect(rightX-pad-boxSize, ly-8, boxSize, boxSize)
+		p.Text(rightNumX+2, ly, fmt.Sprintf("%d", r.num))
+		p.Text(rightLabelX+3, ly, r.label)
 		if selected == r.num {
-			p.Cross(rightX-pad-boxSize, ly-8, boxSize)
+			p.Checkmark(rightCheckX+(checkColW-checkSize)/2, cellTop+(itemH-checkSize)/2, checkSize)
+		}
+		if i > 0 {
+			p.Line(contentX, cellTop, rightX, cellTop)
 		}
 	}
-	p.Line(midX-24, rowTop, midX-24, rowTop+rowH)
+	// garis horizontal di bawah judul "Jenis Cuti yang di ambil", memisahkan
+	// dari grid nomor/label/centang di bawahnya.
+	p.Line(contentX, gridTop, rightX, gridTop)
+	// garis-garis vertikal grid (kolom kosong | nomor | label | centang),
+	// diulang untuk kelompok kiri dan kanan, plus kolom kosong di ujung kanan.
+	for _, vx := range []float64{leftNumX, leftLabelX, leftCheckX, midX, rightNumX, rightLabelX, rightCheckX, rightX - trailColW} {
+		p.Line(vx, gridTop, vx, rowTop+rowH)
+	}
 	y = rowBottom(rowTop, rowH, "II")
 
 	// Row III: Alasan Cuti -- tinggi baris menyesuaikan panjang teks alasan
@@ -348,42 +375,88 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	p.Text(contentX+pad, rowTop+29, fmt.Sprintf("Selama %d Hari   Mulai Tanggal %s", item.JumlahHari, formatTanggalRentang(item.TglMulai, item.TglSelesai)))
 	y = rowBottom(rowTop, rowH, "IV")
 
-	// Row V: Catatan Cuti (riwayat kuota cuti tahunan N-2..N + legenda jenis cuti)
+	// Row V: Catatan Cuti (riwayat kuota cuti tahunan N-2..N + legenda jenis
+	// cuti) -- juga dirender bergrid penuh: tabel kuota di kiri (kolom
+	// kosong | label | Tahun | Sisa | Keterangan, dengan garis antar baris)
+	// dan daftar legenda 1-6 di kanan (kolom kosong | nomor | label, dengan
+	// garis antar baris), meniru formulir cetak asli.
 	rowTop = y
-	rowH = 92.0
+	rowH = 98.0
 	p.SetFont(true, 9)
 	p.Text(contentX+pad, rowTop+13, "Catatan Cuti")
 	quotaW := contentW * 0.5
-	subX := contentX + pad
+	blankColW2 := 6.0
+	quotaEnd := contentX + quotaW
+	numColX := contentX + blankColW2
+	colTahunX := numColX + 14.0
+	remaining := quotaEnd - colTahunX
+	colSisaX := colTahunX + remaining*0.40
+	colKetX := colSisaX + remaining*0.32
 	p.SetFont(false, 8)
-	p.Text(subX, rowTop+27, "Cuti Tahunan")
-	colTahunX := subX + 70
-	colSisaX := colTahunX + 55
-	colKetX := colSisaX + 45
-	p.Text(colTahunX, rowTop+27, "Tahun")
-	p.Text(colSisaX, rowTop+27, "Sisa")
-	p.Text(colKetX, rowTop+27, "Keterangan")
-	p.Line(subX-2, rowTop+31, subX+quotaW-10, rowTop+31)
+
+	// Tabel kuota kiri: baris "1 Cuti Tahunan" (judul, meniru penomoran
+	// jenis cuti #1), lalu baris header Tahun/Sisa/Keterangan, lalu 3 baris
+	// data (N-1/N-2/N) -- persis urutan & struktur pada formulir cetak asli.
+	gridTop3 := rowTop + 18.0
+	rowHLeft := (rowH - 18.0) / 5.0
+	titleTop := gridTop3
+	titleLy := titleTop + rowHLeft*0.72
+	p.Text(numColX+2, titleLy, "1")
+	p.Text(colTahunX+3, titleLy, "Cuti Tahunan")
+
+	headerTop := gridTop3 + rowHLeft
+	headerLy := headerTop + rowHLeft*0.72
+	p.Text(colTahunX+3, headerLy, "Tahun")
+	p.Text(colSisaX+3, headerLy, "Sisa")
+	p.Text(colKetX+3, headerLy, "Keterangan")
+
 	years := []struct {
 		label string
 		year  int
-	}{{"N-2", item.TglMulai.Year() - 2}, {"N-1", item.TglMulai.Year() - 1}, {"N", item.TglMulai.Year()}}
+	}{{"N-1", item.TglMulai.Year() - 1}, {"N-2", item.TglMulai.Year() - 2}, {"N", item.TglMulai.Year()}}
 	for i, yr := range years {
-		ly := rowTop + 43 + float64(i)*13
-		p.Text(colTahunX, ly, yr.label)
+		cellTop := gridTop3 + rowHLeft*float64(2+i)
+		ly := cellTop + rowHLeft*0.72
+		p.Text(colTahunX+3, ly, yr.label)
 		if jc, ok := jatah[yr.year]; ok {
-			p.Text(colSisaX, ly, fmt.Sprintf("%d", jc.Sisa()))
-			p.Text(colKetX, ly, "Cuti Tahunan")
+			p.Text(colSisaX+3, ly, fmt.Sprintf("%d", jc.Sisa()))
+			p.Text(colKetX+3, ly, "Cuti Tahunan")
 		} else {
-			p.Text(colSisaX, ly, "-")
+			p.Text(colSisaX+3, ly, "-")
 		}
 	}
-	legendX := contentX + quotaW + 10
-	legend := []string{"1  Cuti Tahunan", "2  Cuti Sakit", "3  Cuti Karena Alasan Penting", "4  Cuti Besar", "5  Cuti Melahirkan", "6  Cuti di Luar Tanggungan Negara"}
-	for i, l := range legend {
-		p.Text(legendX, rowTop+27+float64(i)*11, l)
+	// garis horizontal antar baris tabel kuota (setelah judul, header, dan
+	// tiap baris data).
+	for i := 1; i <= 4; i++ {
+		hy := gridTop3 + rowHLeft*float64(i)
+		p.Line(contentX, hy, quotaEnd, hy)
 	}
-	p.Line(contentX+quotaW, rowTop, contentX+quotaW, rowTop+rowH)
+
+	legendNumX := quotaEnd + blankColW2
+	legendLabelX := legendNumX + 14.0
+	legendTrailW := 6.0
+	itemH2 := (rowH - 18.0) / 6.0
+	legend := []string{"Cuti Tahunan", "Cuti Sakit", "Cuti Karena Alasan Penting", "Cuti Besar", "Cuti Melahirkan", "Cuti di Luar Tanggungan Negara"}
+	for i, l := range legend {
+		cellTop := gridTop3 + itemH2*float64(i)
+		ly := cellTop + itemH2*0.72
+		p.Text(legendNumX+2, ly, fmt.Sprintf("%d", i+1))
+		p.Text(legendLabelX+3, ly, l)
+		if i > 0 {
+			p.Line(quotaEnd, cellTop, rightX, cellTop)
+		}
+	}
+
+	// garis horizontal di bawah judul "Catatan Cuti", membentang penuh.
+	p.Line(contentX, gridTop3, rightX, gridTop3)
+	// garis-garis vertikal grid.
+	for _, vx := range []float64{numColX, colTahunX, colSisaX, colKetX} {
+		p.Line(vx, gridTop3, vx, rowTop+rowH)
+	}
+	p.Line(quotaEnd, rowTop, quotaEnd, rowTop+rowH)
+	for _, vx := range []float64{legendNumX, legendLabelX, rightX - legendTrailW} {
+		p.Line(vx, gridTop3, vx, rowTop+rowH)
+	}
 	y = rowBottom(rowTop, rowH, "V")
 
 	// Row VI: Alamat Selama Menjalankan Cuti + tanda tangan pegawai
@@ -405,23 +478,42 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	p.TextCentered(rightHalfX+70, rowTop+96, "NIP: "+namaOrDash(pegawai.NIP)+".")
 	y = rowBottom(rowTop, rowH, "VI")
 
-	// Row VII: Pertimbangan Atasan Langsung
+	// Row VII: Pertimbangan Atasan Langsung -- 4 opsi hanya dibingkai pada
+	// satu baris tipis di bawah judul (seperti formulir cetak asli, yang
+	// menyisakan area kosong besar di bawahnya untuk catatan/tanda tangan
+	// atasan langsung), diikuti kolom tanda tangan Kepala Dinas di kanan.
 	rowTop = y
 	rowH = 92.0
 	p.SetFont(true, 9)
 	p.Text(contentX+pad, rowTop+13, "Pertimbangan Atasan Langsung")
 	opts := []string{"Disetujui", "Perubahan", "Ditangguhkan", "Tidak Disetujui"}
+	optRegionEnd := rightHalfX
+	optW := (optRegionEnd - contentX) / float64(len(opts))
+	gridTopVII := rowTop + 18.0
+	optHeaderH := 16.0
+	checkSize2 := 8.0
 	p.SetFont(false, 8)
-	ox := contentX + pad
 	for i, opt := range opts {
-		p.Rect(ox, rowTop+24, 7, 7)
-		if i == 0 { // pengajuan hanya dicetak setelah status "disetujui"
-			p.Cross(ox, rowTop+24, 7)
+		colStart := contentX + optW*float64(i)
+		colCenter := colStart + optW/2
+		tw := utils.TextWidth(opt, 8)
+		// pengajuan hanya dicetak setelah status "disetujui", jadi opsi
+		// pertama otomatis ditandai centang -- langsung di dalam sel,
+		// tanpa kotak tambahan (meniru gaya centang pada Baris II).
+		if i == 0 {
+			startX := colCenter - (checkSize2+4+tw)/2
+			p.Checkmark(startX, gridTopVII+(optHeaderH-checkSize2)/2, checkSize2)
+			p.Text(startX+checkSize2+4, gridTopVII+optHeaderH*0.72, opt)
+		} else {
+			p.TextCentered(colCenter, gridTopVII+optHeaderH*0.72, opt)
 		}
-		p.Text(ox+10, rowTop+30, opt)
-		ox += 10 + utils.TextWidth(opt, 8) + 14
+		if i > 0 {
+			p.Line(colStart, gridTopVII, colStart, gridTopVII+optHeaderH)
+		}
 	}
-	dividerX := ox + 2
+	p.Line(contentX, gridTopVII, optRegionEnd, gridTopVII)
+	p.Line(contentX, gridTopVII+optHeaderH, optRegionEnd, gridTopVII+optHeaderH)
+	dividerX := optRegionEnd
 	p.Line(dividerX, rowTop, dividerX, rowTop+rowH)
 	sigColCenter := dividerX + (rightX-dividerX)/2
 	p.SetFont(false, 8.5)

@@ -177,6 +177,14 @@ func (p *PDFPage) Cross(x, yTop, size float64) {
 	p.Line(x, yTop+size, x+size, yTop)
 }
 
+// Checkmark draws a small "✓" tick mark (used to tick a checkbox on the
+// printed forms, which use a checkmark rather than an X) inside a box whose
+// top-left corner is (x, yTop) and side length is size.
+func (p *PDFPage) Checkmark(x, yTop, size float64) {
+	p.Line(x+size*0.12, yTop+size*0.55, x+size*0.4, yTop+size*0.85)
+	p.Line(x+size*0.4, yTop+size*0.85, x+size*0.92, yTop+size*0.12)
+}
+
 // Image draws a previously registered (via PDFDoc.RegisterImage) image by
 // name, top-left corner at (x, yTop).
 func (p *PDFPage) Image(name string, x, yTop, w, h float64) {
