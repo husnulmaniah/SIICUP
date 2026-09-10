@@ -39,7 +39,7 @@ async function submit() {
       <div class="login-brand">
         <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="login-logo" />
         <div>
-          <div class="login-instansi">Pemerintah Kabupaten Morowali Utara</div>
+          <div class="login-instansi">Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara</div>
           <h1>SI Cuti Pegawai</h1>
         </div>
       </div>
@@ -59,9 +59,8 @@ async function submit() {
         <Button type="submit" label="Masuk" :loading="loading" style="width: 100%; margin-top: 0.5rem" />
       </form>
 
-      <div class="login-hint">
-        <strong>Akun demo</strong> (password: <code>admin123</code>)<br />
-        administrator · admin · andi (atasan) · siti (pegawai)
+      <div class="login-footer">
+        &copy; {{ new Date().getFullYear() }} Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara
       </div>
     </div>
   </div>
@@ -127,9 +126,11 @@ async function submit() {
   color: #374151;
 }
 
-.login-hint {
+.login-footer {
   margin-top: 1.5rem;
-  font-size: 0.78rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+  font-size: 0.72rem;
   color: #94a3b8;
   text-align: center;
   line-height: 1.5;

@@ -40,7 +40,7 @@ onMounted(async () => {
       <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="dashboard-logo" />
       <div>
         <div class="page-title">Selamat datang, {{ auth.user?.nama }}</div>
-        <p class="page-subtitle">Ringkasan data cuti pegawai &mdash; Pemerintah Kabupaten Morowali Utara</p>
+        <p class="page-subtitle">Ringkasan data cuti pegawai &mdash; Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara</p>
       </div>
     </div>
 
