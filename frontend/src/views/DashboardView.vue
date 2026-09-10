@@ -36,8 +36,13 @@ onMounted(async () => {
 
 <template>
   <div class="page-wrap">
-    <div class="page-title">Selamat datang, {{ auth.user?.nama }}</div>
-    <p class="page-subtitle">Ringkasan data cuti pegawai</p>
+    <div class="dashboard-header">
+      <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="dashboard-logo" />
+      <div>
+        <div class="page-title">Selamat datang, {{ auth.user?.nama }}</div>
+        <p class="page-subtitle">Ringkasan data cuti pegawai &mdash; Pemerintah Kabupaten Morowali Utara</p>
+      </div>
+    </div>
 
     <div v-if="loading" style="display: flex; justify-content: center; padding: 3rem">
       <ProgressSpinner style="width: 42px; height: 42px" />
@@ -119,3 +124,24 @@ onMounted(async () => {
     </template>
   </div>
 </template>
+
+<style scoped>
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.dashboard-logo {
+  height: 56px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .dashboard-logo {
+    height: 42px;
+  }
+}
+</style>

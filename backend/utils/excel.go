@@ -119,7 +119,24 @@ func ReadRows(r io.Reader) ([][]string, error) {
 	if len(rows) <= 1 {
 		return [][]string{}, nil
 	}
-	return rows[1:], nil
+
+	// Excel files often report far more rows than actually contain data (leftover
+	// formatting/styling on "empty" rows below the real data). Skip any row whose
+	// cells are all blank so those don't get treated as invalid data rows.
+	var result [][]string
+	for _, row := range rows[1:] {
+		blank := true
+		for _, cell := range row {
+			if strings.TrimSpace(cell) != "" {
+				blank = false
+				break
+			}
+		}
+		if !blank {
+			result = append(result, row)
+		}
+	}
+	return result, nil
 }
 
 // ImportRow applies one row of raw cell strings onto newItem (a pointer to a struct)

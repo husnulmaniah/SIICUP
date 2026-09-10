@@ -37,8 +37,11 @@ async function submit() {
   <div class="login-page">
     <div class="login-card">
       <div class="login-brand">
-        <i class="pi pi-calendar-plus"></i>
-        <h1>SI Cuti Pegawai</h1>
+        <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="login-logo" />
+        <div>
+          <div class="login-instansi">Pemerintah Kabupaten Morowali Utara</div>
+          <h1>SI Cuti Pegawai</h1>
+        </div>
       </div>
       <p class="login-subtitle">Masuk untuk mengelola pengajuan cuti</p>
 
@@ -86,18 +89,28 @@ async function submit() {
 .login-brand {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.75rem;
   color: #4338ca;
   margin-bottom: 0.25rem;
 }
 
-.login-brand i {
-  font-size: 1.6rem;
+.login-logo {
+  height: 48px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.login-instansi {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .login-brand h1 {
   font-size: 1.15rem;
-  margin: 0;
+  margin: 0.1rem 0 0 0;
 }
 
 .login-subtitle {
