@@ -18,6 +18,7 @@ import SelectButton from 'primevue/selectbutton'
 import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
 import InputText from 'primevue/inputtext'
+import Checkbox from 'primevue/checkbox'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -155,11 +156,19 @@ const form = reactive({
   alamat_selama_cuti: '',
 })
 
-// Berkas kelengkapan yang dipilih user untuk pengajuan baru, keyed by
-// requirement key (mis. "sk_terakhir" -> File). Hanya relevan saat membuat
-// pengajuan baru (bukan edit).
+// Berkas kelengkapan yang dipilih user, keyed by jenis/key dokumen (mis.
+// "sk_terakhir" -> File). Dipakai untuk berkas pengajuan baru (create) MAUPUN
+// untuk mengupload ulang berkas yang ditandai "perlu diperbaiki" saat edit
+// pengajuan yang statusnya dikembalikan.
 const docFiles = reactive({})
 const docFileInputs = {}
+
+// Berkas yang ditandai atasan/admin sebagai "perlu diperbaiki" saat pengajuan
+// ini dikembalikan (diisi saat openEdit, dari row.dokumen yang sudah
+// dipreload). Kosong jika pengajuan tidak pernah dikembalikan / semua berkas
+// sudah oke.
+const flaggedEditDocs = ref([])
+const editReturnNote = ref('')
 
 const selectedJenisNama = computed(() => jenisCutiOptions.value.find((j) => j.id === form.id_jenis_cuti)?.jenis || '')
 const docRequirements = computed(() => dokumenRequirementsForJenis(selectedJenisNama.value))
@@ -182,6 +191,8 @@ function openCreate() {
   isEditing.value = false
   formErrors.value = ''
   resetForm()
+  flaggedEditDocs.value = []
+  editReturnNote.value = ''
   formDialog.value = true
 }
 
@@ -195,6 +206,9 @@ function openEdit(row) {
   form.tgl_selesai = new Date(row.tgl_selesai)
   form.alasan_cuti = row.alasan_cuti
   form.alamat_selama_cuti = row.alamat_selama_cuti
+  Object.keys(docFiles).forEach((k) => delete docFiles[k])
+  flaggedEditDocs.value = row.status === 'dikembalikan' ? (row.dokumen || []).filter((d) => d.perlu_perbaikan) : []
+  editReturnNote.value = row.status === 'dikembalikan' ? row.catatan_approval || '' : ''
   formDialog.value = true
 }
 
@@ -208,6 +222,10 @@ function missingDocs() {
   if (isEditing.value || !docsRequired.value) return []
   return docRequirements.value.filter((r) => r.required && !docFiles[r.key]).map((r) => r.label)
 }
+function missingFlaggedDocs() {
+  if (!isEditing.value) return []
+  return flaggedEditDocs.value.filter((d) => !docFiles[d.jenis]).map((d) => d.label || d.jenis)
+}
 
 async function saveForm() {
   if (!form.id_jenis_cuti || !form.tgl_mulai || !form.tgl_selesai || (isManage.value && !form.id_pegawai)) {
@@ -219,19 +237,40 @@ async function saveForm() {
     formErrors.value = 'Berkas wajib belum diupload: ' + missing.join(', ')
     return
   }
+  const missingFixed = missingFlaggedDocs()
+  if (missingFixed.length) {
+    formErrors.value = 'Berkas yang perlu diperbaiki belum diupload ulang: ' + missingFixed.join(', ')
+    return
+  }
   formErrors.value = ''
   saving.value = true
   try {
     if (isEditing.value) {
-      const payload = {
-        id_pegawai: form.id_pegawai,
-        id_jenis_cuti: form.id_jenis_cuti,
-        tgl_mulai: form.tgl_mulai.toISOString().slice(0, 10),
-        tgl_selesai: form.tgl_selesai.toISOString().slice(0, 10),
-        alasan_cuti: form.alasan_cuti,
-        alamat_selama_cuti: form.alamat_selama_cuti,
+      if (flaggedEditDocs.value.length) {
+        // ada berkas yang ditandai perlu diperbaiki -> kirim multipart supaya
+        // berkas penggantinya ikut terupload dalam permintaan yang sama.
+        const formData = new FormData()
+        if (form.id_pegawai) formData.append('id_pegawai', form.id_pegawai)
+        formData.append('id_jenis_cuti', form.id_jenis_cuti)
+        formData.append('tgl_mulai', form.tgl_mulai.toISOString().slice(0, 10))
+        formData.append('tgl_selesai', form.tgl_selesai.toISOString().slice(0, 10))
+        formData.append('alasan_cuti', form.alasan_cuti || '')
+        formData.append('alamat_selama_cuti', form.alamat_selama_cuti || '')
+        for (const d of flaggedEditDocs.value) {
+          if (docFiles[d.jenis]) formData.append('dokumen_' + d.jenis, docFiles[d.jenis])
+        }
+        await http.put(`/pengajuan-cuti/${form.id}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      } else {
+        const payload = {
+          id_pegawai: form.id_pegawai,
+          id_jenis_cuti: form.id_jenis_cuti,
+          tgl_mulai: form.tgl_mulai.toISOString().slice(0, 10),
+          tgl_selesai: form.tgl_selesai.toISOString().slice(0, 10),
+          alasan_cuti: form.alasan_cuti,
+          alamat_selama_cuti: form.alamat_selama_cuti,
+        }
+        await http.put(`/pengajuan-cuti/${form.id}`, payload)
       }
-      await http.put(`/pengajuan-cuti/${form.id}`, payload)
       toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pengajuan cuti berhasil diperbarui', life: 3000 })
     } else {
       const formData = new FormData()
@@ -319,10 +358,15 @@ const approvalDialog = ref(false)
 const approvalRow = ref(null)
 const approvalNote = ref('')
 const approvalLoading = ref(false)
+// id dokumen yang dicentang sebagai "tidak sesuai/bermasalah" -- hanya dipakai
+// saat aksi "Kembalikan", supaya pegawai tahu berkas mana yang wajib diupload
+// ulang (lihat flaggedEditDocs di form edit).
+const flaggedDocIds = ref([])
 
 function openApproval(row) {
   approvalRow.value = row
   approvalNote.value = ''
+  flaggedDocIds.value = []
   approvalDialog.value = true
 }
 
@@ -338,7 +382,9 @@ async function processApproval(action) {
   }
   approvalLoading.value = true
   try {
-    await http.put(`/pengajuan-cuti/${approvalRow.value.id}/${action}`, { catatan_approval: approvalNote.value })
+    const payload = { catatan_approval: approvalNote.value }
+    if (action === 'kembalikan') payload.dokumen_ids = flaggedDocIds.value
+    await http.put(`/pengajuan-cuti/${approvalRow.value.id}/${action}`, payload)
     const messages = {
       approve: 'Pengajuan cuti disetujui',
       reject: 'Pengajuan cuti ditolak',
@@ -540,6 +586,9 @@ onMounted(() => {
     <!-- create/edit dialog -->
     <Dialog v-model:visible="formDialog" modal :header="isEditing ? 'Edit Pengajuan Cuti' : 'Ajukan Cuti'" :style="{ width: '30rem', maxWidth: '95vw' }">
       <Message v-if="formErrors" severity="error" :closable="false" style="margin-bottom: 1rem">{{ formErrors }}</Message>
+      <Message v-if="flaggedEditDocs.length" severity="warn" :closable="false" style="margin-bottom: 1rem">
+        Pengajuan ini dikembalikan{{ editReturnNote ? ': ' + editReturnNote : '' }}. Silakan upload ulang berkas yang ditandai di bawah ini.
+      </Message>
       <div style="display: flex; flex-direction: column; gap: 1rem">
         <div v-if="isManage">
           <label class="field-label">Pegawai *</label>
@@ -585,6 +634,20 @@ onMounted(() => {
             </div>
           </div>
         </div>
+        <div v-if="isEditing && flaggedEditDocs.length">
+          <label class="field-label">Berkas yang Perlu Diperbaiki (wajib diupload ulang)</label>
+          <div v-for="doc in flaggedEditDocs" :key="doc.id" class="doc-upload-row">
+            <div class="doc-upload-label">
+              {{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">(berkas lama: {{ doc.nama_file }})</small>
+              <span style="color: #ef4444">*</span>
+            </div>
+            <div class="doc-upload-actions">
+              <input :ref="(el) => (docFileInputs[doc.jenis] = el)" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="(e) => onDocFileChosen(doc.jenis, e)" />
+              <Button size="small" outlined :label="docFiles[doc.jenis] ? 'Ganti File' : 'Pilih File Baru'" icon="pi pi-upload" @click="pickDocFile(doc.jenis)" />
+              <span v-if="docFiles[doc.jenis]" class="doc-upload-filename">{{ docFiles[doc.jenis].name }}</span>
+            </div>
+          </div>
+        </div>
       </div>
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="formDialog = false" />
@@ -605,7 +668,10 @@ onMounted(() => {
         <div style="margin-top: 0.5rem; font-weight: 600">Berkas Kelengkapan</div>
         <div v-if="detailRow.dokumen?.length">
           <div v-for="doc in detailRow.dokumen" :key="doc.id" class="doc-row">
-            <span>{{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small></span>
+            <span>
+              {{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small>
+              <Tag v-if="doc.perlu_perbaikan" value="Perlu Diperbaiki" severity="warn" style="margin-left: 0.35rem" />
+            </span>
             <div style="display: flex; gap: 0.15rem">
               <Button icon="pi pi-eye" size="small" text label="Lihat" @click="previewDoc(detailRow.id, doc)" />
               <Button icon="pi pi-download" size="small" text @click="downloadDoc(detailRow.id, doc)" />
@@ -628,9 +694,15 @@ onMounted(() => {
         <div><strong>Alasan:</strong> {{ approvalRow.alasan_cuti || '-' }}</div>
         <div><strong>Alamat Selama Cuti:</strong> {{ approvalRow.alamat_selama_cuti || '-' }}</div>
         <div style="margin-top: 0.25rem; font-weight: 600">Berkas Kelengkapan</div>
+        <Message v-if="approvalRow.dokumen?.length" severity="info" :closable="false" style="font-size: 0.78rem; padding: 0.5rem 0.75rem">
+          Centang berkas yang tidak sesuai sebelum klik "Kembalikan", agar pegawai tahu berkas mana yang wajib diupload ulang.
+        </Message>
         <div v-if="approvalRow.dokumen?.length">
           <div v-for="doc in approvalRow.dokumen" :key="doc.id" class="doc-row">
-            <span>{{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small></span>
+            <span style="display: flex; align-items: center; gap: 0.5rem">
+              <Checkbox v-model="flaggedDocIds" :inputId="'doc-flag-' + doc.id" :value="doc.id" />
+              <label :for="'doc-flag-' + doc.id" style="cursor: pointer">{{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small></label>
+            </span>
             <div style="display: flex; gap: 0.15rem">
               <Button icon="pi pi-eye" size="small" text label="Lihat" @click="previewDoc(approvalRow.id, doc)" />
               <Button icon="pi pi-download" size="small" text @click="downloadDoc(approvalRow.id, doc)" />

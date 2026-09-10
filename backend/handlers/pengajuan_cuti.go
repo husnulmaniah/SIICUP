@@ -486,7 +486,7 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
 	var item models.PengajuanCuti
-	if err := db.Preload("Pegawai").First(&item, "id = ?", id).Error; err != nil {
+	if err := db.Preload("Pegawai").Preload("Dokumen", func(d *gorm.DB) *gorm.DB { return d.Omit("file") }).First(&item, "id = ?", id).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}
@@ -499,10 +499,30 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	// Saat mengedit pengajuan yang dikembalikan, boleh sekaligus mengupload
+	// ulang berkas yang ditandai atasan/admin (id_pengajuan/dokumen.perlu_perbaikan)
+	// -- ini butuh multipart/form-data. Edit biasa (tanpa berkas) tetap boleh
+	// JSON seperti sebelumnya.
+	isMultipart := strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data")
 	var p pengajuanPayload
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
-		return
+	if isMultipart {
+		if err := r.ParseMultipartForm(20 << 20); err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 20MB)")
+			return
+		}
+		p = pengajuanPayload{
+			IDPegawai:        parseUintForm(r, "id_pegawai"),
+			IDJenisCuti:      parseUintForm(r, "id_jenis_cuti"),
+			TglMulai:         r.FormValue("tgl_mulai"),
+			TglSelesai:       r.FormValue("tgl_selesai"),
+			AlasanCuti:       r.FormValue("alasan_cuti"),
+			AlamatSelamaCuti: r.FormValue("alamat_selama_cuti"),
+		}
+	} else {
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+			return
+		}
 	}
 	start, err := utils.ParseDateCell(p.TglMulai)
 	if err != nil {
@@ -517,6 +537,63 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if end.Before(start) {
 		utils.Error(w, http.StatusBadRequest, "tanggal selesai tidak boleh sebelum tanggal mulai")
 		return
+	}
+
+	// Berkas yang ditandai "perlu diperbaiki" saat pengajuan dikembalikan wajib
+	// diupload ulang (khusus pegawai pemilik pengajuan) sebelum pengajuan bisa
+	// disimpan lagi. Validasi & baca semua file dulu sebelum menyentuh database
+	// supaya tidak ada perubahan sebagian jika salah satu berkas gagal.
+	type docReplace struct {
+		id   uint
+		name string
+		data []byte
+	}
+	var replacements []docReplace
+	if item.Status == models.StatusDikembalikan {
+		var stillMissing []string
+		for _, d := range item.Dokumen {
+			if !d.PerluPerbaikan {
+				continue
+			}
+			fh := formFileHeader(r, "dokumen_"+d.Jenis)
+			if fh == nil {
+				if claims.RoleName == "pegawai" {
+					stillMissing = append(stillMissing, d.Label)
+				}
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(fh.Filename))
+			if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+				utils.Error(w, http.StatusBadRequest, "berkas '"+d.Label+"' harus berformat PDF, JPG, atau PNG")
+				return
+			}
+			f, err := fh.Open()
+			if err != nil {
+				utils.Error(w, http.StatusBadRequest, "gagal membaca berkas '"+d.Label+"'")
+				return
+			}
+			data, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
+				utils.Error(w, http.StatusBadRequest, "gagal membaca berkas '"+d.Label+"'")
+				return
+			}
+			replacements = append(replacements, docReplace{id: d.ID, name: fh.Filename, data: data})
+		}
+		if len(stillMissing) > 0 {
+			utils.Error(w, http.StatusBadRequest, "silakan upload ulang berkas yang ditandai perlu diperbaiki: "+strings.Join(stillMissing, ", "))
+			return
+		}
+	}
+	for _, rep := range replacements {
+		if err := db.Model(&models.PengajuanDokumen{}).Where("id = ?", rep.id).Updates(map[string]interface{}{
+			"nama_file":       rep.name,
+			"file":            rep.data,
+			"perlu_perbaikan": false,
+		}).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan berkas pengganti: "+err.Error())
+			return
+		}
 	}
 
 	item.IDJenisCuti = p.IDJenisCuti
@@ -654,11 +731,22 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	utils.Success(w, "pengajuan cuti telah ditolak", item)
 }
 
+// kembalikanPayload extends approvalPayload with the list of PengajuanDokumen
+// IDs the atasan/admin ticked as bermasalah (tidak sesuai) -- these get
+// PerluPerbaikan=true so the pegawai's edit form knows exactly which berkas
+// must be re-uploaded.
+type kembalikanPayload struct {
+	Catatan    string `json:"catatan_approval"`
+	DokumenIDs []uint `json:"dokumen_ids"`
+}
+
 // kembalikanPengajuan sends a still-pending pengajuan back to the pegawai for
 // correction (e.g. some uploaded documents don't match/aren't valid) instead
 // of rejecting it outright. Unlike a rejection, the pegawai can then edit or
 // delete-and-resubmit it (see updatePengajuan/deletePengajuan), and a reason
-// is mandatory so the pegawai knows what to fix.
+// is mandatory so the pegawai knows what to fix. Optionally, specific
+// documents can be flagged (dokumen_ids) so the pegawai's edit form prompts
+// exactly those berkas to be re-uploaded instead of the whole submission.
 func kembalikanPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
@@ -675,11 +763,24 @@ func kembalikanPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya")
 		return
 	}
-	var p approvalPayload
+	var p kembalikanPayload
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	if strings.TrimSpace(p.Catatan) == "" {
 		utils.Error(w, http.StatusBadRequest, "alasan pengembalian wajib diisi (misal: ada berkas yang tidak sesuai)")
 		return
+	}
+
+	// Reset semua tanda lama dulu, lalu tandai ulang hanya berkas yang dipilih
+	// kali ini (kalau ada) sebagai perlu diperbaiki/diupload ulang.
+	if err := db.Model(&models.PengajuanDokumen{}).Where("id_pengajuan = ?", item.ID).Update("perlu_perbaikan", false).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menandai berkas: "+err.Error())
+		return
+	}
+	if len(p.DokumenIDs) > 0 {
+		if err := db.Model(&models.PengajuanDokumen{}).Where("id_pengajuan = ? AND id IN ?", item.ID, p.DokumenIDs).Update("perlu_perbaikan", true).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menandai berkas: "+err.Error())
+			return
+		}
 	}
 
 	now := time.Now()

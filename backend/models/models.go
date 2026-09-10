@@ -204,6 +204,12 @@ type PengajuanDokumen struct {
 	NamaFile    string    `json:"nama_file" gorm:"column:nama_file;size:255"`
 	File        []byte    `json:"-" gorm:"column:file;type:bytea"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+
+	// PerluPerbaikan ditandai oleh atasan/admin saat mengembalikan pengajuan
+	// (kembalikanPengajuan) untuk menunjukkan berkas ini yang tidak sesuai dan
+	// harus diupload ulang oleh pegawai. Direset ke false begitu pegawai
+	// mengupload ulang berkas penggantinya (lihat updatePengajuan).
+	PerluPerbaikan bool `json:"perlu_perbaikan" gorm:"column:perlu_perbaikan;default:false"`
 }
 
 func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
