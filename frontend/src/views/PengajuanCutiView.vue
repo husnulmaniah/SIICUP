@@ -4,6 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { useAuthStore } from '../stores/auth'
 import http from '../api/http'
+import { toApiDate } from '../utils/date'
 
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -275,8 +276,8 @@ async function saveForm() {
         const formData = new FormData()
         if (form.id_pegawai) formData.append('id_pegawai', form.id_pegawai)
         formData.append('id_jenis_cuti', form.id_jenis_cuti)
-        formData.append('tgl_mulai', form.tgl_mulai.toISOString().slice(0, 10))
-        formData.append('tgl_selesai', form.tgl_selesai.toISOString().slice(0, 10))
+        formData.append('tgl_mulai', toApiDate(form.tgl_mulai))
+        formData.append('tgl_selesai', toApiDate(form.tgl_selesai))
         formData.append('alasan_cuti', form.alasan_cuti || '')
         formData.append('alamat_selama_cuti', form.alamat_selama_cuti || '')
         for (const d of flaggedEditDocs.value) {
@@ -287,8 +288,8 @@ async function saveForm() {
         const payload = {
           id_pegawai: form.id_pegawai,
           id_jenis_cuti: form.id_jenis_cuti,
-          tgl_mulai: form.tgl_mulai.toISOString().slice(0, 10),
-          tgl_selesai: form.tgl_selesai.toISOString().slice(0, 10),
+          tgl_mulai: toApiDate(form.tgl_mulai),
+          tgl_selesai: toApiDate(form.tgl_selesai),
           alasan_cuti: form.alasan_cuti,
           alamat_selama_cuti: form.alamat_selama_cuti,
         }
@@ -299,8 +300,8 @@ async function saveForm() {
       const formData = new FormData()
       if (form.id_pegawai) formData.append('id_pegawai', form.id_pegawai)
       formData.append('id_jenis_cuti', form.id_jenis_cuti)
-      formData.append('tgl_mulai', form.tgl_mulai.toISOString().slice(0, 10))
-      formData.append('tgl_selesai', form.tgl_selesai.toISOString().slice(0, 10))
+      formData.append('tgl_mulai', toApiDate(form.tgl_mulai))
+      formData.append('tgl_selesai', toApiDate(form.tgl_selesai))
       formData.append('alasan_cuti', form.alasan_cuti || '')
       formData.append('alamat_selama_cuti', form.alamat_selama_cuti || '')
       for (const req of docRequirements.value) {

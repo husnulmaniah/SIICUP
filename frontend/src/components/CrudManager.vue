@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
+import { toApiDate } from '../utils/date'
 
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -286,7 +287,7 @@ function serializeForm() {
   for (const f of props.config.formFields) {
     let v = form[f.field]
     if (f.type === 'date' && v instanceof Date) {
-      v = v.toISOString().slice(0, 10)
+      v = toApiDate(v)
     }
     if (f.type === 'password' && !v) {
       continue // don't send empty password on edit
