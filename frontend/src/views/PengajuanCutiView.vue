@@ -285,7 +285,34 @@ function downloadDoc(pengajuanId, doc) {
   downloadFile(`/pengajuan-cuti/${pengajuanId}/dokumen/${doc.jenis}`, doc.nama_file)
 }
 
-// ---- approval (atasan) ----
+// ---- lihat dokumen langsung (tanpa download) ----
+const previewDialog = ref(false)
+const previewUrl = ref('')
+const previewType = ref('pdf') // 'pdf' | 'image' | 'other'
+const previewTitle = ref('')
+
+async function previewDoc(pengajuanId, doc) {
+  try {
+    const res = await http.get(`/pengajuan-cuti/${pengajuanId}/dokumen/${doc.jenis}`, {
+      params: { inline: 1 },
+      responseType: 'blob',
+    })
+    const ext = (doc.nama_file || '').split('.').pop().toLowerCase()
+    previewType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    previewTitle.value = doc.label || doc.jenis
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
+function closePreview() {
+  if (previewUrl.value) window.URL.revokeObjectURL(previewUrl.value)
+  previewUrl.value = ''
+}
+
+// ---- approval (atasan + admin/administrator) ----
 const approvalDialog = ref(false)
 const approvalRow = ref(null)
 const approvalNote = ref('')
@@ -314,6 +341,26 @@ async function processApproval(action) {
   } finally {
     approvalLoading.value = false
   }
+}
+
+// ---- kembalikan ke status menunggu (atasan + admin/administrator) ----
+function confirmReturn(row) {
+  confirm.require({
+    message: `Kembalikan pengajuan cuti ini ke status "menunggu"? ${row.status === 'disetujui' ? 'Kuota cuti tahunan yang sudah terpotong akan dikembalikan.' : ''}`,
+    header: 'Konfirmasi Kembalikan Pengajuan',
+    icon: 'pi pi-undo',
+    acceptLabel: 'Ya, Kembalikan',
+    rejectLabel: 'Batal',
+    accept: async () => {
+      try {
+        await http.put(`/pengajuan-cuti/${row.id}/return`, {})
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pengajuan cuti dikembalikan ke status menunggu', life: 3000 })
+        fetchList()
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      }
+    },
+  })
 }
 
 // ---- excel import/export (admin/administrator only) ----
@@ -443,16 +490,25 @@ onMounted(() => {
           <Column header="Status" style="width: 130px">
             <template #body="{ data }"><Tag :value="data.status" :severity="statusSeverity(data.status)" /></template>
           </Column>
-          <Column header="Aksi" style="width: 190px">
+          <Column header="Aksi" style="width: 230px">
             <template #body="{ data }">
-              <div style="display: flex; gap: 0.35rem">
+              <div style="display: flex; gap: 0.35rem; flex-wrap: wrap">
                 <Button icon="pi pi-eye" size="small" severity="secondary" rounded text @click="openDetail(data)" />
                 <Button
-                  v-if="isAtasan && data.status === 'pending'"
+                  v-if="(isAtasan || isManage) && data.status === 'pending'"
                   icon="pi pi-check-square"
                   size="small"
                   label="Proses"
                   @click="openApproval(data)"
+                />
+                <Button
+                  v-if="(isAtasan || isManage) && data.status !== 'pending'"
+                  icon="pi pi-undo"
+                  size="small"
+                  severity="warn"
+                  outlined
+                  label="Kembalikan"
+                  @click="confirmReturn(data)"
                 />
                 <template v-if="(isPegawai && data.status === 'pending') || isManage">
                   <Button icon="pi pi-pencil" size="small" severity="secondary" rounded text @click="openEdit(data)" />
@@ -534,7 +590,10 @@ onMounted(() => {
         <div v-if="detailRow.dokumen?.length">
           <div v-for="doc in detailRow.dokumen" :key="doc.id" class="doc-row">
             <span>{{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small></span>
-            <Button icon="pi pi-download" size="small" text @click="downloadDoc(detailRow.id, doc)" />
+            <div style="display: flex; gap: 0.15rem">
+              <Button icon="pi pi-eye" size="small" text label="Lihat" @click="previewDoc(detailRow.id, doc)" />
+              <Button icon="pi pi-download" size="small" text @click="downloadDoc(detailRow.id, doc)" />
+            </div>
           </div>
         </div>
         <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
@@ -556,7 +615,10 @@ onMounted(() => {
         <div v-if="approvalRow.dokumen?.length">
           <div v-for="doc in approvalRow.dokumen" :key="doc.id" class="doc-row">
             <span>{{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small></span>
-            <Button icon="pi pi-download" size="small" text @click="downloadDoc(approvalRow.id, doc)" />
+            <div style="display: flex; gap: 0.15rem">
+              <Button icon="pi pi-eye" size="small" text label="Lihat" @click="previewDoc(approvalRow.id, doc)" />
+              <Button icon="pi pi-download" size="small" text @click="downloadDoc(approvalRow.id, doc)" />
+            </div>
           </div>
         </div>
         <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
@@ -566,6 +628,22 @@ onMounted(() => {
       <template #footer>
         <Button label="Tolak" severity="danger" outlined :loading="approvalLoading" @click="processApproval('reject')" />
         <Button label="Setujui" severity="success" :loading="approvalLoading" @click="processApproval('approve')" />
+      </template>
+    </Dialog>
+
+    <!-- lihat dokumen (tanpa download) -->
+    <Dialog v-model:visible="previewDialog" modal :header="previewTitle" :style="{ width: '90vw', maxWidth: '48rem' }" @hide="closePreview">
+      <div v-if="previewType === 'pdf'" style="width: 100%; height: 75vh">
+        <iframe :src="previewUrl" style="width: 100%; height: 100%; border: none" title="Pratinjau dokumen"></iframe>
+      </div>
+      <div v-else-if="previewType === 'image'" style="text-align: center">
+        <img :src="previewUrl" style="max-width: 100%; max-height: 75vh" alt="Pratinjau dokumen" />
+      </div>
+      <div v-else style="padding: 2rem; text-align: center; color: var(--p-text-muted-color)">
+        Format berkas ini tidak bisa dipratinjau langsung, silakan unduh untuk melihatnya.
+      </div>
+      <template #footer>
+        <Button label="Tutup" severity="secondary" outlined @click="previewDialog = false" />
       </template>
     </Dialog>
 

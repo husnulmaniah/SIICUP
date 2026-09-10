@@ -189,7 +189,10 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h) }
-	atasanOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "atasan") }
+	// approve/reject/return: atasan (bawahannya sendiri) DAN admin/administrator
+	// (siapa saja) -- canAccessPengajuan di bawah masih mengecek relasi
+	// atasan-bawahan untuk role "atasan".
+	approverRoles := func(h http.HandlerFunc) http.Handler { return authed(h, "atasan", "administrator", "admin") }
 
 	mux.Handle("GET /api/pengajuan-cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { listPengajuan(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-cuti/export", manage(func(w http.ResponseWriter, r *http.Request) { exportPengajuan(w, r, db) }))
@@ -201,11 +204,33 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("POST /api/pengajuan-cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { createPengajuan(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-cuti/{id}", anyRole(func(w http.ResponseWriter, r *http.Request) { updatePengajuan(w, r, db) }))
 	mux.Handle("DELETE /api/pengajuan-cuti/{id}", anyRole(func(w http.ResponseWriter, r *http.Request) { deletePengajuan(w, r, db) }))
-	mux.Handle("PUT /api/pengajuan-cuti/{id}/approve", atasanOnly(func(w http.ResponseWriter, r *http.Request) { approvePengajuan(w, r, db) }))
-	mux.Handle("PUT /api/pengajuan-cuti/{id}/reject", atasanOnly(func(w http.ResponseWriter, r *http.Request) { rejectPengajuan(w, r, db) }))
+	mux.Handle("PUT /api/pengajuan-cuti/{id}/approve", approverRoles(func(w http.ResponseWriter, r *http.Request) { approvePengajuan(w, r, db) }))
+	mux.Handle("PUT /api/pengajuan-cuti/{id}/reject", approverRoles(func(w http.ResponseWriter, r *http.Request) { rejectPengajuan(w, r, db) }))
+	mux.Handle("PUT /api/pengajuan-cuti/{id}/return", approverRoles(func(w http.ResponseWriter, r *http.Request) { returnPengajuan(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-cuti/{id}/dokumen/{jenis}", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenPengajuan(w, r, db) }))
 }
 
+// dokumenContentType maps a stored filename's extension to a real MIME type
+// so a browser can render it inline (view) instead of only being able to
+// save it (download).
+func dokumenContentType(filename string) string {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".pdf":
+		return "application/pdf"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// downloadDokumenPengajuan serves a pengajuan's supporting document. By
+// default it forces a download (Content-Disposition: attachment); passing
+// ?inline=1 instead serves it as "inline" with the real MIME type so a PDF
+// or image can be viewed directly (e.g. in an <iframe>/<img>) without the
+// user having to save it first.
 func downloadDokumenPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
@@ -224,8 +249,13 @@ func downloadDokumenPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.D
 		utils.Error(w, http.StatusNotFound, "dokumen tidak ditemukan")
 		return
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+doc.NamaFile+"\"")
+	if r.URL.Query().Get("inline") == "1" {
+		w.Header().Set("Content-Type", dokumenContentType(doc.NamaFile))
+		w.Header().Set("Content-Disposition", "inline; filename=\""+doc.NamaFile+"\"")
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+doc.NamaFile+"\"")
+	}
 	w.Write(doc.File)
 }
 
@@ -621,6 +651,44 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	preloadPengajuan(db).First(&item, item.ID)
 	utils.Success(w, "pengajuan cuti telah ditolak", item)
+}
+
+// returnPengajuan reverts a pengajuan that was already disetujui/ditolak back
+// to pending, so it can go through the approval flow again (e.g. an approval
+// made by mistake). If it had been approved as annual leave, the quota that
+// was deducted is rolled back first.
+func returnPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.PengajuanCuti
+	if err := db.Preload("Pegawai").Preload("JenisCuti").First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessPengajuan(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda hanya dapat memproses pengajuan cuti bawahan anda")
+		return
+	}
+	if item.Status == models.StatusPending {
+		utils.Error(w, http.StatusBadRequest, "pengajuan ini masih menunggu, tidak perlu dikembalikan")
+		return
+	}
+	if item.Status == models.StatusDisetuju && item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
+		if err := adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, -item.JumlahHari); err != nil {
+			utils.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	item.Status = models.StatusPending
+	item.IDAtasanApprove = nil
+	item.TglApproval = nil
+	item.CatatanApproval = ""
+	if err := db.Save(&item).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengembalikan pengajuan: "+err.Error())
+		return
+	}
+	preloadPengajuan(db).First(&item, item.ID)
+	utils.Success(w, "pengajuan cuti dikembalikan ke status menunggu", item)
 }
 
 func pengajuanExcelColumns(db *gorm.DB) []utils.ExcelColumn {
