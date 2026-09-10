@@ -27,6 +27,31 @@ func RegisterPengaturanSuratRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}
 	mux.Handle("GET /api/pengaturan-surat", manage(func(w http.ResponseWriter, r *http.Request) { getPengaturanSurat(w, r, db) }))
 	mux.Handle("PUT /api/pengaturan-surat", manage(func(w http.ResponseWriter, r *http.Request) { updatePengaturanSurat(w, r, db) }))
+	mux.Handle("GET /api/pengaturan-surat/calon-penandatangan", manage(func(w http.ResponseWriter, r *http.Request) { listCalonPenandatangan(w, r, db) }))
+}
+
+// jabatanPenandatangan adalah nama jabatan (huruf kecil) yang pemegangnya
+// boleh dipilih sebagai penandatangan formulir cuti -- normalnya Kepala
+// Dinas, tapi Sekretaris Dinas Pendidikan dan Kebudayaan Daerah juga boleh
+// (mis. saat jabatan Kepala Dinas sedang lowong/menandatangani sebagai
+// pelaksana tugas).
+var jabatanPenandatangan = []string{"kepala dinas", "sekretaris dinas pendidikan dan kebudayaan daerah"}
+
+// listCalonPenandatangan mengambil data pegawai yang jabatannya cocok
+// dengan jabatanPenandatangan, supaya halaman Pengaturan Formulir bisa
+// menyediakan pilihan otomatis (nama & NIP langsung terisi dari data
+// pegawai) selain input manual.
+func listCalonPenandatangan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	var items []models.Pegawai
+	if err := db.Preload("Jabatan").
+		Joins("JOIN jabatan ON jabatan.id = pegawai.id_jabatan").
+		Where("LOWER(jabatan.jabatan) IN (?)", jabatanPenandatangan).
+		Order("pegawai.nama asc").
+		Find(&items).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pegawai")
+		return
+	}
+	utils.Success(w, "ok", items)
 }
 
 func getPengaturanSurat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

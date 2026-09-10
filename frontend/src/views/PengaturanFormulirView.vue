@@ -1,8 +1,9 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import http from '../api/http'
 import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
@@ -12,6 +13,34 @@ const loading = ref(true)
 const saving = ref(false)
 const namaKepalaDinas = ref('')
 const nipKepalaDinas = ref('')
+
+// ---- pilih otomatis dari Data Pegawai (jabatan Kepala Dinas / Sekretaris
+// Dinas Pendidikan dan Kebudayaan Daerah) ----
+const calonPenandatangan = ref([])
+const calonLoading = ref(true)
+const selectedPenandatangan = ref(null)
+
+const calonOptionLabel = (o) => `${o.nama} (${o.jabatan?.jabatan || '-'})`
+
+async function loadCalonPenandatangan() {
+  calonLoading.value = true
+  try {
+    const { data } = await http.get('/pengaturan-surat/calon-penandatangan')
+    calonPenandatangan.value = data.data || []
+  } catch (e) {
+    calonPenandatangan.value = []
+  } finally {
+    calonLoading.value = false
+  }
+}
+
+function onPilihPenandatangan(pegawaiId) {
+  const p = calonPenandatangan.value.find((x) => x.id === pegawaiId)
+  if (p) {
+    namaKepalaDinas.value = p.nama || ''
+    nipKepalaDinas.value = p.nip || ''
+  }
+}
 
 async function load() {
   loading.value = true
@@ -41,7 +70,10 @@ async function save() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadCalonPenandatangan()
+})
 </script>
 
 <template>
@@ -61,6 +93,30 @@ onMounted(load)
           Perubahan di sini berlaku untuk semua formulir yang akan dicetak setelah ini disimpan (formulir yang sudah
           pernah diunduh sebelumnya tidak berubah).
         </Message>
+
+        <div>
+          <label class="field-label">Pilih Otomatis dari Data Pegawai</label>
+          <Select
+            v-model="selectedPenandatangan"
+            :options="calonPenandatangan"
+            :optionLabel="calonOptionLabel"
+            optionValue="id"
+            :loading="calonLoading"
+            filter
+            showClear
+            style="width: 100%"
+            placeholder="Pilih pejabat (Kepala Dinas / Sekretaris)..."
+            @update:modelValue="onPilihPenandatangan"
+          />
+          <small v-if="!calonLoading && !calonPenandatangan.length" style="color: var(--p-text-muted-color); display: block; margin-top: 0.35rem">
+            Belum ada pegawai dengan jabatan "Kepala Dinas" atau "Sekretaris Dinas Pendidikan dan Kebudayaan Daerah". Atur
+            jabatan pegawai yang bersangkutan lewat menu Data Pegawai, atau isi manual di bawah.
+          </small>
+          <small v-else style="color: var(--p-text-muted-color); display: block; margin-top: 0.35rem">
+            Memilih di sini otomatis mengisi Nama & NIP di bawah. Field di bawah tetap bisa diedit manual bila perlu.
+          </small>
+        </div>
+
         <div>
           <label class="field-label">Nama Kepala Dinas</label>
           <InputText v-model="namaKepalaDinas" style="width: 100%" placeholder="mis. MOH. RIDWAN DM. S.Ag" />
