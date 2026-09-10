@@ -129,6 +129,14 @@ func listJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		query = query.Where("tahun = ?", tahun)
 		countQuery = countQuery.Where("tahun = ?", tahun)
 	}
+	// filter tambahan supaya admin/administrator/atasan bisa melihat riwayat
+	// jatah cuti tahunan milik SATU pegawai tertentu saja (dipakai di dialog
+	// Detail Pegawai) -- diterapkan setelah scoping role di atas, jadi hanya
+	// mempersempit, tidak pernah memperluas akses.
+	if idPegawai := q.Get("id_pegawai"); idPegawai != "" {
+		query = query.Where("id_pegawai = ?", idPegawai)
+		countQuery = countQuery.Where("id_pegawai = ?", idPegawai)
+	}
 
 	var total int64
 	countQuery.Count(&total)

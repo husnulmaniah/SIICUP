@@ -84,6 +84,28 @@ function docFilename(jenis) {
   return (slot && detailItem.value?.[slot.field]) || ''
 }
 
+// ---- riwayat jatah cuti tahunan pegawai ini (diisi otomatis oleh sistem
+// setiap kali pengajuan Cuti Tahunan pegawai ini disetujui -- lihat catatan
+// di bawah tabel) ----
+const detailJatahCuti = ref([])
+const detailJatahCutiLoading = ref(false)
+
+function sisaCuti(j) {
+  return (j.jumlah_hari ?? 0) - (j.terpakai ?? 0)
+}
+
+async function loadDetailJatahCuti(pegawaiId) {
+  detailJatahCutiLoading.value = true
+  try {
+    const { data } = await http.get('/jatah-cuti', { params: { id_pegawai: pegawaiId, pageSize: 50 } })
+    detailJatahCuti.value = data.data || []
+  } catch (e) {
+    detailJatahCuti.value = []
+  } finally {
+    detailJatahCutiLoading.value = false
+  }
+}
+
 async function openDetail(row) {
   detailItem.value = row
   detailDialogVisible.value = true
@@ -96,6 +118,7 @@ async function openDetail(row) {
   } finally {
     detailLoading.value = false
   }
+  loadDetailJatahCuti(row.id)
 }
 
 function pickDocFile(jenis) {
@@ -666,6 +689,39 @@ const canManage = computed(() => true) // route guard already restricts page acc
             <Button v-if="docFilename(slot.jenis)" icon="pi pi-trash" size="small" severity="danger" text @click="confirmRemoveDokumen(slot.jenis, slot.label)" />
           </div>
         </div>
+
+        <h4 style="margin: 1.5rem 0 0.75rem 0">Jatah Cuti Tahunan</h4>
+        <div v-if="detailJatahCutiLoading" style="display: flex; justify-content: center; padding: 1rem">
+          <ProgressSpinner style="width: 28px; height: 28px" />
+        </div>
+        <template v-else-if="detailJatahCuti.length">
+          <div class="responsive-table-wrap">
+            <table class="jatah-table">
+              <thead>
+                <tr>
+                  <th>Tahun</th>
+                  <th>Jumlah Hari</th>
+                  <th>Terpakai</th>
+                  <th>Sisa</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="j in detailJatahCuti" :key="j.id">
+                  <td>{{ j.tahun }}</td>
+                  <td>{{ j.jumlah_hari }}</td>
+                  <td>{{ j.terpakai }}</td>
+                  <td><Tag :value="String(sisaCuti(j))" :severity="sisaCuti(j) > 0 ? 'success' : 'danger'" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <small style="display: block; margin-top: 0.4rem; color: var(--p-text-muted-color)">
+            Kolom "Terpakai" terisi &amp; bertambah otomatis setiap kali pengajuan Cuti Tahunan pegawai ini disetujui.
+          </small>
+        </template>
+        <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">
+          Belum ada data jatah cuti tahunan. Baris akan muncul otomatis di sini begitu pengajuan Cuti Tahunan pegawai ini pertama kali disetujui (atau bisa ditambahkan manual lewat menu Jatah Cuti Tahunan).
+        </div>
       </template>
       <template #footer>
         <Button label="Tutup" severity="secondary" outlined @click="detailDialogVisible = false" />
@@ -714,6 +770,26 @@ const canManage = computed(() => true) // route guard already restricts page acc
 .doc-label {
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.jatah-table {
+  width: 100%;
+  min-width: 320px;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.jatah-table th,
+.jatah-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.jatah-table th {
+  font-weight: 600;
+  color: var(--p-text-muted-color);
+  font-size: 0.78rem;
 }
 
 .doc-filename {
