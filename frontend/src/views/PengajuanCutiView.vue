@@ -35,27 +35,33 @@ const search = ref('')
 const jenisCutiOptions = ref([])
 const pegawaiOptions = ref([])
 
-// Checklist kelengkapan berkas per jenis cuti (cermin dari aturan backend).
+// Checklist kelengkapan berkas per jenis cuti (cermin dari aturan backend --
+// lihat dokumenRequirementsForJenis di backend/handlers/pengajuan_cuti.go).
 // Urutan pengecekan penting: kata kunci yang lebih spesifik (melahirkan/
 // umroh/sakit/alasan penting) dicek sebelum kata kunci umum "tahunan",
 // karena "Cuti Tahunan Umroh" mengandung kedua kata "tahunan" dan "umroh".
-function dokumenRequirementsForJenis(jenisNama) {
+//
+// "Surat Rekomendasi Kepala Sekolah" hanya berlaku untuk pegawai yang tempat
+// tugasnya di sekolah (yang punya Kepala Sekolah untuk menandatanganinya) --
+// pegawai yang tempat tugasnya di Dinas tidak pernah diminta berkas ini.
+function dokumenRequirementsForJenis(jenisNama, isSekolah) {
+  const rekomendasiKepsek = { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true }
+  const withRekomendasiKepsek = (...reqs) => (isSekolah ? [rekomendasiKepsek, ...reqs] : reqs)
+
   const j = (jenisNama || '').toLowerCase()
   if (j.includes('melahirkan')) {
-    return [
-      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
+    return withRekomendasiKepsek(
       { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
       { key: 'keterangan_hpl', label: 'Surat Keterangan HPL (Rumah Sakit/Puskesmas)', required: true },
       { key: 'buku_kia', label: 'Buku KIA', required: true },
       { key: 'hasil_usg', label: 'Hasil USG', required: false },
-    ]
+    )
   }
   if (j.includes('umroh')) {
-    return [
-      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
+    return withRekomendasiKepsek(
       { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
       { key: 'keterangan_travel', label: 'Surat Keterangan dari Travel Pemberangkatan', required: true },
-    ]
+    )
   }
   if (j.includes('sakit')) {
     return [
@@ -65,17 +71,13 @@ function dokumenRequirementsForJenis(jenisNama) {
     ]
   }
   if (j.includes('alasan penting')) {
-    return [
+    return withRekomendasiKepsek(
       { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
-      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
       { key: 'dokumen_pendukung', label: 'Dokumen Pendukung (rawat inap keluarga / kematian / KUA / istri melahirkan)', required: true },
-    ]
+    )
   }
   if (j.includes('tahunan')) {
-    return [
-      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
-      { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
-    ]
+    return withRekomendasiKepsek({ key: 'sk_terakhir', label: 'SK Terakhir', required: true })
   }
   return []
 }
@@ -106,12 +108,24 @@ function formatDate(v) {
   return d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+// Tempat tugas pegawai yang sedang login (dipakai saat pegawai/atasan
+// mengajukan cuti untuk diri sendiri) -- dipakai untuk menentukan apakah
+// "Surat Rekomendasi Kepala Sekolah" wajib diupload (lihat isSekolah di bawah).
+const myTempatTgs = ref('')
+
 async function loadOptions() {
   const jc = await http.get('/ref/jenis-cuti')
   jenisCutiOptions.value = jc.data.data || []
   if (isManage.value) {
     const peg = await http.get('/ref/pegawai')
     pegawaiOptions.value = peg.data.data || []
+  } else {
+    try {
+      const me = await http.get('/pegawai/me')
+      myTempatTgs.value = me.data.data?.tempat_tgs || ''
+    } catch (e) {
+      myTempatTgs.value = ''
+    }
   }
 }
 
@@ -171,7 +185,16 @@ const flaggedEditDocs = ref([])
 const editReturnNote = ref('')
 
 const selectedJenisNama = computed(() => jenisCutiOptions.value.find((j) => j.id === form.id_jenis_cuti)?.jenis || '')
-const docRequirements = computed(() => dokumenRequirementsForJenis(selectedJenisNama.value))
+// Tempat tugas dari pegawai yang bersangkutan -- pegawai yang dipilih admin
+// (form.id_pegawai) untuk isManage, atau profil pegawai/atasan sendiri.
+const selectedTempatTgs = computed(() => {
+  if (isManage.value) {
+    return pegawaiOptions.value.find((p) => p.id === form.id_pegawai)?.tempat_tgs || ''
+  }
+  return myTempatTgs.value
+})
+const isSekolah = computed(() => selectedTempatTgs.value.toLowerCase().includes('sekolah'))
+const docRequirements = computed(() => dokumenRequirementsForJenis(selectedJenisNama.value, isSekolah.value))
 // admin/administrator boleh membuat pengajuan tanpa berkas; pegawai/atasan
 // yang mengajukan untuk diri sendiri wajib melengkapi berkas.
 const docsRequired = computed(() => !isManage.value)

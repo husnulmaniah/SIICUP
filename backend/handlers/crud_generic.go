@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -105,9 +107,51 @@ func getCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg Cru
 	utils.Success(w, "berhasil mengambil data", item)
 }
 
+// dateOnlyJSONRe matches a plain "YYYY-MM-DD" date-only string, the format
+// every date-picker in the frontend (and a plain HTML <input type=date>)
+// naturally sends.
+var dateOnlyJSONRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// normalizeDateOnlyJSON rewrites any flat "YYYY-MM-DD" string field in a JSON
+// object body into a full RFC3339 timestamp ("...T00:00:00Z"). This is needed
+// because createCrud below decodes straight into the model struct T, and Go's
+// encoding/json uses time.Time.UnmarshalJSON for any time.Time field (e.g.
+// TglMerah.Tgl) -- which only accepts full RFC3339, not a date-only string,
+// and otherwise fails with "format data tidak valid" even though the value
+// itself is a perfectly valid date. (updateCrud doesn't have this problem: it
+// decodes into a map and lets GORM/the DB driver scan the date-only string
+// into the "date" column directly.) If the body isn't a flat JSON object,
+// it's returned unchanged so the normal decode error still surfaces.
+func normalizeDateOnlyJSON(raw []byte) []byte {
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	changed := false
+	for k, v := range m {
+		if s, ok := v.(string); ok && dateOnlyJSONRe.MatchString(s) {
+			m[k] = s + "T00:00:00Z"
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
 func createCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg CrudConfig[T]) {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca data")
+		return
+	}
 	var item T
-	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+	if err := json.Unmarshal(normalizeDateOnlyJSON(raw), &item); err != nil {
 		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
 		return
 	}

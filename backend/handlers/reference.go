@@ -60,7 +60,10 @@ func RegisterReferenceRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}))
 	mux.Handle("GET /api/ref/pegawai", any(func(w http.ResponseWriter, r *http.Request) {
 		var items []models.Pegawai
-		db.Select("id", "nip", "nama").Order("nama asc").Find(&items)
+		// tempat_tgs disertakan supaya frontend bisa menentukan kelengkapan
+		// berkas cuti yang berlaku (mis. "Surat Rekomendasi Kepala Sekolah"
+		// hanya wajib untuk pegawai yang tempat tugasnya di sekolah).
+		db.Select("id", "nip", "nama", "tempat_tgs").Order("nama asc").Find(&items)
 		utils.Success(w, "ok", items)
 	}))
 	mux.Handle("GET /api/ref/role", any(func(w http.ResponseWriter, r *http.Request) {

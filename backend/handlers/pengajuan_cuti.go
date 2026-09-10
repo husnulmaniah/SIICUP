@@ -31,15 +31,6 @@ func preloadPengajuan(query *gorm.DB) *gorm.DB {
 	return query.Preload("Dokumen", func(d *gorm.DB) *gorm.DB { return d.Omit("file") })
 }
 
-// sixDayWeekForTempatTgs decides whether a pegawai works a 6-day week (Senin-Sabtu)
-// or the default 5-day week (Senin-Jumat), based on their tempat tugas: staff
-// posted at a school ("sekolah") work 6 days a week, everyone else (dinas/
-// kantor/etc) works 5 days a week. This replaces manual pola-hari-kerja
-// selection -- the work pattern is now derived automatically per pegawai.
-func sixDayWeekForTempatTgs(tempatTgs string) bool {
-	return strings.Contains(strings.ToLower(tempatTgs), "sekolah")
-}
-
 // autoPolaID finds the PolaHariKerja master row matching the auto-detected
 // work pattern (for display/export consistency only -- it plays no part in
 // the actual day-count calculation anymore).
@@ -64,28 +55,59 @@ type dokumenRequirement struct {
 	Required bool   `json:"required"`
 }
 
+// isSekolahFromTempatTgs decides whether a pegawai's tempat tugas is a
+// sekolah (school) as opposed to dinas/kantor -- used both to pick the
+// 5-day/6-day work week (sixDayWeekForTempatTgs) and to decide whether the
+// "Surat Rekomendasi Kepala Sekolah" document applies to them (that
+// recommendation only makes sense when the pegawai actually has a Kepala
+// Sekolah, i.e. is posted at a school; pegawai posted directly at the Dinas
+// don't have one and so are never asked to upload it).
+func isSekolahFromTempatTgs(tempatTgs string) bool {
+	return strings.Contains(strings.ToLower(tempatTgs), "sekolah")
+}
+
+// sixDayWeekForTempatTgs decides whether a pegawai works a 6-day week (Senin-Sabtu)
+// or the default 5-day week (Senin-Jumat), based on their tempat tugas: staff
+// posted at a school ("sekolah") work 6 days a week, everyone else (dinas/
+// kantor/etc) works 5 days a week. This replaces manual pola-hari-kerja
+// selection -- the work pattern is now derived automatically per pegawai.
+func sixDayWeekForTempatTgs(tempatTgs string) bool {
+	return isSekolahFromTempatTgs(tempatTgs)
+}
+
 // dokumenRequirementsForJenis returns the checklist of supporting documents
 // for a jenis cuti, following the office's document-completeness rules.
 // Order matters: more specific keywords (melahirkan/umroh/sakit/alasan
 // penting) are checked before the generic "tahunan" fallback, since e.g.
 // "Cuti Tahunan Umroh" contains both "tahunan" and "umroh".
-func dokumenRequirementsForJenis(jenisNama string) []dokumenRequirement {
+//
+// "Surat Rekomendasi Kepala Sekolah" only applies to pegawai whose tempat
+// tugas is a sekolah (they have a Kepala Sekolah to sign it) -- pegawai
+// posted at the Dinas itself never have to upload this document, so the
+// entry is omitted entirely when isSekolah is false.
+func dokumenRequirementsForJenis(jenisNama string, isSekolah bool) []dokumenRequirement {
+	rekomendasiKepsek := dokumenRequirement{Key: "rekomendasi_kepsek", Label: "Surat Rekomendasi Kepala Sekolah", Required: true}
+	withRekomendasiKepsek := func(reqs ...dokumenRequirement) []dokumenRequirement {
+		if !isSekolah {
+			return reqs
+		}
+		return append([]dokumenRequirement{rekomendasiKepsek}, reqs...)
+	}
+
 	j := strings.ToLower(jenisNama)
 	switch {
 	case strings.Contains(j, "melahirkan"):
-		return []dokumenRequirement{
-			{Key: "rekomendasi_kepsek", Label: "Surat Rekomendasi Kepala Sekolah", Required: true},
-			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-			{Key: "keterangan_hpl", Label: "Surat Keterangan HPL (Rumah Sakit/Puskesmas)", Required: true},
-			{Key: "buku_kia", Label: "Buku KIA", Required: true},
-			{Key: "hasil_usg", Label: "Hasil USG", Required: false},
-		}
+		return withRekomendasiKepsek(
+			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+			dokumenRequirement{Key: "keterangan_hpl", Label: "Surat Keterangan HPL (Rumah Sakit/Puskesmas)", Required: true},
+			dokumenRequirement{Key: "buku_kia", Label: "Buku KIA", Required: true},
+			dokumenRequirement{Key: "hasil_usg", Label: "Hasil USG", Required: false},
+		)
 	case strings.Contains(j, "umroh"):
-		return []dokumenRequirement{
-			{Key: "rekomendasi_kepsek", Label: "Surat Rekomendasi Kepala Sekolah", Required: true},
-			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-			{Key: "keterangan_travel", Label: "Surat Keterangan dari Travel Pemberangkatan", Required: true},
-		}
+		return withRekomendasiKepsek(
+			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+			dokumenRequirement{Key: "keterangan_travel", Label: "Surat Keterangan dari Travel Pemberangkatan", Required: true},
+		)
 	case strings.Contains(j, "sakit"):
 		return []dokumenRequirement{
 			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
@@ -93,16 +115,14 @@ func dokumenRequirementsForJenis(jenisNama string) []dokumenRequirement {
 			{Key: "keterangan_rawat_inap", Label: "Surat Keterangan Rawat Inap", Required: true},
 		}
 	case strings.Contains(j, "alasan penting"):
-		return []dokumenRequirement{
-			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-			{Key: "rekomendasi_kepsek", Label: "Surat Rekomendasi Kepala Sekolah", Required: true},
-			{Key: "dokumen_pendukung", Label: "Dokumen Pendukung (surat ket. rawat inap keluarga / surat kematian / surat KUA / dokumen istri melahirkan)", Required: true},
-		}
+		return withRekomendasiKepsek(
+			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+			dokumenRequirement{Key: "dokumen_pendukung", Label: "Dokumen Pendukung (surat ket. rawat inap keluarga / surat kematian / surat KUA / dokumen istri melahirkan)", Required: true},
+		)
 	case strings.Contains(j, "tahunan"):
-		return []dokumenRequirement{
-			{Key: "rekomendasi_kepsek", Label: "Surat Rekomendasi Kepala Sekolah", Required: true},
-			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-		}
+		return withRekomendasiKepsek(
+			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+		)
 	default:
 		return nil
 	}
@@ -432,7 +452,7 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	var pending []pendingDoc
 	var problems []string
-	for _, req := range dokumenRequirementsForJenis(jenis.Jenis) {
+	for _, req := range dokumenRequirementsForJenis(jenis.Jenis, isSekolahFromTempatTgs(pegawai.TempatTgs)) {
 		fh := formFileHeader(r, "dokumen_"+req.Key)
 		if fh == nil {
 			if req.Required && selfSubmit {
