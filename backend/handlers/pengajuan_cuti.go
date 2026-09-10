@@ -213,6 +213,23 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// loadApprovedPengajuanForForm di formulir.go.
 	mux.Handle("GET /api/pengajuan-cuti/{id}/form/rekomendasi", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-cuti/{id}/form/cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormCuti(w, r, db) }))
+	// upload/hapus hasil scan formulir yang sudah ditandatangani basah oleh
+	// Kepala Dinas -- hanya admin/administrator. Berkas ini disimpan sebagai
+	// PengajuanDokumen biasa (jenis "ttd_rekomendasi"/"ttd_cuti") sehingga
+	// endpoint GET .../dokumen/{jenis} di atas otomatis bisa dipakai semua
+	// role (termasuk pegawai pemilik pengajuan) untuk melihat/mengunduhnya.
+	mux.Handle("POST /api/pengajuan-cuti/{id}/form/rekomendasi/ttd", manage(func(w http.ResponseWriter, r *http.Request) {
+		uploadFormSigned(w, r, db, "ttd_rekomendasi", "Surat Rekomendasi (TTD Kepala Dinas)")
+	}))
+	mux.Handle("DELETE /api/pengajuan-cuti/{id}/form/rekomendasi/ttd", manage(func(w http.ResponseWriter, r *http.Request) {
+		deleteFormSigned(w, r, db, "ttd_rekomendasi")
+	}))
+	mux.Handle("POST /api/pengajuan-cuti/{id}/form/cuti/ttd", manage(func(w http.ResponseWriter, r *http.Request) {
+		uploadFormSigned(w, r, db, "ttd_cuti", "Formulir Cuti (TTD Kepala Dinas)")
+	}))
+	mux.Handle("DELETE /api/pengajuan-cuti/{id}/form/cuti/ttd", manage(func(w http.ResponseWriter, r *http.Request) {
+		deleteFormSigned(w, r, db, "ttd_cuti")
+	}))
 }
 
 // dokumenContentType maps a stored filename's extension to a real MIME type

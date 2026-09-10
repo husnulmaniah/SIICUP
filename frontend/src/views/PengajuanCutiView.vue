@@ -348,9 +348,95 @@ async function previewDoc(pengajuanId, doc) {
   }
 }
 
+// ---- lihat & cetak formulir (Surat Rekomendasi / Formulir Cuti) langsung,
+// tanpa memaksa download -- pakai dialog+iframe yang sama seperti previewDoc.
+// Karena backend mengirim PDF dengan Content-Disposition: inline, browser
+// menampilkan viewer PDF bawaan yang sudah punya tombol print/download sendiri.
+async function previewForm(pengajuanId, kind, title) {
+  try {
+    const url = kind === 'rekomendasi' ? `/pengajuan-cuti/${pengajuanId}/form/rekomendasi` : `/pengajuan-cuti/${pengajuanId}/form/cuti`
+    const res = await http.get(url, { params: { inline: 1 }, responseType: 'blob' })
+    previewType.value = 'pdf'
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    previewTitle.value = title
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat formulir', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
 function closePreview() {
   if (previewUrl.value) window.URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = ''
+}
+
+// ---- upload/lihat/hapus scan formulir yang sudah ditandatangani basah oleh
+// Kepala Dinas (admin/administrator saja yang bisa upload/hapus; semua role,
+// termasuk pegawai pemilik pengajuan, bisa melihat & mengunduhnya). Disimpan
+// sebagai PengajuanDokumen biasa dengan jenis "ttd_rekomendasi"/"ttd_cuti".
+const ttdFileInputs = {}
+const ttdUploading = reactive({ rekomendasi: false, cuti: false })
+const ttdLabel = { rekomendasi: 'Surat Rekomendasi', cuti: 'Formulir Cuti' }
+
+function ttdJenis(kind) {
+  return kind === 'rekomendasi' ? 'ttd_rekomendasi' : 'ttd_cuti'
+}
+function ttdDoc(kind) {
+  return (detailRow.value?.dokumen || []).find((d) => d.jenis === ttdJenis(kind))
+}
+// berkas kelengkapan pengajuan (yang diupload pegawai saat mengajukan),
+// dipisahkan dari berkas formulir bertanda tangan (ttd_*) yang punya section
+// sendiri di detail dialog.
+const kelengkapanDocs = computed(() => (detailRow.value?.dokumen || []).filter((d) => !d.jenis.startsWith('ttd_')))
+async function refreshDetailRow() {
+  if (!detailRow.value) return
+  try {
+    const { data } = await http.get(`/pengajuan-cuti/${detailRow.value.id}`)
+    detailRow.value = data.data
+  } catch (e) {
+    // biarkan; dialog tetap menampilkan data sebelumnya
+  }
+}
+function pickTtdFile(kind) {
+  ttdFileInputs[kind]?.click()
+}
+async function onTtdFileChosen(kind, e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file || !detailRow.value) return
+  ttdUploading[kind] = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const url = kind === 'rekomendasi' ? `/pengajuan-cuti/${detailRow.value.id}/form/rekomendasi/ttd` : `/pengajuan-cuti/${detailRow.value.id}/form/cuti/ttd`
+    await http.post(url, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `Berkas ${ttdLabel[kind]} bertanda tangan berhasil diupload`, life: 3000 })
+    await refreshDetailRow()
+  } catch (err) {
+    toast.add({ severity: 'error', summary: 'Gagal upload', detail: err.response?.data?.message || err.message, life: 4000 })
+  } finally {
+    ttdUploading[kind] = false
+  }
+}
+function confirmDeleteTtd(kind) {
+  confirm.require({
+    message: `Hapus berkas ${ttdLabel[kind]} bertanda tangan yang sudah diupload?`,
+    header: 'Konfirmasi Hapus',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        const url = kind === 'rekomendasi' ? `/pengajuan-cuti/${detailRow.value.id}/form/rekomendasi/ttd` : `/pengajuan-cuti/${detailRow.value.id}/form/cuti/ttd`
+        await http.delete(url)
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Berkas dihapus', life: 3000 })
+        await refreshDetailRow()
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      }
+    },
+  })
 }
 
 // ---- approval (atasan + admin/administrator) ----
@@ -563,8 +649,8 @@ onMounted(() => {
                     severity="info"
                     rounded
                     text
-                    title="Unduh Surat Rekomendasi"
-                    @click="downloadFile(`/pengajuan-cuti/${data.id}/form/rekomendasi`, `surat_rekomendasi_${data.id}.pdf`)"
+                    title="Lihat & Cetak Surat Rekomendasi"
+                    @click="previewForm(data.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti')"
                   />
                   <Button
                     icon="pi pi-file-pdf"
@@ -572,8 +658,8 @@ onMounted(() => {
                     severity="help"
                     rounded
                     text
-                    title="Unduh Formulir Cuti"
-                    @click="downloadFile(`/pengajuan-cuti/${data.id}/form/cuti`, `formulir_cuti_${data.id}.pdf`)"
+                    title="Lihat & Cetak Formulir Cuti"
+                    @click="previewForm(data.id, 'cuti', 'Formulir Cuti')"
                   />
                 </template>
                 <Button
@@ -686,8 +772,8 @@ onMounted(() => {
         <div><strong>Alamat Selama Cuti:</strong> {{ detailRow.alamat_selama_cuti || '-' }}</div>
         <div v-if="detailRow.catatan_approval"><strong>Catatan Atasan:</strong> {{ detailRow.catatan_approval }}</div>
         <div style="margin-top: 0.5rem; font-weight: 600">Berkas Kelengkapan</div>
-        <div v-if="detailRow.dokumen?.length">
-          <div v-for="doc in detailRow.dokumen" :key="doc.id" class="doc-row">
+        <div v-if="kelengkapanDocs.length">
+          <div v-for="doc in kelengkapanDocs" :key="doc.id" class="doc-row">
             <span>
               {{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small>
               <Tag v-if="doc.perlu_perbaikan" value="Perlu Diperbaiki" severity="warn" style="margin-left: 0.35rem" />
@@ -700,23 +786,48 @@ onMounted(() => {
         </div>
         <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
         <div v-if="detailRow.status === 'disetujui'" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
-          <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Cetak</div>
+          <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Cetak (dibuat otomatis oleh sistem)</div>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
             <Button
-              icon="pi pi-file-pdf"
+              icon="pi pi-eye"
               size="small"
               outlined
               label="Surat Rekomendasi"
-              @click="downloadFile(`/pengajuan-cuti/${detailRow.id}/form/rekomendasi`, `surat_rekomendasi_${detailRow.id}.pdf`)"
+              @click="previewForm(detailRow.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti')"
             />
             <Button
-              icon="pi pi-file-pdf"
+              icon="pi pi-eye"
               size="small"
               outlined
               label="Formulir Cuti"
-              @click="downloadFile(`/pengajuan-cuti/${detailRow.id}/form/cuti`, `formulir_cuti_${detailRow.id}.pdf`)"
+              @click="previewForm(detailRow.id, 'cuti', 'Formulir Cuti')"
             />
           </div>
+          <small style="display: block; margin-top: 0.4rem; color: var(--p-text-muted-color)">Klik untuk melihat &amp; langsung mencetak (tanpa perlu download dulu).</small>
+        </div>
+        <div v-if="detailRow.status === 'disetujui'" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
+          <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Bertanda Tangan Kepala Dinas</div>
+          <div v-for="kind in ['rekomendasi', 'cuti']" :key="kind" class="doc-row">
+            <span>
+              {{ ttdLabel[kind] }}
+              <Tag v-if="ttdDoc(kind)" value="Sudah diupload" severity="success" style="margin-left: 0.35rem" />
+              <Tag v-else value="Belum diupload" severity="warn" style="margin-left: 0.35rem" />
+            </span>
+            <div style="display: flex; gap: 0.15rem; align-items: center">
+              <template v-if="ttdDoc(kind)">
+                <Button icon="pi pi-eye" size="small" text label="Lihat" @click="previewDoc(detailRow.id, ttdDoc(kind))" />
+                <Button icon="pi pi-download" size="small" text @click="downloadDoc(detailRow.id, ttdDoc(kind))" />
+              </template>
+              <template v-if="isManage">
+                <input :ref="(el) => (ttdFileInputs[kind] = el)" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="(e) => onTtdFileChosen(kind, e)" />
+                <Button size="small" outlined :loading="ttdUploading[kind]" :label="ttdDoc(kind) ? 'Ganti File' : 'Upload'" icon="pi pi-upload" @click="pickTtdFile(kind)" />
+                <Button v-if="ttdDoc(kind)" icon="pi pi-trash" size="small" severity="danger" text @click="confirmDeleteTtd(kind)" />
+              </template>
+            </div>
+          </div>
+          <small v-if="!isManage" style="display: block; margin-top: 0.3rem; color: var(--p-text-muted-color)">
+            Berkas ini akan tersedia untuk dilihat/diunduh setelah diupload oleh Administrator.
+          </small>
         </div>
       </div>
       <template #footer>
@@ -760,7 +871,7 @@ onMounted(() => {
     </Dialog>
 
     <!-- lihat dokumen (tanpa download) -->
-    <Dialog v-model:visible="previewDialog" modal :header="previewTitle" :style="{ width: '90vw', maxWidth: '48rem' }" @hide="closePreview">
+    <Dialog v-model:visible="previewDialog" modal :header="previewTitle" :style="{ width: '95vw', maxWidth: '62rem' }" @hide="closePreview">
       <div v-if="previewType === 'pdf'" style="width: 100%; height: 75vh">
         <iframe :src="previewUrl" style="width: 100%; height: 100%; border: none" title="Pratinjau dokumen"></iframe>
       </div>

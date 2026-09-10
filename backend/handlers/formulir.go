@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -528,4 +530,81 @@ func downloadFormCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	writePDFResponse(w, r, pdfBytes, fmt.Sprintf("formulir_cuti_%s.pdf", pegawai.NIP))
+}
+
+// uploadFormSigned lets admin/administrator upload the scan of a form that
+// has actually been physically signed by Kepala Dinas ("ttd" = tanda
+// tangan). It is stored as an ordinary PengajuanDokumen row (jenis
+// "ttd_rekomendasi" / "ttd_cuti"), which means the existing
+// GET /api/pengajuan-cuti/{id}/dokumen/{jenis} endpoint (with its ?inline=1
+// support and canAccessPengajuan access control) already knows how to serve
+// it back -- including to the pegawai who owns the pengajuan. Uploading
+// again simply replaces the previous file, so admin can correct a mistake by
+// re-uploading.
+func uploadFormSigned(w http.ResponseWriter, r *http.Request, db *gorm.DB, jenis, label string) {
+	id := r.PathValue("id")
+	var item models.PengajuanCuti
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if item.Status != models.StatusDisetuju {
+		utils.Error(w, http.StatusBadRequest, "berkas bertanda tangan hanya bisa diupload setelah pengajuan disetujui")
+		return
+	}
+	if err := r.ParseMultipartForm(15 << 20); err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas (maksimal 15MB)")
+		return
+	}
+	fh := formFileHeader(r, "file")
+	if fh == nil {
+		utils.Error(w, http.StatusBadRequest, "berkas wajib diupload")
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(fh.Filename))
+	if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		utils.Error(w, http.StatusBadRequest, "berkas harus berformat PDF, JPG, atau PNG")
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
+		return
+	}
+	data, err := io.ReadAll(f)
+	f.Close()
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
+		return
+	}
+
+	var existing models.PengajuanDokumen
+	if err := db.Where("id_pengajuan = ? AND jenis = ?", item.ID, jenis).First(&existing).Error; err == nil {
+		existing.NamaFile = fh.Filename
+		existing.File = data
+		existing.Label = label
+		existing.PerluPerbaikan = false
+		if err := db.Save(&existing).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan berkas: "+err.Error())
+			return
+		}
+	} else {
+		doc := models.PengajuanDokumen{IDPengajuan: item.ID, Jenis: jenis, Label: label, NamaFile: fh.Filename, File: data}
+		if err := db.Create(&doc).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan berkas: "+err.Error())
+			return
+		}
+	}
+	utils.Success(w, "berkas bertanda tangan berhasil diupload", map[string]string{"jenis": jenis, "nama_file": fh.Filename})
+}
+
+// deleteFormSigned removes a previously uploaded signed-form scan (e.g. to
+// let admin correct a wrong upload before re-uploading the right one).
+func deleteFormSigned(w http.ResponseWriter, r *http.Request, db *gorm.DB, jenis string) {
+	id := r.PathValue("id")
+	if err := db.Where("id_pengajuan = ? AND jenis = ?", id, jenis).Delete(&models.PengajuanDokumen{}).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menghapus berkas: "+err.Error())
+		return
+	}
+	utils.Success(w, "berkas berhasil dihapus", nil)
 }
