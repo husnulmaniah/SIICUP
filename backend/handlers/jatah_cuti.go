@@ -217,6 +217,12 @@ func importJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if isReplaceMode(r) {
+		if err := deleteAllRows(db, &models.JatahCuti{}); err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal menghapus data lama: "+err.Error())
+			return
+		}
+	}
 	cols := jatahCutiExcelColumns(db)
 
 	type rowError struct {

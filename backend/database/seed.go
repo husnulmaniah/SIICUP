@@ -114,3 +114,30 @@ func Seed(db *gorm.DB) {
 	log.Println("  andi (atasan) / admin123")
 	log.Println("  siti (pegawai)/ admin123")
 }
+
+// EnsureJenisCuti melengkapi data master Jenis Cuti dengan jenis-jenis yang
+// dibutuhkan alur kelengkapan berkas (Cuti Tahunan Umroh, Cuti Alasan
+// Penting), tanpa mengganggu database yang sudah berjalan. Dijalankan setiap
+// kali server start (bukan hanya saat database masih kosong seperti Seed()),
+// dan idempotent: hanya menambahkan jenis yang namanya belum ada.
+func EnsureJenisCuti(db *gorm.DB) {
+	wanted := []models.JenisCuti{
+		{Jenis: "Cuti Tahunan", DefaultJatah: 12, Keterangan: "Cuti tahunan reguler, wajib SK terakhir & rekomendasi kepala sekolah bila diajukan sendiri"},
+		{Jenis: "Cuti Tahunan Umroh", DefaultJatah: 12, Keterangan: "Cuti tahunan untuk keperluan umroh, wajib SK terakhir, rekomendasi kepala sekolah & surat keterangan travel"},
+		{Jenis: "Cuti Sakit", DefaultJatah: 0, Keterangan: "Tidak memotong kuota cuti tahunan, wajib SK terakhir, surat rujukan & surat keterangan rawat inap"},
+		{Jenis: "Cuti Melahirkan", DefaultJatah: 0, Keterangan: "Tidak memotong kuota cuti tahunan, wajib rekomendasi kepala sekolah, SK terakhir, surat keterangan HPL & buku KIA"},
+		{Jenis: "Cuti Alasan Penting", DefaultJatah: 0, Keterangan: "Tidak memotong kuota cuti tahunan, wajib SK terakhir, rekomendasi kepala sekolah & dokumen pendukung"},
+	}
+	for _, jc := range wanted {
+		var existing models.JenisCuti
+		err := db.Where("jenis ILIKE ?", jc.Jenis).First(&existing).Error
+		if err == nil {
+			continue // sudah ada, jangan diubah (mungkin sudah disesuaikan admin)
+		}
+		if err := db.Create(&jc).Error; err != nil {
+			log.Printf("gagal menambahkan jenis cuti '%s': %v", jc.Jenis, err)
+		} else {
+			log.Printf("jenis cuti '%s' ditambahkan", jc.Jenis)
+		}
+	}
+}

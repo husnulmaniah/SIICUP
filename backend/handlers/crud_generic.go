@@ -196,6 +196,13 @@ func importCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 		return
 	}
 
+	if isReplaceMode(r) {
+		if err := deleteAllRows(db, new(T)); err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal menghapus data lama (kemungkinan masih dipakai data lain): "+err.Error())
+			return
+		}
+	}
+
 	type rowError struct {
 		Row    int      `json:"row"`
 		Errors []string `json:"errors"`

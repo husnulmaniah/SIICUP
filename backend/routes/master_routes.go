@@ -162,8 +162,8 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 		FileBaseName: "tgl_merah",
 		OrderBy:      "tgl asc",
 		Columns: []utils.ExcelColumn{
-			{Header: "Tanggal (YYYY-MM-DD)", Required: true, Example: "2026-01-01",
-				Get: func(i interface{}) string { t := i.(models.TglMerah).Tgl; return t.Format("2006-01-02") },
+			{Header: "Tanggal (DD-MM-YYYY)", Required: true, Example: "01-01-2026",
+				Get: func(i interface{}) string { t := i.(models.TglMerah).Tgl; return t.Format("02-01-2006") },
 				Set: func(i interface{}, raw string) error {
 					t, err := utils.ParseDateCell(raw)
 					if err != nil {

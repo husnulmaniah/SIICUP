@@ -15,6 +15,7 @@ func main() {
 
 	database.Migrate(config.DB)
 	database.Seed(config.DB)
+	database.EnsureJenisCuti(config.DB)
 
 	handler := routes.SetupRoutes(config.DB)
 

@@ -151,15 +151,30 @@ Setiap tabel punya 3 tombol:
 
 1. **Template** — mengunduh file `.xlsx` kosong berisi header kolom yang benar + satu baris contoh.
 2. **Export** — mengunduh seluruh data yang ada saat ini ke `.xlsx`.
-3. **Import** — mengunggah file `.xlsx` (isi sesuai format template) untuk **menambahkan** data baru secara massal. Setiap baris divalidasi; jika ada baris yang gagal (misal kolom wajib kosong, atau relasi seperti nama Jabatan belum terdaftar), sistem akan menampilkan nomor baris dan pesan errornya tanpa membatalkan baris lain yang valid.
+3. **Import** — mengunggah file `.xlsx` (isi sesuai format template). Saat import, pilih salah satu mode:
+   - **Tambahkan ke data yang ada** (default) — data dari file ditambahkan sebagai baris baru, data lama tidak disentuh.
+   - **Hapus semua data lama, lalu import** — seluruh data yang sudah ada di tabel tersebut dihapus permanen, baru kemudian data dari file dimasukkan. Gunakan mode ini kalau ingin file excel menjadi satu-satunya sumber data (mengganti total).
+
+   Setiap baris divalidasi; jika ada baris yang gagal (misal kolom wajib kosong, atau relasi seperti nama Jabatan belum terdaftar), sistem akan menampilkan nomor baris dan pesan errornya tanpa membatalkan baris lain yang valid. Baris yang kosong sepenuhnya di excel otomatis dilewati (tidak dihitung gagal).
 
 Untuk kolom yang berupa relasi (misalnya Jabatan, Unit Kerja, Pangkat/Golongan pada data Pegawai), isi menggunakan **nama/teksnya** (bukan ID) — sistem otomatis mencocokkan ke data master yang sudah ada. Pastikan data master tersebut sudah dibuat lebih dulu sebelum import data yang mereferensikannya.
 
+Semua kolom **tanggal** (TMT, Tanggal Mulai/Selesai Cuti, Tanggal Merah, dll) menggunakan format **DD-MM-YYYY** (contoh: `17-08-2026`), baik di template, hasil export, maupun saat mengisi ulang file untuk diimport.
+
 ## Aturan Bisnis Penting
 
-- **Jumlah hari cuti** dihitung otomatis dari tanggal mulai–selesai, mengurangi hari Minggu (selalu), hari Sabtu (jika Pola Hari Kerja yang dipilih adalah "5 hari kerja"), dan semua tanggal yang terdaftar di menu **Tanggal Merah**.
-- **Kuota cuti tahunan** (menu Jatah Cuti Tahunan) hanya terpotong untuk pengajuan dengan Jenis Cuti yang namanya mengandung kata **"Tahunan"** (mengikuti aturan cuti PNS/pegawai di Indonesia bahwa cuti sakit/melahirkan/besar tidak memotong jatah cuti tahunan). Anda bisa menambah jenis cuti baru lewat menu Jenis Cuti.
-- Pengajuan yang statusnya masih **pending** dapat diedit/dihapus oleh pegawai yang mengajukan; setelah **disetujui/ditolak**, hanya admin/administrator yang dapat mengubahnya (mengedit pengajuan yang sudah diproses akan mengembalikan statusnya ke pending untuk diproses ulang).
+- **Jumlah hari cuti & pola hari kerja dihitung otomatis** dari **tempat tugas** pegawai yang mengajukan: jika kolom Tempat Tugas mengandung kata "Sekolah", hari kerja dihitung 6 hari (Senin&ndash;Sabtu); tempat tugas lainnya (Dinas/Kantor/dll) dihitung 5 hari kerja (Senin&ndash;Jumat). Hari Minggu selalu dikecualikan, begitu juga semua tanggal yang terdaftar di menu **Tanggal Merah**. Kolom "Pola Hari Kerja" pada data pengajuan cuti kini hanya bersifat informatif (terisi otomatis sesuai hasil deteksi ini).
+- **Kuota cuti tahunan** (menu Jatah Cuti Tahunan) hanya terpotong untuk pengajuan dengan Jenis Cuti yang namanya mengandung kata **"Tahunan"** (termasuk "Cuti Tahunan Umroh"), mengikuti aturan cuti PNS/pegawai di Indonesia bahwa cuti sakit/melahirkan/alasan penting tidak memotong jatah cuti tahunan. Anda bisa menambah jenis cuti baru lewat menu Jenis Cuti.
+- **Kelengkapan berkas cuti**: saat **pegawai atau atasan mengajukan cuti untuk dirinya sendiri**, sistem mewajibkan upload berkas pendukung sesuai jenis cutinya sebelum pengajuan bisa disimpan. Saat **admin/administrator** menambahkan pengajuan cuti (untuk siapa saja), berkas bersifat opsional. Ketentuan berkas per jenis cuti:
+  - **Cuti Tahunan (biasa)**: Surat Rekomendasi Kepala Sekolah, SK Terakhir.
+  - **Cuti Tahunan Umroh**: Surat Rekomendasi Kepala Sekolah, SK Terakhir, Surat Keterangan dari Travel Pemberangkatan.
+  - **Cuti Melahirkan**: Surat Rekomendasi Kepala Sekolah, SK Terakhir, Surat Keterangan HPL (Rumah Sakit/Puskesmas), Buku KIA, dan Hasil USG (opsional).
+  - **Cuti Sakit**: SK Terakhir, Surat Rujukan, Surat Keterangan Rawat Inap.
+  - **Cuti Alasan Penting**: SK Terakhir, Surat Rekomendasi Kepala Sekolah, Dokumen Pendukung (surat keterangan rawat inap anggota keluarga, surat keterangan kematian, surat keterangan dari KUA, atau dokumen istri melahirkan).
+
+  Berkas yang sudah diupload dapat dilihat dan diunduh lewat tombol detail (ikon mata) pada setiap baris pengajuan, maupun pada dialog persetujuan yang dilihat atasan.
+- Setiap pengajuan cuti tercatat di akun pegawai yang mengajukan: halaman **Dashboard** menampilkan sisa kuota cuti tahun berjalan beserta 10 riwayat pengajuan terakhir, sedangkan halaman **Pengajuan Cuti** menampilkan seluruh riwayat pengajuan pegawai tersebut (tanpa batas jumlah, dengan paginasi).
+- Pengajuan yang statusnya masih **pending** dapat diedit/dihapus oleh pegawai yang mengajukan; setelah **disetujui/ditolak**, hanya admin/administrator yang dapat mengubahnya (mengedit pengajuan yang sudah diproses akan mengembalikan statusnya ke pending untuk diproses ulang). Berkas kelengkapan hanya diupload saat pengajuan pertama kali dibuat.
 
 ## Troubleshooting
 

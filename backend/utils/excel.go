@@ -168,13 +168,15 @@ func ImportRow(newItem interface{}, row []string, columns []ExcelColumn) []strin
 
 func ParseDateCell(raw string) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
-	layouts := []string{"2006-01-02", "02/01/2006", "02-01-2006", "2006/01/02"}
+	// DD-MM-YYYY is the primary format used across templates/export; the
+	// others are accepted too so older files / manual edits still import fine.
+	layouts := []string{"02-01-2006", "02/01/2006", "2006-01-02", "2006/01/02"}
 	for _, l := range layouts {
 		if t, err := time.Parse(l, raw); err == nil {
 			return t, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("format tanggal tidak valid, gunakan YYYY-MM-DD (nilai: %s)", raw)
+	return time.Time{}, fmt.Errorf("format tanggal tidak valid, gunakan DD-MM-YYYY (nilai: %s)", raw)
 }
 
 func ParseIntCell(raw string) (int, error) {
@@ -193,5 +195,5 @@ func FormatDateCell(t *time.Time) string {
 	if t == nil || t.IsZero() {
 		return ""
 	}
-	return t.Format("2006-01-02")
+	return t.Format("02-01-2006")
 }

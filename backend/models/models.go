@@ -104,6 +104,15 @@ type Pegawai struct {
 	IDAtasan     *uint      `json:"id_atasan" gorm:"column:id_atasan"`
 	Atasan       *Pegawai   `json:"atasan,omitempty" gorm:"foreignKey:IDAtasan;references:ID"`
 	Email        string     `json:"email" gorm:"size:100"`
+
+	// Dokumen kepegawaian (disimpan langsung di database sebagai bytea agar
+	// tidak hilang saat container backend di-redeploy/restart).
+	SkTerakhirNama string `json:"sk_terakhir_nama" gorm:"column:sk_terakhir_nama;size:255"`
+	SkTerakhirFile []byte `json:"-" gorm:"column:sk_terakhir_file;type:bytea"`
+	SkKgbNama      string `json:"sk_kgb_nama" gorm:"column:sk_kgb_nama;size:255"`
+	SkKgbFile      []byte `json:"-" gorm:"column:sk_kgb_file;type:bytea"`
+	SkPensiunNama  string `json:"sk_pensiun_nama" gorm:"column:sk_pensiun_nama;size:255"`
+	SkPensiunFile  []byte `json:"-" gorm:"column:sk_pensiun_file;type:bytea"`
 }
 
 func (Pegawai) TableName() string { return "pegawai" }
@@ -174,6 +183,26 @@ type PengajuanCuti struct {
 	TglApproval        *time.Time     `json:"tgl_approval" gorm:"column:tgl_approval"`
 	CatatanApproval    string         `json:"catatan_approval" gorm:"column:catatan_approval;size:255"`
 	CreatedAt          time.Time      `json:"created_at"`
+
+	// Dokumen kelengkapan yang diupload saat pengajuan dibuat (wajib untuk
+	// pengajuan mandiri oleh pegawai/atasan, opsional bila dibuatkan oleh admin).
+	Dokumen []PengajuanDokumen `json:"dokumen,omitempty" gorm:"foreignKey:IDPengajuan;references:ID"`
 }
 
 func (PengajuanCuti) TableName() string { return "pengajuan_cuti" }
+
+// ============================================================
+// PENGAJUAN DOKUMEN (kelengkapan berkas cuti, per pengajuan)
+// ============================================================
+
+type PengajuanDokumen struct {
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	IDPengajuan uint      `json:"id_pengajuan" gorm:"column:id_pengajuan;not null;index"`
+	Jenis       string    `json:"jenis" gorm:"column:jenis;size:50;not null"`
+	Label       string    `json:"label" gorm:"column:label;size:150"`
+	NamaFile    string    `json:"nama_file" gorm:"column:nama_file;size:255"`
+	File        []byte    `json:"-" gorm:"column:file;type:bytea"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }

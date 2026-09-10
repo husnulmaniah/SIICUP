@@ -32,8 +32,52 @@ const statusFilter = ref(null)
 const search = ref('')
 
 const jenisCutiOptions = ref([])
-const polaOptions = ref([])
 const pegawaiOptions = ref([])
+
+// Checklist kelengkapan berkas per jenis cuti (cermin dari aturan backend).
+// Urutan pengecekan penting: kata kunci yang lebih spesifik (melahirkan/
+// umroh/sakit/alasan penting) dicek sebelum kata kunci umum "tahunan",
+// karena "Cuti Tahunan Umroh" mengandung kedua kata "tahunan" dan "umroh".
+function dokumenRequirementsForJenis(jenisNama) {
+  const j = (jenisNama || '').toLowerCase()
+  if (j.includes('melahirkan')) {
+    return [
+      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
+      { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
+      { key: 'keterangan_hpl', label: 'Surat Keterangan HPL (Rumah Sakit/Puskesmas)', required: true },
+      { key: 'buku_kia', label: 'Buku KIA', required: true },
+      { key: 'hasil_usg', label: 'Hasil USG', required: false },
+    ]
+  }
+  if (j.includes('umroh')) {
+    return [
+      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
+      { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
+      { key: 'keterangan_travel', label: 'Surat Keterangan dari Travel Pemberangkatan', required: true },
+    ]
+  }
+  if (j.includes('sakit')) {
+    return [
+      { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
+      { key: 'surat_rujukan', label: 'Surat Rujukan', required: true },
+      { key: 'keterangan_rawat_inap', label: 'Surat Keterangan Rawat Inap', required: true },
+    ]
+  }
+  if (j.includes('alasan penting')) {
+    return [
+      { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
+      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
+      { key: 'dokumen_pendukung', label: 'Dokumen Pendukung (rawat inap keluarga / kematian / KUA / istri melahirkan)', required: true },
+    ]
+  }
+  if (j.includes('tahunan')) {
+    return [
+      { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true },
+      { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
+    ]
+  }
+  return []
+}
 
 const statusFilterOptions = [
   { label: 'Semua', value: null },
@@ -60,9 +104,8 @@ function formatDate(v) {
 }
 
 async function loadOptions() {
-  const [jc, ph] = await Promise.all([http.get('/ref/jenis-cuti'), http.get('/ref/pola-hari-kerja')])
+  const jc = await http.get('/ref/jenis-cuti')
   jenisCutiOptions.value = jc.data.data || []
-  polaOptions.value = ph.data.data || []
   if (isManage.value) {
     const peg = await http.get('/ref/pegawai')
     pegawaiOptions.value = peg.data.data || []
@@ -106,10 +149,21 @@ const form = reactive({
   id_jenis_cuti: null,
   tgl_mulai: null,
   tgl_selesai: null,
-  id_pola_hari_kerja: null,
   alasan_cuti: '',
   alamat_selama_cuti: '',
 })
+
+// Berkas kelengkapan yang dipilih user untuk pengajuan baru, keyed by
+// requirement key (mis. "sk_terakhir" -> File). Hanya relevan saat membuat
+// pengajuan baru (bukan edit).
+const docFiles = reactive({})
+const docFileInputs = {}
+
+const selectedJenisNama = computed(() => jenisCutiOptions.value.find((j) => j.id === form.id_jenis_cuti)?.jenis || '')
+const docRequirements = computed(() => dokumenRequirementsForJenis(selectedJenisNama.value))
+// admin/administrator boleh membuat pengajuan tanpa berkas; pegawai/atasan
+// yang mengajukan untuk diri sendiri wajib melengkapi berkas.
+const docsRequired = computed(() => !isManage.value)
 
 function resetForm() {
   form.id = null
@@ -117,9 +171,9 @@ function resetForm() {
   form.id_jenis_cuti = null
   form.tgl_mulai = null
   form.tgl_selesai = null
-  form.id_pola_hari_kerja = null
   form.alasan_cuti = ''
   form.alamat_selama_cuti = ''
+  Object.keys(docFiles).forEach((k) => delete docFiles[k])
 }
 
 function openCreate() {
@@ -137,10 +191,20 @@ function openEdit(row) {
   form.id_jenis_cuti = row.id_jenis_cuti
   form.tgl_mulai = new Date(row.tgl_mulai)
   form.tgl_selesai = new Date(row.tgl_selesai)
-  form.id_pola_hari_kerja = row.id_pola_hari_kerja
   form.alasan_cuti = row.alasan_cuti
   form.alamat_selama_cuti = row.alamat_selama_cuti
   formDialog.value = true
+}
+
+function pickDocFile(key) {
+  docFileInputs[key]?.click()
+}
+function onDocFileChosen(key, e) {
+  docFiles[key] = e.target.files[0] || null
+}
+function missingDocs() {
+  if (isEditing.value || !docsRequired.value) return []
+  return docRequirements.value.filter((r) => r.required && !docFiles[r.key]).map((r) => r.label)
 }
 
 async function saveForm() {
@@ -148,23 +212,37 @@ async function saveForm() {
     formErrors.value = 'Lengkapi semua data wajib (pegawai, jenis cuti, tanggal mulai & selesai)'
     return
   }
+  const missing = missingDocs()
+  if (missing.length) {
+    formErrors.value = 'Berkas wajib belum diupload: ' + missing.join(', ')
+    return
+  }
   formErrors.value = ''
   saving.value = true
   try {
-    const payload = {
-      id_pegawai: form.id_pegawai,
-      id_jenis_cuti: form.id_jenis_cuti,
-      tgl_mulai: form.tgl_mulai.toISOString().slice(0, 10),
-      tgl_selesai: form.tgl_selesai.toISOString().slice(0, 10),
-      id_pola_hari_kerja: form.id_pola_hari_kerja,
-      alasan_cuti: form.alasan_cuti,
-      alamat_selama_cuti: form.alamat_selama_cuti,
-    }
     if (isEditing.value) {
+      const payload = {
+        id_pegawai: form.id_pegawai,
+        id_jenis_cuti: form.id_jenis_cuti,
+        tgl_mulai: form.tgl_mulai.toISOString().slice(0, 10),
+        tgl_selesai: form.tgl_selesai.toISOString().slice(0, 10),
+        alasan_cuti: form.alasan_cuti,
+        alamat_selama_cuti: form.alamat_selama_cuti,
+      }
       await http.put(`/pengajuan-cuti/${form.id}`, payload)
       toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pengajuan cuti berhasil diperbarui', life: 3000 })
     } else {
-      await http.post('/pengajuan-cuti', payload)
+      const formData = new FormData()
+      if (form.id_pegawai) formData.append('id_pegawai', form.id_pegawai)
+      formData.append('id_jenis_cuti', form.id_jenis_cuti)
+      formData.append('tgl_mulai', form.tgl_mulai.toISOString().slice(0, 10))
+      formData.append('tgl_selesai', form.tgl_selesai.toISOString().slice(0, 10))
+      formData.append('alasan_cuti', form.alasan_cuti || '')
+      formData.append('alamat_selama_cuti', form.alamat_selama_cuti || '')
+      for (const req of docRequirements.value) {
+        if (docFiles[req.key]) formData.append('dokumen_' + req.key, docFiles[req.key])
+      }
+      await http.post('/pengajuan-cuti', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
       toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pengajuan cuti berhasil diajukan', life: 3000 })
     }
     formDialog.value = false
@@ -194,6 +272,17 @@ function confirmDelete(row) {
       }
     },
   })
+}
+
+// ---- detail (semua role bisa lihat riwayat pengajuan miliknya sendiri) ----
+const detailDialog = ref(false)
+const detailRow = ref(null)
+function openDetail(row) {
+  detailRow.value = row
+  detailDialog.value = true
+}
+function downloadDoc(pengajuanId, doc) {
+  downloadFile(`/pengajuan-cuti/${pengajuanId}/dokumen/${doc.jenis}`, doc.nama_file)
 }
 
 // ---- approval (atasan) ----
@@ -249,10 +338,16 @@ const importFile = ref(null)
 const importing = ref(false)
 const importResult = ref(null)
 const fileInputRef = ref(null)
+const importMode = ref('append')
+const importModeOptions = [
+  { label: 'Tambahkan ke data yang ada', value: 'append' },
+  { label: 'Hapus semua data lama, lalu import', value: 'replace' },
+]
 
 function openImport() {
   importFile.value = null
   importResult.value = null
+  importMode.value = 'append'
   importDialog.value = true
 }
 function pickFile() {
@@ -261,12 +356,28 @@ function pickFile() {
 function onFileChosen(e) {
   importFile.value = e.target.files[0] || null
 }
-async function submitImport() {
+function submitImport() {
   if (!importFile.value) return
+  if (importMode.value === 'replace') {
+    confirm.require({
+      message: 'Semua data pengajuan cuti yang sudah ada akan DIHAPUS sebelum data dari file excel dimasukkan. Aksi ini tidak bisa dibatalkan. Lanjutkan?',
+      header: 'Konfirmasi Hapus & Import Ulang',
+      icon: 'pi pi-exclamation-triangle',
+      acceptLabel: 'Ya, Hapus & Import',
+      rejectLabel: 'Batal',
+      acceptClass: 'p-button-danger',
+      accept: () => doImport(),
+    })
+  } else {
+    doImport()
+  }
+}
+async function doImport() {
   importing.value = true
   try {
     const formData = new FormData()
     formData.append('file', importFile.value)
+    formData.append('mode', importMode.value)
     const { data } = await http.post('/pengajuan-cuti/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
     importResult.value = data.data
     toast.add({ severity: data.success ? 'success' : 'warn', summary: 'Import selesai', detail: data.message, life: 4000 })
@@ -332,9 +443,10 @@ onMounted(() => {
           <Column header="Status" style="width: 130px">
             <template #body="{ data }"><Tag :value="data.status" :severity="statusSeverity(data.status)" /></template>
           </Column>
-          <Column header="Aksi" style="width: 150px">
+          <Column header="Aksi" style="width: 190px">
             <template #body="{ data }">
               <div style="display: flex; gap: 0.35rem">
+                <Button icon="pi pi-eye" size="small" severity="secondary" rounded text @click="openDetail(data)" />
                 <Button
                   v-if="isAtasan && data.status === 'pending'"
                   icon="pi pi-check-square"
@@ -368,17 +480,16 @@ onMounted(() => {
         <div style="display: flex; gap: 0.75rem">
           <div style="flex: 1">
             <label class="field-label">Tanggal Mulai *</label>
-            <DatePicker v-model="form.tgl_mulai" dateFormat="yy-mm-dd" showIcon style="width: 100%" />
+            <DatePicker v-model="form.tgl_mulai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
           </div>
           <div style="flex: 1">
             <label class="field-label">Tanggal Selesai *</label>
-            <DatePicker v-model="form.tgl_selesai" dateFormat="yy-mm-dd" showIcon style="width: 100%" />
+            <DatePicker v-model="form.tgl_selesai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
           </div>
         </div>
-        <div>
-          <label class="field-label">Pola Hari Kerja</label>
-          <Select v-model="form.id_pola_hari_kerja" :options="polaOptions" optionLabel="pola" optionValue="id" showClear style="width: 100%" placeholder="Default: hitung Senin-Jumat" />
-        </div>
+        <Message severity="info" :closable="false" style="font-size: 0.8rem">
+          Pola hari kerja dihitung otomatis dari tempat tugas pegawai: tempat tugas "Sekolah" &rarr; 6 hari kerja (Senin&ndash;Sabtu), tempat tugas lainnya (Dinas/Kantor) &rarr; 5 hari kerja (Senin&ndash;Jumat).
+        </Message>
         <div>
           <label class="field-label">Alasan Cuti</label>
           <Textarea v-model="form.alasan_cuti" rows="2" style="width: 100%" />
@@ -387,10 +498,49 @@ onMounted(() => {
           <label class="field-label">Alamat Selama Cuti</label>
           <Textarea v-model="form.alamat_selama_cuti" rows="2" style="width: 100%" />
         </div>
+        <div v-if="!isEditing && docRequirements.length">
+          <label class="field-label">Berkas Kelengkapan {{ docsRequired ? '(wajib)' : '(opsional, karena diajukan oleh admin)' }}</label>
+          <div v-for="req in docRequirements" :key="req.key" class="doc-upload-row">
+            <div class="doc-upload-label">
+              {{ req.label }}
+              <span v-if="req.required && docsRequired" style="color: #ef4444">*</span>
+              <span v-else-if="!req.required" style="color: var(--p-text-muted-color); font-size: 0.75rem">(opsional)</span>
+            </div>
+            <div class="doc-upload-actions">
+              <input :ref="(el) => (docFileInputs[req.key] = el)" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="(e) => onDocFileChosen(req.key, e)" />
+              <Button size="small" outlined :label="docFiles[req.key] ? 'Ganti File' : 'Pilih File'" icon="pi pi-upload" @click="pickDocFile(req.key)" />
+              <span v-if="docFiles[req.key]" class="doc-upload-filename">{{ docFiles[req.key].name }}</span>
+            </div>
+          </div>
+        </div>
       </div>
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="formDialog = false" />
         <Button label="Simpan" :loading="saving" @click="saveForm" />
+      </template>
+    </Dialog>
+
+    <!-- detail dialog (semua role) -->
+    <Dialog v-model:visible="detailDialog" modal header="Detail Pengajuan Cuti" :style="{ width: '32rem', maxWidth: '95vw' }">
+      <div v-if="detailRow" style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem">
+        <div v-if="!isPegawai"><strong>Pegawai:</strong> {{ detailRow.pegawai?.nama }}</div>
+        <div><strong>Jenis Cuti:</strong> {{ detailRow.jenis_cuti?.jenis }}</div>
+        <div><strong>Tanggal:</strong> {{ formatDate(detailRow.tgl_mulai) }} &ndash; {{ formatDate(detailRow.tgl_selesai) }} ({{ detailRow.jumlah_hari }} hari)</div>
+        <div><strong>Status:</strong> <Tag :value="detailRow.status" :severity="statusSeverity(detailRow.status)" /></div>
+        <div><strong>Alasan:</strong> {{ detailRow.alasan_cuti || '-' }}</div>
+        <div><strong>Alamat Selama Cuti:</strong> {{ detailRow.alamat_selama_cuti || '-' }}</div>
+        <div v-if="detailRow.catatan_approval"><strong>Catatan Atasan:</strong> {{ detailRow.catatan_approval }}</div>
+        <div style="margin-top: 0.5rem; font-weight: 600">Berkas Kelengkapan</div>
+        <div v-if="detailRow.dokumen?.length">
+          <div v-for="doc in detailRow.dokumen" :key="doc.id" class="doc-row">
+            <span>{{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small></span>
+            <Button icon="pi pi-download" size="small" text @click="downloadDoc(detailRow.id, doc)" />
+          </div>
+        </div>
+        <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
+      </div>
+      <template #footer>
+        <Button label="Tutup" severity="secondary" outlined @click="detailDialog = false" />
       </template>
     </Dialog>
 
@@ -402,6 +552,14 @@ onMounted(() => {
         <div><strong>Tanggal:</strong> {{ formatDate(approvalRow.tgl_mulai) }} &ndash; {{ formatDate(approvalRow.tgl_selesai) }} ({{ approvalRow.jumlah_hari }} hari)</div>
         <div><strong>Alasan:</strong> {{ approvalRow.alasan_cuti || '-' }}</div>
         <div><strong>Alamat Selama Cuti:</strong> {{ approvalRow.alamat_selama_cuti || '-' }}</div>
+        <div style="margin-top: 0.25rem; font-weight: 600">Berkas Kelengkapan</div>
+        <div v-if="approvalRow.dokumen?.length">
+          <div v-for="doc in approvalRow.dokumen" :key="doc.id" class="doc-row">
+            <span>{{ doc.label || doc.jenis }} <small style="color: var(--p-text-muted-color)">({{ doc.nama_file }})</small></span>
+            <Button icon="pi pi-download" size="small" text @click="downloadDoc(approvalRow.id, doc)" />
+          </div>
+        </div>
+        <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
       </div>
       <label class="field-label">Catatan (opsional)</label>
       <Textarea v-model="approvalNote" rows="2" style="width: 100%" placeholder="Catatan untuk pegawai..." />
@@ -414,13 +572,20 @@ onMounted(() => {
     <!-- import dialog (admin/administrator) -->
     <Dialog v-model:visible="importDialog" modal header="Import Data dari Excel" :style="{ width: '34rem', maxWidth: '95vw' }">
       <p style="margin-top: 0; color: var(--p-text-muted-color); font-size: 0.9rem">
-        Unduh template, isi data, lalu upload file excel (.xlsx). Import akan menambahkan pengajuan cuti baru.
+        Unduh template terlebih dahulu, isi data sesuai format (tanggal: DD-MM-YYYY), lalu upload file excel (.xlsx) di bawah ini.
       </p>
       <Button label="Download Template" icon="pi pi-download" severity="secondary" outlined @click="downloadFile('/pengajuan-cuti/template', 'template_pengajuan_cuti.xlsx')" style="margin-bottom: 1rem" />
       <input ref="fileInputRef" type="file" accept=".xlsx" style="display: none" @change="onFileChosen" />
       <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem">
         <Button label="Pilih File Excel" icon="pi pi-file-excel" outlined @click="pickFile" />
         <span style="font-size: 0.85rem">{{ importFile?.name || 'Belum ada file dipilih' }}</span>
+      </div>
+      <div style="margin-bottom: 1rem">
+        <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem">Jika ada data sebelumnya</label>
+        <SelectButton v-model="importMode" :options="importModeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" style="display: flex; flex-wrap: wrap" />
+        <small v-if="importMode === 'replace'" style="color: #ef4444; display: block; margin-top: 0.4rem">
+          Semua pengajuan cuti yang sudah ada akan dihapus permanen sebelum data baru dari file dimasukkan.
+        </small>
       </div>
       <div v-if="importResult" style="margin-top: 1rem">
         <Message :severity="importResult.failed_rows?.length ? 'warn' : 'success'" :closable="false">
@@ -441,5 +606,33 @@ onMounted(() => {
   font-size: 0.85rem;
   font-weight: 600;
   margin-bottom: 0.35rem;
+}
+.doc-upload-row {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+}
+.doc-upload-label {
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+}
+.doc-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.doc-upload-filename {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+}
+.doc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+  font-size: 0.85rem;
 }
 </style>

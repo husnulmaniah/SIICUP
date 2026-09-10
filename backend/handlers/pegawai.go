@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -13,6 +15,12 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// dokumenFileFields lists the GORM struct field names (bytea columns) that
+// must be excluded from ordinary list/detail queries so we don't drag large
+// binary blobs along with every request; they're only fetched by the
+// dedicated download endpoint below.
+var dokumenFileFields = []string{"SkTerakhirFile", "SkKgbFile", "SkPensiunFile"}
 
 var pegawaiPreloads = []string{"Jabatan", "UnitKerja", "PangkatGol.Pangkat", "PangkatGol.Gol", "Status", "Atasan"}
 
@@ -79,7 +87,7 @@ func pegawaiExcelColumns(db *gorm.DB) []utils.ExcelColumn {
 		{Header: "Tempat Tugas", Example: "Kantor Pusat",
 			Get: func(i interface{}) string { return i.(models.Pegawai).TempatTgs },
 			Set: func(i interface{}, raw string) error { i.(*models.Pegawai).TempatTgs = raw; return nil }},
-		{Header: "TMT (YYYY-MM-DD)", Example: "2010-01-01",
+		{Header: "TMT (DD-MM-YYYY)", Example: "01-01-2010",
 			Get: func(i interface{}) string { return utils.FormatDateCell(i.(models.Pegawai).TMT) },
 			Set: func(i interface{}, raw string) error {
 				t, err := utils.ParseDateCell(raw)
@@ -186,6 +194,152 @@ func RegisterPegawaiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("POST /api/pegawai", manage(func(w http.ResponseWriter, r *http.Request) { createPegawai(w, r, db) }))
 	mux.Handle("PUT /api/pegawai/{id}", manage(func(w http.ResponseWriter, r *http.Request) { updatePegawai(w, r, db) }))
 	mux.Handle("DELETE /api/pegawai/{id}", manage(func(w http.ResponseWriter, r *http.Request) { deletePegawai(w, r, db) }))
+
+	mux.Handle("GET /api/pegawai/{id}/dokumen/{jenis}", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenPegawai(w, r, db) }))
+	mux.Handle("POST /api/pegawai/{id}/dokumen/{jenis}", manage(func(w http.ResponseWriter, r *http.Request) { uploadDokumenPegawai(w, r, db) }))
+	mux.Handle("DELETE /api/pegawai/{id}/dokumen/{jenis}", manage(func(w http.ResponseWriter, r *http.Request) { deleteDokumenPegawai(w, r, db) }))
+}
+
+// validDokumenJenis restricts the {jenis} path segment to the three known
+// document slots described in the UI: SK Terakhir, SK Kenaikan Gaji
+// Berkala, and SK Pensiun.
+func validDokumenJenis(jenis string) bool {
+	switch jenis {
+	case "sk-terakhir", "sk-kgb", "sk-pensiun":
+		return true
+	}
+	return false
+}
+
+func canAccessPegawaiRow(claims *utils.Claims, item *models.Pegawai) bool {
+	if claims.RoleName == "administrator" || claims.RoleName == "admin" {
+		return true
+	}
+	if claims.RoleName == "atasan" {
+		return item.IDAtasan != nil && claims.IDPegawai != nil && *item.IDAtasan == *claims.IDPegawai
+	}
+	return claims.IDPegawai != nil && item.ID == *claims.IDPegawai
+}
+
+func downloadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	jenis := r.PathValue("jenis")
+	if !validDokumenJenis(jenis) {
+		utils.Error(w, http.StatusBadRequest, "jenis dokumen tidak dikenal")
+		return
+	}
+	var item models.Pegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessPegawaiRow(claims, &item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
+		return
+	}
+
+	var filename string
+	var data []byte
+	switch jenis {
+	case "sk-terakhir":
+		filename, data = item.SkTerakhirNama, item.SkTerakhirFile
+	case "sk-kgb":
+		filename, data = item.SkKgbNama, item.SkKgbFile
+	case "sk-pensiun":
+		filename, data = item.SkPensiunNama, item.SkPensiunFile
+	}
+	if len(data) == 0 {
+		utils.Error(w, http.StatusNotFound, "dokumen belum diupload")
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	w.Write(data)
+}
+
+func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	jenis := r.PathValue("jenis")
+	if !validDokumenJenis(jenis) {
+		utils.Error(w, http.StatusBadRequest, "jenis dokumen tidak dikenal")
+		return
+	}
+	var item models.Pegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if err := r.ParseMultipartForm(15 << 20); err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload (maksimal 15MB)")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "file tidak ditemukan (field 'file')")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		utils.Error(w, http.StatusBadRequest, "format file harus PDF, JPG, atau PNG")
+		return
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal membaca isi file")
+		return
+	}
+
+	updates := map[string]interface{}{}
+	switch jenis {
+	case "sk-terakhir":
+		updates["sk_terakhir_nama"] = header.Filename
+		updates["sk_terakhir_file"] = data
+	case "sk-kgb":
+		updates["sk_kgb_nama"] = header.Filename
+		updates["sk_kgb_file"] = data
+	case "sk-pensiun":
+		updates["sk_pensiun_nama"] = header.Filename
+		updates["sk_pensiun_file"] = data
+	}
+	if err := db.Model(&item).Updates(updates).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan dokumen: "+err.Error())
+		return
+	}
+	utils.Success(w, "dokumen berhasil diupload", map[string]string{"nama_file": header.Filename})
+}
+
+func deleteDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	jenis := r.PathValue("jenis")
+	if !validDokumenJenis(jenis) {
+		utils.Error(w, http.StatusBadRequest, "jenis dokumen tidak dikenal")
+		return
+	}
+	var item models.Pegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	updates := map[string]interface{}{}
+	switch jenis {
+	case "sk-terakhir":
+		updates["sk_terakhir_nama"] = ""
+		updates["sk_terakhir_file"] = nil
+	case "sk-kgb":
+		updates["sk_kgb_nama"] = ""
+		updates["sk_kgb_file"] = nil
+	case "sk-pensiun":
+		updates["sk_pensiun_nama"] = ""
+		updates["sk_pensiun_file"] = nil
+	}
+	if err := db.Model(&item).Updates(updates).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menghapus dokumen: "+err.Error())
+		return
+	}
+	utils.Success(w, "dokumen berhasil dihapus", nil)
 }
 
 func listPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -201,7 +355,7 @@ func listPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	search := strings.TrimSpace(q.Get("q"))
 
-	query := db.Model(&models.Pegawai{})
+	query := db.Model(&models.Pegawai{}).Omit(dokumenFileFields...)
 	for _, p := range pegawaiPreloads {
 		query = query.Preload(p)
 	}
@@ -247,7 +401,7 @@ func mePegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	var item models.Pegawai
-	query := db
+	query := db.Omit(dokumenFileFields...)
 	for _, p := range pegawaiPreloads {
 		query = query.Preload(p)
 	}
@@ -274,7 +428,7 @@ func getPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	id := r.PathValue("id")
 
 	var item models.Pegawai
-	query := db
+	query := db.Omit(dokumenFileFields...)
 	for _, p := range pegawaiPreloads {
 		query = query.Preload(p)
 	}
@@ -386,7 +540,7 @@ func deletePegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 func exportPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var items []models.Pegawai
-	query := db
+	query := db.Omit(dokumenFileFields...)
 	for _, p := range pegawaiPreloads {
 		query = query.Preload(p)
 	}
@@ -415,6 +569,12 @@ func importPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if isReplaceMode(r) {
+		if err := deleteAllRows(db, &models.Pegawai{}); err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal menghapus data lama (kemungkinan masih ada akun user/pengajuan cuti yang terhubung): "+err.Error())
+			return
+		}
 	}
 	cols := pegawaiExcelColumns(db)
 	// column indexes: 0 NIP,1 Nama,2 Jabatan,3 UnitKerja,4 Pangkat,5 Golongan,6 TempatTugas,7 TMT,8 NoHP,9 Email,10 Status,11 NIP Atasan
