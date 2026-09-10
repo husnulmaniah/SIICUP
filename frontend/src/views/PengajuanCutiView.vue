@@ -28,6 +28,11 @@ const confirm = useConfirm()
 const items = ref([])
 const total = ref(0)
 const loading = ref(false)
+// Pilihan "tampilkan N entri" -- dropdown custom di pojok kiri atas tabel,
+// dipisah dari paginator bawaan PrimeVue (lihat CrudManager.vue untuk pola
+// yang sama, dipakai konsisten di semua tabel data pada aplikasi ini).
+const entriesOptions = [5, 10, 25, 50, 100]
+
 const page = ref(1)
 const pageSize = ref(10)
 const statusFilter = ref(null)
@@ -148,6 +153,11 @@ async function fetchList() {
 function onPage(event) {
   page.value = Math.floor(event.first / event.rows) + 1
   pageSize.value = event.rows
+  fetchList()
+}
+
+function onEntriesChange() {
+  page.value = 1
   fetchList()
 }
 
@@ -628,9 +638,13 @@ onMounted(() => {
     </p>
 
     <div class="card">
-      <div class="toolbar-actions" style="justify-content: space-between; margin-bottom: 1rem; align-items: center; flex-wrap: wrap">
-        <SelectButton v-model="statusFilter" :options="statusFilterOptions" optionLabel="label" optionValue="value" style="display: flex; flex-wrap: wrap" />
-        <div class="toolbar-actions">
+      <div class="toolbar-actions" style="justify-content: space-between; margin-bottom: 1rem; align-items: flex-end; flex-wrap: wrap; gap: .75rem">
+        <div class="entries-picker">
+          <span class="entries-picker-label">Tampilkan</span>
+          <Select v-model="pageSize" :options="entriesOptions" @change="onEntriesChange" />
+        </div>
+        <div class="toolbar-actions" style="align-items: center; flex-wrap: wrap">
+          <SelectButton v-model="statusFilter" :options="statusFilterOptions" optionLabel="label" optionValue="value" style="display: flex; flex-wrap: wrap" />
           <Button v-if="isPegawai || isManage" icon="pi pi-plus" label="Ajukan Cuti" @click="openCreate" />
           <template v-if="isManage">
             <Button icon="pi pi-download" label="Template" severity="secondary" outlined @click="downloadFile('/pengajuan-cuti/template', 'template_pengajuan_cuti.xlsx')" />
@@ -650,9 +664,9 @@ onMounted(() => {
           :totalRecords="total"
           :first="(page - 1) * pageSize"
           @page="onPage"
-          :rowsPerPageOptions="[10, 25, 50]"
+          paginatorTemplate="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+          currentPageReportTemplate="Showing {first} to {last} of {totalRecords} entries"
           dataKey="id"
-          stripedRows
           size="small"
           style="min-width: 760px"
         >

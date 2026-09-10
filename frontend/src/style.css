@@ -110,3 +110,129 @@ a {
   background: #cbd5e1;
   border-radius: 4px;
 }
+
+/* ============================================================
+   Gaya tabel data (DataTable + Paginator) global -- dipakai semua
+   halaman yang menampilkan tabel (CrudManager/Master Data, Pengajuan
+   Cuti, Perubahan Data, Dashboard). Header huruf kapital abu-abu tanpa
+   border vertikal, baris dipisah garis bawah tipis, kolom aksi berupa
+   tombol bulat solid berwarna, dan paginasi berbentuk lingkaran dengan
+   teks "Showing x to y of z entries" didorong ke kiri lewat trik
+   margin-right:auto pada elemen pertama flex (.p-paginator-current).
+   ============================================================ */
+.p-datatable-thead > tr > th {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--p-surface-200, #e2e8f0);
+  text-transform: uppercase;
+  font-size: .72rem;
+  letter-spacing: .05em;
+  font-weight: 700;
+  color: var(--p-text-muted-color, #94a3b8);
+  padding: .85rem 1rem;
+}
+
+.p-datatable-tbody > tr > td {
+  border: none;
+  border-bottom: 1px solid var(--p-surface-100, #f1f5f9);
+  padding: .85rem 1rem;
+}
+
+.p-datatable-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
+/* Matikan warna selang-seling bawaan stripedRows -- referensi tampilannya
+   baris putih polos, dipisah garis tipis saja. */
+.p-datatable.p-datatable-striped .p-datatable-tbody > tr:nth-child(even) {
+  background: transparent;
+}
+
+.p-datatable-tbody > tr:hover {
+  background: var(--p-surface-50, #f8fafc) !important;
+}
+
+/* Dropdown "entries per page" custom di pojok kiri atas tabel */
+.entries-picker {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+.entries-picker-label {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--p-text-muted-color, #94a3b8);
+}
+
+.entries-picker .p-select {
+  min-width: 88px;
+  border-radius: 999px;
+}
+
+/* Search box model pil, ikon di sisi kanan */
+.table-search .p-inputtext {
+  border-radius: 999px;
+  background: var(--p-surface-50, #f8fafc);
+}
+
+.table-search .p-inputtext:focus {
+  background: var(--p-content-background, #fff);
+}
+
+/* Kolom Aksi -- tombol bulat/rounded solid kecil berwarna, ikon putih */
+.table-actions {
+  display: flex;
+  gap: .4rem;
+}
+
+.table-action-btn.p-button {
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 8px;
+}
+
+.table-action-btn .p-button-icon {
+  font-size: .8rem;
+}
+
+/* Paginator bulat, teks "Showing..." didorong ke kiri */
+.p-paginator {
+  border: none;
+  background: transparent;
+  padding: .85rem .25rem 0;
+}
+
+.p-paginator-content {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .2rem;
+  width: 100%;
+}
+
+.p-paginator-current {
+  order: -1;
+  margin-right: auto;
+  color: var(--p-text-muted-color, #94a3b8);
+  font-size: .82rem;
+  padding-right: 0;
+}
+
+.p-paginator-first,
+.p-paginator-prev,
+.p-paginator-next,
+.p-paginator-last,
+.p-paginator-page {
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  margin: 0 .1rem;
+}
+
+button.p-paginator-page.p-paginator-page-selected {
+  background: #26c0c7 !important;
+  border-color: #26c0c7 !important;
+  color: #fff !important;
+}

@@ -29,6 +29,11 @@ const props = defineProps({
 const toast = useToast()
 const confirm = useConfirm()
 
+// Pilihan "tampilkan N entri" -- dropdown custom di pojok kiri atas tabel
+// (dipisah dari paginator bawaan PrimeVue supaya tampilannya sesuai gaya
+// tabel baru: dropdown kecil sendiri, paginasi bulat terpisah di bawah).
+const entriesOptions = [5, 10, 25, 50, 100]
+
 const items = ref([])
 const total = ref(0)
 const loading = ref(false)
@@ -244,6 +249,11 @@ async function fetchList() {
 function onPage(event) {
   page.value = Math.floor(event.first / event.rows) + 1
   pageSize.value = event.rows
+  fetchList()
+}
+
+function onEntriesChange() {
+  page.value = 1
   fetchList()
 }
 
@@ -506,12 +516,16 @@ const canManage = computed(() => true) // route guard already restricts page acc
     <p class="page-subtitle">{{ config.subtitle }}</p>
 
     <div class="card">
-      <div class="toolbar-actions" style="justify-content: space-between; margin-bottom: 1rem; align-items: center">
-        <IconField v-if="config.searchPlaceholder !== false" style="min-width: 220px; max-width: 320px; flex: 1">
-          <InputIcon class="pi pi-search" />
-          <InputText v-model="search" :placeholder="config.searchPlaceholder || 'Cari...'" style="width: 100%" />
-        </IconField>
-        <div class="toolbar-actions">
+      <div class="toolbar-actions" style="justify-content: space-between; margin-bottom: 1rem; align-items: flex-end; flex-wrap: wrap; gap: .75rem">
+        <div class="entries-picker">
+          <span class="entries-picker-label">Tampilkan</span>
+          <Select v-model="pageSize" :options="entriesOptions" @change="onEntriesChange" />
+        </div>
+        <div class="toolbar-actions" style="align-items: center; flex: 1; justify-content: flex-end">
+          <IconField v-if="config.searchPlaceholder !== false" class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
+            <InputText v-model="search" :placeholder="config.searchPlaceholder || 'Cari...'" style="width: 100%" />
+            <InputIcon class="pi pi-search" />
+          </IconField>
           <Button icon="pi pi-plus" label="Tambah" @click="openCreate" />
           <Button icon="pi pi-download" label="Template" severity="secondary" outlined @click="downloadTemplate" />
           <Button icon="pi pi-upload" label="Import" severity="secondary" outlined @click="openImportDialog" />
@@ -530,9 +544,9 @@ const canManage = computed(() => true) // route guard already restricts page acc
           :totalRecords="total"
           :first="(page - 1) * pageSize"
           @page="onPage"
-          :rowsPerPageOptions="[10, 25, 50, 100]"
+          paginatorTemplate="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+          currentPageReportTemplate="Showing {first} to {last} of {totalRecords} entries"
           dataKey="id"
-          stripedRows
           size="small"
           style="min-width: 640px"
         >
@@ -550,10 +564,10 @@ const canManage = computed(() => true) // route guard already restricts page acc
           </Column>
           <Column header="Aksi" :style="{ width: isPegawaiTable ? '170px' : '130px' }">
             <template #body="{ data }">
-              <div style="display: flex; gap: 0.35rem">
-                <Button v-if="isPegawaiTable" icon="pi pi-eye" size="small" severity="info" rounded text @click="openDetail(data)" />
-                <Button icon="pi pi-pencil" size="small" severity="secondary" rounded text @click="openEdit(data)" />
-                <Button icon="pi pi-trash" size="small" severity="danger" rounded text @click="confirmDelete(data)" />
+              <div class="table-actions">
+                <Button v-if="isPegawaiTable" icon="pi pi-user" size="small" severity="info" rounded class="table-action-btn" @click="openDetail(data)" />
+                <Button icon="pi pi-pencil" size="small" severity="success" rounded class="table-action-btn" @click="openEdit(data)" />
+                <Button icon="pi pi-times" size="small" severity="warn" rounded class="table-action-btn" @click="confirmDelete(data)" />
               </div>
             </template>
           </Column>
