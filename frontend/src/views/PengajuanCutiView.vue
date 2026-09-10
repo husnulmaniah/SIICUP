@@ -601,7 +601,7 @@ onMounted(() => {
 
     <div class="card">
       <div class="toolbar-actions" style="justify-content: space-between; margin-bottom: 1rem; align-items: center; flex-wrap: wrap">
-        <SelectButton v-model="statusFilter" :options="statusFilterOptions" optionLabel="label" optionValue="value" />
+        <SelectButton v-model="statusFilter" :options="statusFilterOptions" optionLabel="label" optionValue="value" style="display: flex; flex-wrap: wrap" />
         <div class="toolbar-actions">
           <Button v-if="isPegawai || isManage" icon="pi pi-plus" label="Ajukan Cuti" @click="openCreate" />
           <template v-if="isManage">
@@ -661,6 +661,16 @@ onMounted(() => {
                     title="Lihat & Cetak Formulir Cuti"
                     @click="previewForm(data.id, 'cuti', 'Formulir Cuti')"
                   />
+                  <Button
+                    v-if="isManage"
+                    icon="pi pi-upload"
+                    size="small"
+                    severity="contrast"
+                    rounded
+                    text
+                    title="Upload Formulir yang Sudah di-TTD Kepala Dinas"
+                    @click="openDetail(data)"
+                  />
                 </template>
                 <Button
                   v-if="(isAtasan || isManage) && data.status === 'pending'"
@@ -690,41 +700,44 @@ onMounted(() => {
     </div>
 
     <!-- create/edit dialog -->
-    <Dialog v-model:visible="formDialog" modal :header="isEditing ? 'Edit Pengajuan Cuti' : 'Ajukan Cuti'" :style="{ width: '30rem', maxWidth: '95vw' }">
+    <Dialog v-model:visible="formDialog" modal :header="isEditing ? 'Edit Pengajuan Cuti' : 'Ajukan Cuti'" :style="{ width: '38rem', maxWidth: '95vw' }">
       <Message v-if="formErrors" severity="error" :closable="false" style="margin-bottom: 1rem">{{ formErrors }}</Message>
       <Message v-if="flaggedEditDocs.length" severity="warn" :closable="false" style="margin-bottom: 1rem">
         Pengajuan ini dikembalikan{{ editReturnNote ? ': ' + editReturnNote : '' }}. Silakan upload ulang berkas yang ditandai di bawah ini.
       </Message>
-      <div style="display: flex; flex-direction: column; gap: 1rem">
-        <div v-if="isManage">
+      <!-- grid responsive (PrimeFlex): 1 kolom di HP, otomatis jadi 2 kolom di tablet/desktop (>=768px) -->
+      <div class="grid formgrid">
+        <div v-if="isManage" class="col-12">
           <label class="field-label">Pegawai *</label>
           <Select v-model="form.id_pegawai" :options="pegawaiOptions" :optionLabel="(o) => `${o.nama} (${o.nip})`" optionValue="id" filter style="width: 100%" placeholder="Pilih pegawai" />
         </div>
-        <div>
+        <div class="col-12">
           <label class="field-label">Jenis Cuti *</label>
           <Select v-model="form.id_jenis_cuti" :options="jenisCutiOptions" optionLabel="jenis" optionValue="id" style="width: 100%" placeholder="Pilih jenis cuti" />
         </div>
-        <div style="display: flex; gap: 0.75rem">
-          <div style="flex: 1">
-            <label class="field-label">Tanggal Mulai *</label>
-            <DatePicker v-model="form.tgl_mulai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
-          </div>
-          <div style="flex: 1">
-            <label class="field-label">Tanggal Selesai *</label>
-            <DatePicker v-model="form.tgl_selesai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
-          </div>
+        <div class="col-12 md:col-6">
+          <label class="field-label">Tanggal Mulai *</label>
+          <DatePicker v-model="form.tgl_mulai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
         </div>
-        <Message severity="info" :closable="false" style="font-size: 0.8rem">
-          Pola hari kerja dihitung otomatis dari tempat tugas pegawai: tempat tugas "Sekolah" &rarr; 6 hari kerja (Senin&ndash;Sabtu), tempat tugas lainnya (Dinas/Kantor) &rarr; 5 hari kerja (Senin&ndash;Jumat).
-        </Message>
-        <div>
+        <div class="col-12 md:col-6">
+          <label class="field-label">Tanggal Selesai *</label>
+          <DatePicker v-model="form.tgl_selesai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
+        </div>
+        <div class="col-12">
+          <Message severity="info" :closable="false" style="font-size: 0.8rem">
+            Pola hari kerja dihitung otomatis dari tempat tugas pegawai: tempat tugas "Sekolah" &rarr; 6 hari kerja (Senin&ndash;Sabtu), tempat tugas lainnya (Dinas/Kantor) &rarr; 5 hari kerja (Senin&ndash;Jumat).
+          </Message>
+        </div>
+        <div class="col-12 md:col-6">
           <label class="field-label">Alasan Cuti</label>
           <Textarea v-model="form.alasan_cuti" rows="2" style="width: 100%" />
         </div>
-        <div>
+        <div class="col-12 md:col-6">
           <label class="field-label">Alamat Selama Cuti</label>
           <Textarea v-model="form.alamat_selama_cuti" rows="2" style="width: 100%" />
         </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem">
         <div v-if="!isEditing && docRequirements.length">
           <label class="field-label">Berkas Kelengkapan {{ docsRequired ? '(wajib)' : '(opsional, karena diajukan oleh admin)' }}</label>
           <div v-for="req in docRequirements" :key="req.key" class="doc-upload-row">

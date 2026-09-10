@@ -7,10 +7,29 @@ html, body, #app {
   margin: 0;
 }
 
+html, body {
+  /* Cegah seluruh halaman scroll horizontal di HP/tablet -- elemen yang
+     memang butuh scroll horizontal (tabel, dsb) sudah dibungkus wrapper
+     sendiri dengan overflow-x: auto (lihat .responsive-table-wrap). */
+  overflow-x: hidden;
+  width: 100%;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--p-surface-50, #f8fafc);
   color: var(--p-text-color, #1e293b);
+}
+
+img {
+  max-width: 100%;
+}
+
+/* SelectButton (mis. filter status, mode import) baris tombolnya default
+   tidak wrap di tema Aura -- di HP dengan banyak opsi ini bisa memaksa
+   halaman melebar. Buat selalu wrap supaya turun ke baris baru. */
+.p-selectbutton {
+  flex-wrap: wrap;
 }
 
 a {
