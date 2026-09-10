@@ -678,18 +678,32 @@ onMounted(() => {
                       @click="openDetail(data)"
                     />
                   </template>
-                  <!-- pegawai: hanya lihat berkas yang SUDAH di-ttd Kepala Dinas & sudah diupload admin -->
+                  <!-- pegawai: hanya lihat berkas yang SUDAH di-ttd Kepala Dinas & sudah diupload admin.
+                       Sediakan tombol Lihat (preview inline) DAN Unduh (download langsung) --
+                       preview inline lewat iframe kadang tidak didukung di browser HP (mis. Chrome
+                       Android hanya menampilkan placeholder "Buka" tanpa render PDF-nya), jadi tombol
+                       download jadi jalan pintas yang selalu berhasil di semua perangkat. -->
                   <template v-else>
-                    <Button
-                      v-if="ttdDocOf(data)"
-                      icon="pi pi-file-pdf"
-                      size="small"
-                      severity="success"
-                      rounded
-                      text
-                      title="Lihat Berkas Pengajuan Cuti (sudah TTD Kepala Dinas)"
-                      @click="previewDoc(data.id, ttdDocOf(data))"
-                    />
+                    <template v-if="ttdDocOf(data)">
+                      <Button
+                        icon="pi pi-eye"
+                        size="small"
+                        severity="success"
+                        rounded
+                        text
+                        title="Lihat Berkas Pengajuan Cuti (sudah TTD Kepala Dinas)"
+                        @click="previewDoc(data.id, ttdDocOf(data))"
+                      />
+                      <Button
+                        icon="pi pi-download"
+                        size="small"
+                        severity="success"
+                        rounded
+                        text
+                        title="Unduh Berkas Pengajuan Cuti (sudah TTD Kepala Dinas)"
+                        @click="downloadDoc(data.id, ttdDocOf(data))"
+                      />
+                    </template>
                     <Tag
                       v-else
                       value="Proses TTD Kepala Dinas"
