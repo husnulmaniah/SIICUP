@@ -372,22 +372,28 @@ function closePreview() {
 
 // ---- upload/lihat/hapus scan formulir yang sudah ditandatangani basah oleh
 // Kepala Dinas (admin/administrator saja yang bisa upload/hapus; semua role,
-// termasuk pegawai pemilik pengajuan, bisa melihat & mengunduhnya). Disimpan
-// sebagai PengajuanDokumen biasa dengan jenis "ttd_rekomendasi"/"ttd_cuti".
-const ttdFileInputs = {}
-const ttdUploading = reactive({ rekomendasi: false, cuti: false })
-const ttdLabel = { rekomendasi: 'Surat Rekomendasi', cuti: 'Formulir Cuti' }
+// termasuk pegawai pemilik pengajuan, bisa melihat & mengunduhnya). Cukup
+// SATU file per pengajuan (Surat Rekomendasi + Formulir Cuti yang sudah
+// ditandatangani biasanya sudah discan jadi satu berkas), disimpan sebagai
+// PengajuanDokumen biasa dengan jenis "ttd_formulir".
+const TTD_JENIS = 'ttd_formulir'
+const TTD_LABEL = 'Berkas Pengajuan Cuti (Sudah TTD Kepala Dinas)'
+const ttdFileInput = ref(null)
+const ttdUploading = ref(false)
 
-function ttdJenis(kind) {
-  return kind === 'rekomendasi' ? 'ttd_rekomendasi' : 'ttd_cuti'
+function ttdDoc() {
+  return (detailRow.value?.dokumen || []).find((d) => d.jenis === TTD_JENIS)
 }
-function ttdDoc(kind) {
-  return (detailRow.value?.dokumen || []).find((d) => d.jenis === ttdJenis(kind))
+// sama seperti ttdDoc, tapi menerima row apapun (dipakai di kolom Aksi tabel,
+// bukan hanya detailRow) -- listPengajuan sudah preload relasi Dokumen
+// (tanpa isi file-nya) jadi ini tidak perlu request tambahan.
+function ttdDocOf(row) {
+  return (row?.dokumen || []).find((d) => d.jenis === TTD_JENIS)
 }
 // berkas kelengkapan pengajuan (yang diupload pegawai saat mengajukan),
-// dipisahkan dari berkas formulir bertanda tangan (ttd_*) yang punya section
-// sendiri di detail dialog.
-const kelengkapanDocs = computed(() => (detailRow.value?.dokumen || []).filter((d) => !d.jenis.startsWith('ttd_')))
+// dipisahkan dari berkas formulir bertanda tangan (ttd_formulir) yang punya
+// section sendiri di detail dialog.
+const kelengkapanDocs = computed(() => (detailRow.value?.dokumen || []).filter((d) => d.jenis !== TTD_JENIS))
 async function refreshDetailRow() {
   if (!detailRow.value) return
   try {
@@ -397,30 +403,29 @@ async function refreshDetailRow() {
     // biarkan; dialog tetap menampilkan data sebelumnya
   }
 }
-function pickTtdFile(kind) {
-  ttdFileInputs[kind]?.click()
+function pickTtdFile() {
+  ttdFileInput.value?.click()
 }
-async function onTtdFileChosen(kind, e) {
+async function onTtdFileChosen(e) {
   const file = e.target.files[0]
   e.target.value = ''
   if (!file || !detailRow.value) return
-  ttdUploading[kind] = true
+  ttdUploading.value = true
   try {
     const formData = new FormData()
     formData.append('file', file)
-    const url = kind === 'rekomendasi' ? `/pengajuan-cuti/${detailRow.value.id}/form/rekomendasi/ttd` : `/pengajuan-cuti/${detailRow.value.id}/form/cuti/ttd`
-    await http.post(url, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
-    toast.add({ severity: 'success', summary: 'Berhasil', detail: `Berkas ${ttdLabel[kind]} bertanda tangan berhasil diupload`, life: 3000 })
+    await http.post(`/pengajuan-cuti/${detailRow.value.id}/form/ttd`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `${TTD_LABEL} berhasil diupload`, life: 3000 })
     await refreshDetailRow()
   } catch (err) {
     toast.add({ severity: 'error', summary: 'Gagal upload', detail: err.response?.data?.message || err.message, life: 4000 })
   } finally {
-    ttdUploading[kind] = false
+    ttdUploading.value = false
   }
 }
-function confirmDeleteTtd(kind) {
+function confirmDeleteTtd() {
   confirm.require({
-    message: `Hapus berkas ${ttdLabel[kind]} bertanda tangan yang sudah diupload?`,
+    message: `Hapus ${TTD_LABEL} yang sudah diupload?`,
     header: 'Konfirmasi Hapus',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: 'Ya, Hapus',
@@ -428,8 +433,7 @@ function confirmDeleteTtd(kind) {
     acceptClass: 'p-button-danger',
     accept: async () => {
       try {
-        const url = kind === 'rekomendasi' ? `/pengajuan-cuti/${detailRow.value.id}/form/rekomendasi/ttd` : `/pengajuan-cuti/${detailRow.value.id}/form/cuti/ttd`
-        await http.delete(url)
+        await http.delete(`/pengajuan-cuti/${detailRow.value.id}/form/ttd`)
         toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Berkas dihapus', life: 3000 })
         await refreshDetailRow()
       } catch (e) {
@@ -643,34 +647,56 @@ onMounted(() => {
               <div style="display: flex; gap: 0.35rem; flex-wrap: wrap">
                 <Button icon="pi pi-eye" size="small" severity="secondary" rounded text @click="openDetail(data)" />
                 <template v-if="data.status === 'disetujui'">
-                  <Button
-                    icon="pi pi-file-pdf"
-                    size="small"
-                    severity="info"
-                    rounded
-                    text
-                    title="Lihat & Cetak Surat Rekomendasi"
-                    @click="previewForm(data.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti')"
-                  />
-                  <Button
-                    icon="pi pi-file-pdf"
-                    size="small"
-                    severity="help"
-                    rounded
-                    text
-                    title="Lihat & Cetak Formulir Cuti"
-                    @click="previewForm(data.id, 'cuti', 'Formulir Cuti')"
-                  />
-                  <Button
-                    v-if="isManage"
-                    icon="pi pi-upload"
-                    size="small"
-                    severity="contrast"
-                    rounded
-                    text
-                    title="Upload Formulir yang Sudah di-TTD Kepala Dinas"
-                    @click="openDetail(data)"
-                  />
+                  <!-- admin/administrator/atasan: cetak formulir mentah (belum ttd) untuk diajukan ttd ke Kepala Dinas -->
+                  <template v-if="!isPegawai">
+                    <Button
+                      icon="pi pi-file-pdf"
+                      size="small"
+                      severity="info"
+                      rounded
+                      text
+                      title="Lihat & Cetak Surat Rekomendasi"
+                      @click="previewForm(data.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti')"
+                    />
+                    <Button
+                      icon="pi pi-file-pdf"
+                      size="small"
+                      severity="help"
+                      rounded
+                      text
+                      title="Lihat & Cetak Formulir Cuti"
+                      @click="previewForm(data.id, 'cuti', 'Formulir Cuti')"
+                    />
+                    <Button
+                      v-if="isManage"
+                      icon="pi pi-upload"
+                      size="small"
+                      severity="contrast"
+                      rounded
+                      text
+                      title="Upload Formulir yang Sudah di-TTD Kepala Dinas"
+                      @click="openDetail(data)"
+                    />
+                  </template>
+                  <!-- pegawai: hanya lihat berkas yang SUDAH di-ttd Kepala Dinas & sudah diupload admin -->
+                  <template v-else>
+                    <Button
+                      v-if="ttdDocOf(data)"
+                      icon="pi pi-file-pdf"
+                      size="small"
+                      severity="success"
+                      rounded
+                      text
+                      title="Lihat Berkas Pengajuan Cuti (sudah TTD Kepala Dinas)"
+                      @click="previewDoc(data.id, ttdDocOf(data))"
+                    />
+                    <Tag
+                      v-else
+                      value="Proses TTD Kepala Dinas"
+                      severity="warn"
+                      title="Pengajuan sudah disetujui, berkas sedang diproses tanda tangan Kepala Dinas"
+                    />
+                  </template>
                 </template>
                 <Button
                   v-if="(isAtasan || isManage) && data.status === 'pending'"
@@ -798,8 +824,10 @@ onMounted(() => {
           </div>
         </div>
         <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
-        <div v-if="detailRow.status === 'disetujui'" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
-          <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Cetak (dibuat otomatis oleh sistem)</div>
+        <!-- pegawai tidak perlu melihat/mencetak draf formulir yang belum di-ttd --
+             cukup admin/administrator/atasan yang mencetaknya untuk diajukan ttd. -->
+        <div v-if="detailRow.status === 'disetujui' && !isPegawai" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
+          <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Cetak (dibuat otomatis oleh sistem, belum TTD)</div>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
             <Button
               icon="pi pi-eye"
@@ -820,26 +848,29 @@ onMounted(() => {
         </div>
         <div v-if="detailRow.status === 'disetujui'" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
           <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Bertanda Tangan Kepala Dinas</div>
-          <div v-for="kind in ['rekomendasi', 'cuti']" :key="kind" class="doc-row">
+          <div class="doc-row">
             <span>
-              {{ ttdLabel[kind] }}
-              <Tag v-if="ttdDoc(kind)" value="Sudah diupload" severity="success" style="margin-left: 0.35rem" />
-              <Tag v-else value="Belum diupload" severity="warn" style="margin-left: 0.35rem" />
+              Berkas Pengajuan Cuti
+              <Tag v-if="ttdDoc()" value="Sudah diupload" severity="success" style="margin-left: 0.35rem" />
+              <Tag v-else value="Menunggu TTD Kepala Dinas" severity="warn" style="margin-left: 0.35rem" />
             </span>
             <div style="display: flex; gap: 0.15rem; align-items: center">
-              <template v-if="ttdDoc(kind)">
-                <Button icon="pi pi-eye" size="small" text label="Lihat" @click="previewDoc(detailRow.id, ttdDoc(kind))" />
-                <Button icon="pi pi-download" size="small" text @click="downloadDoc(detailRow.id, ttdDoc(kind))" />
+              <template v-if="ttdDoc()">
+                <Button icon="pi pi-eye" size="small" text label="Lihat" @click="previewDoc(detailRow.id, ttdDoc())" />
+                <Button icon="pi pi-download" size="small" text @click="downloadDoc(detailRow.id, ttdDoc())" />
               </template>
               <template v-if="isManage">
-                <input :ref="(el) => (ttdFileInputs[kind] = el)" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="(e) => onTtdFileChosen(kind, e)" />
-                <Button size="small" outlined :loading="ttdUploading[kind]" :label="ttdDoc(kind) ? 'Ganti File' : 'Upload'" icon="pi pi-upload" @click="pickTtdFile(kind)" />
-                <Button v-if="ttdDoc(kind)" icon="pi pi-trash" size="small" severity="danger" text @click="confirmDeleteTtd(kind)" />
+                <input ref="ttdFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onTtdFileChosen" />
+                <Button size="small" outlined :loading="ttdUploading" :label="ttdDoc() ? 'Ganti File' : 'Upload'" icon="pi pi-upload" @click="pickTtdFile" />
+                <Button v-if="ttdDoc()" icon="pi pi-trash" size="small" severity="danger" text @click="confirmDeleteTtd" />
               </template>
             </div>
           </div>
-          <small v-if="!isManage" style="display: block; margin-top: 0.3rem; color: var(--p-text-muted-color)">
-            Berkas ini akan tersedia untuk dilihat/diunduh setelah diupload oleh Administrator.
+          <small style="display: block; margin-top: 0.3rem; color: var(--p-text-muted-color)">
+            Satu berkas gabungan (Surat Rekomendasi + Formulir Cuti yang sudah ditandatangani Kepala Dinas) sudah cukup -- tidak perlu diupload terpisah.
+          </small>
+          <small v-if="!isManage && !ttdDoc()" style="display: block; margin-top: 0.2rem; color: var(--p-text-muted-color)">
+            Pengajuan cuti ini sudah <strong>disetujui</strong>, berkas resminya masih dalam proses tanda tangan Kepala Dinas. Berkas yang sudah di-ttd akan tampil di sini begitu diupload oleh Administrator.
           </small>
         </div>
       </div>
