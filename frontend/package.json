@@ -1,7 +1,7 @@
 {
-  "name": "sicuti-frontend",
-  "version": "1.0.0",
+  "name": "frontend",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,18 +9,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "axios": "^1.7.7",
-    "datatables.net-dt": "^2.1.8",
-    "datatables.net-vue3": "^3.0.2",
-    "pinia": "^2.2.4",
-    "sweetalert2": "^11.14.5",
-    "vue": "^3.5.12",
-    "vue-router": "^4.4.5",
-    "jspdf": "^2.5.2",
-    "html2canvas": "^1.4.1"
+    "@primevue/themes": "^4.5.4",
+    "axios": "^1.7.9",
+    "pinia": "^2.3.1",
+    "primeicons": "^7.0.0",
+    "primevue": "^4.5.4",
+    "vue": "^3.5.41",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.1.4",
-    "vite": "^5.4.10"
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.2.2"
   }
 }

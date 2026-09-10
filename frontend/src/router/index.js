@@ -1,31 +1,50 @@
-import { createRouter, createWebHistory } from 'vue-router';
-import { useAuthStore } from '../stores/auth';
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+import { getConfig } from '../config/tables'
+
+import LoginView from '../views/LoginView.vue'
+import AppLayout from '../layouts/AppLayout.vue'
+import DashboardView from '../views/DashboardView.vue'
+import PengajuanCutiView from '../views/PengajuanCutiView.vue'
+import MasterDataView from '../views/MasterDataView.vue'
+import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
-  { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { publik: true } },
-  { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
-  { path: '/pegawai', name: 'pegawai', component: () => import('../views/PegawaiView.vue'), meta: { admin: true } },
-  { path: '/pegawai/:id', name: 'pegawai-detail', component: () => import('../views/PegawaiDetailView.vue'), meta: { admin: true } },
-  { path: '/cuti', name: 'cuti', component: () => import('../views/CutiListView.vue') },
-  { path: '/cuti/ajukan', name: 'cuti-ajukan', component: () => import('../views/CutiFormView.vue') },
-  { path: '/cuti/:id', name: 'cuti-detail', component: () => import('../views/CutiDetailView.vue') },
-  { path: '/perubahan-data', name: 'perubahan', component: () => import('../views/PerubahanDataView.vue') },
-  { path: '/laporan', name: 'laporan', component: () => import('../views/LaporanView.vue'), meta: { admin: true } },
-  { path: '/hari-libur', name: 'hari-libur', component: () => import('../views/HariLiburView.vue'), meta: { admin: true } },
-  { path: '/akun', name: 'akun', component: () => import('../views/UsersView.vue'), meta: { adminUtama: true } },
-  { path: '/profil', name: 'profil', component: () => import('../views/ProfilView.vue') },
-];
+  { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
+  {
+    path: '/',
+    component: AppLayout,
+    children: [
+      { path: '', redirect: '/dashboard' },
+      { path: 'dashboard', name: 'dashboard', component: DashboardView },
+      { path: 'pengajuan-cuti', name: 'pengajuan-cuti', component: PengajuanCutiView },
+      { path: 'master/:tableKey', name: 'master', component: MasterDataView },
+    ],
+  },
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },
+]
 
-const router = createRouter({ history: createWebHistory(), routes });
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
 
 router.beforeEach((to) => {
-  const auth = useAuthStore();
-  if (!to.meta.publik && !auth.isLoggedIn) return '/login';
-  if (to.meta.publik && auth.isLoggedIn) return '/';
-  // Wajib ganti password default sebelum mengakses halaman lain
-  if (auth.isLoggedIn && auth.user?.mustChangePassword && to.path !== '/profil') return '/profil';
-  if (to.meta.admin && !auth.isAdmin) return '/';
-  if (to.meta.adminUtama && !auth.isAdminUtama) return '/';
-});
+  const auth = useAuthStore()
 
-export default router;
+  if (!to.meta.public && !auth.isLoggedIn) {
+    return { name: 'login' }
+  }
+  if (to.name === 'login' && auth.isLoggedIn) {
+    return { name: 'dashboard' }
+  }
+  if (to.name === 'master') {
+    const cfg = getConfig(to.params.tableKey)
+    if (!cfg || !cfg.roles.includes(auth.role)) {
+      return { name: 'dashboard' }
+    }
+  }
+  return true
+})
+
+export default router

@@ -1,33 +1,36 @@
-import { defineStore } from 'pinia';
+import { defineStore } from 'pinia'
+import http from '../api/http'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    token: localStorage.getItem('sicuti_token') || null,
-    user: JSON.parse(localStorage.getItem('sicuti_user') || 'null'),
+    token: localStorage.getItem('cuti_token') || null,
+    user: JSON.parse(localStorage.getItem('cuti_user') || 'null'),
   }),
+
   getters: {
-    isLoggedIn: (s) => !!s.token,
-    isAdmin: (s) => ['ADMIN_UTAMA', 'ADMIN_PEMBANTU'].includes(s.user?.role),
-    isAdminUtama: (s) => s.user?.role === 'ADMIN_UTAMA',
-    roleLabel: (s) => ({ ADMIN_UTAMA: 'Admin Utama', ADMIN_PEMBANTU: 'Admin Pembantu', PEGAWAI: 'Pegawai' }[s.user?.role] || ''),
+    isLoggedIn: (state) => !!state.token,
+    role: (state) => state.user?.role || null,
+    isAdministrator: (state) => state.user?.role === 'administrator',
+    isAdmin: (state) => state.user?.role === 'admin',
+    isPegawai: (state) => state.user?.role === 'pegawai',
+    isAtasan: (state) => state.user?.role === 'atasan',
+    canManageMaster: (state) => ['administrator', 'admin'].includes(state.user?.role),
   },
+
   actions: {
-    setLogin({ token, user }) {
-      this.token = token; this.user = user;
-      localStorage.setItem('sicuti_token', token);
-      localStorage.setItem('sicuti_user', JSON.stringify(user));
+    async login(username, password) {
+      const { data } = await http.post('/login', { username, password })
+      this.token = data.data.token
+      this.user = data.data.user
+      localStorage.setItem('cuti_token', this.token)
+      localStorage.setItem('cuti_user', JSON.stringify(this.user))
     },
-    selesaiGantiPassword() {
-      if (this.user) {
-        this.user = { ...this.user, mustChangePassword: false };
-        localStorage.setItem('sicuti_user', JSON.stringify(this.user));
-      }
-    },
-    logout(redirect = true) {
-      this.token = null; this.user = null;
-      localStorage.removeItem('sicuti_token');
-      localStorage.removeItem('sicuti_user');
-      if (redirect) location.href = '/login';
+
+    logout() {
+      this.token = null
+      this.user = null
+      localStorage.removeItem('cuti_token')
+      localStorage.removeItem('cuti_user')
     },
   },
-});
+})

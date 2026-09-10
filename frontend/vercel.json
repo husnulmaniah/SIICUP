@@ -1,17 +1,5 @@
 {
   "rewrites": [
-<<<<<<< HEAD
-    {
-      "source": "/api/:path*",
-      "destination": "https://GANTI-DENGAN-DOMAIN-BACKEND/api/:path*"
-    },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
-=======
-    
-    {
-      "source": "/api/:path*",
-      "destination": "https://sicuti-api.vercel.app/api/:path*"
-    }
->>>>>>> f1249a356178981b02639d968356a5a7494816f5
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

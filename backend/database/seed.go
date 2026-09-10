@@ -1,0 +1,116 @@
+package database
+
+import (
+	"log"
+	"time"
+
+	"cuti-app/models"
+	"cuti-app/utils"
+
+	"gorm.io/gorm"
+)
+
+// Seed inserts a minimal working demo dataset (roles, one account per role,
+// a small amount of reference/master data) ONLY the first time the app runs
+// against an empty database, so it is safe to call on every startup.
+func Seed(db *gorm.DB) {
+	var roleCount int64
+	db.Model(&models.Role{}).Count(&roleCount)
+	if roleCount > 0 {
+		log.Println("data sudah ada, lewati seeding")
+		return
+	}
+	log.Println("database kosong, menjalankan seeding data awal...")
+
+	roles := []models.Role{{Role: "administrator"}, {Role: "admin"}, {Role: "pegawai"}, {Role: "atasan"}}
+	db.Create(&roles)
+	roleByName := map[string]uint{}
+	for _, r := range roles {
+		roleByName[r.Role] = r.ID
+	}
+
+	statuses := []models.Status{{Status: "Aktif"}, {Status: "Nonaktif"}}
+	db.Create(&statuses)
+
+	jabatans := []models.Jabatan{{Jabatan: "Kepala Dinas"}, {Jabatan: "Kepala Bidang"}, {Jabatan: "Staff"}}
+	db.Create(&jabatans)
+
+	units := []models.UnitKerja{{Unit: "Sekretariat"}, {Unit: "Bidang Pelayanan"}}
+	db.Create(&units)
+
+	pangkats := []models.Pangkat{{Pangkat: "Pembina"}, {Pangkat: "Penata Muda"}}
+	db.Create(&pangkats)
+
+	golongans := []models.Golongan{{Gol: "IV/a"}, {Gol: "III/a"}}
+	db.Create(&golongans)
+
+	pangkatGols := []models.PangkatGol{
+		{IDPangkat: pangkats[0].ID, IDGol: golongans[0].ID},
+		{IDPangkat: pangkats[1].ID, IDGol: golongans[1].ID},
+	}
+	db.Create(&pangkatGols)
+
+	jenisCutis := []models.JenisCuti{
+		{Jenis: "Cuti Tahunan", DefaultJatah: 12, Keterangan: "Jatah cuti tahunan reguler, dipotong dari kuota tahunan"},
+		{Jenis: "Cuti Sakit", DefaultJatah: 0, Keterangan: "Tidak memotong kuota cuti tahunan"},
+		{Jenis: "Cuti Melahirkan", DefaultJatah: 0, Keterangan: "Tidak memotong kuota cuti tahunan"},
+		{Jenis: "Cuti Besar", DefaultJatah: 0, Keterangan: "Tidak memotong kuota cuti tahunan"},
+	}
+	db.Create(&jenisCutis)
+
+	polas := []models.PolaHariKerja{
+		{Pola: "5 Hari Kerja (Senin-Jumat)"},
+		{Pola: "6 Hari Kerja (Senin-Sabtu)"},
+	}
+	db.Create(&polas)
+
+	year := time.Now().Year()
+	holidays := []models.TglMerah{
+		{Tgl: time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC), Keterangan: "Tahun Baru Masehi"},
+		{Tgl: time.Date(year, 8, 17, 0, 0, 0, 0, time.UTC), Keterangan: "Hari Kemerdekaan RI"},
+		{Tgl: time.Date(year, 12, 25, 0, 0, 0, 0, time.UTC), Keterangan: "Hari Raya Natal"},
+	}
+	db.Create(&holidays)
+
+	statusAktif := statuses[0].ID
+	jabatanKabid := jabatans[1].ID
+	jabatanStaff := jabatans[2].ID
+	unitID := units[1].ID
+	pgAtasan := pangkatGols[0].ID
+	pgStaff := pangkatGols[1].ID
+
+	atasan := models.Pegawai{
+		NIP: "197001011995011001", Nama: "Andi Wijaya",
+		IDJabatan: &jabatanKabid, IDUnitKerja: &unitID, IDPangkatGol: &pgAtasan,
+		IDStatus: &statusAktif, TempatTgs: "Kantor Pusat", NoHP: "081200000001",
+		Email: "andi.wijaya@instansi.go.id",
+	}
+	db.Create(&atasan)
+
+	staff := models.Pegawai{
+		NIP: "199001012015012002", Nama: "Siti Rahma",
+		IDJabatan: &jabatanStaff, IDUnitKerja: &unitID, IDPangkatGol: &pgStaff,
+		IDStatus: &statusAktif, IDAtasan: &atasan.ID, TempatTgs: "Kantor Pusat", NoHP: "081200000002",
+		Email: "siti.rahma@instansi.go.id",
+	}
+	db.Create(&staff)
+
+	defaultPass, _ := utils.HashPassword("admin123")
+
+	users := []models.User{
+		{Username: "administrator", Pass: defaultPass, Nama: "Administrator Sistem", IDRole: roleByName["administrator"]},
+		{Username: "admin", Pass: defaultPass, Nama: "Admin Kepegawaian", IDRole: roleByName["admin"]},
+		{Username: "andi", Pass: defaultPass, Nama: "Andi Wijaya", IDRole: roleByName["atasan"], IDPegawai: &atasan.ID},
+		{Username: "siti", Pass: defaultPass, Nama: "Siti Rahma", IDRole: roleByName["pegawai"], IDPegawai: &staff.ID},
+	}
+	db.Create(&users)
+
+	db.Create(&models.JatahCuti{IDPegawai: staff.ID, Tahun: year, JumlahHari: 12, Terpakai: 0})
+	db.Create(&models.JatahCuti{IDPegawai: atasan.ID, Tahun: year, JumlahHari: 12, Terpakai: 0})
+
+	log.Println("seeding selesai. akun default (password semua: admin123):")
+	log.Println("  administrator / admin123")
+	log.Println("  admin         / admin123")
+	log.Println("  andi (atasan) / admin123")
+	log.Println("  siti (pegawai)/ admin123")
+}

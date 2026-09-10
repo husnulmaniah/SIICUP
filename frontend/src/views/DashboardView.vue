@@ -1,55 +1,121 @@
 <script setup>
-import { ref, onMounted } from 'vue';
-import api from '../api';
-import { useAuthStore } from '../stores/auth';
-import StatusBadge from '../components/StatusBadge.vue';
-import { labelJenis, formatTanggal } from '../cuti-config';
+import { ref, onMounted } from 'vue'
+import { useAuthStore } from '../stores/auth'
+import http from '../api/http'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import Tag from 'primevue/tag'
+import ProgressSpinner from 'primevue/progressspinner'
 
-const auth = useAuthStore();
-const stat = ref(null);
+const auth = useAuthStore()
+const data = ref(null)
+const loading = ref(true)
+
+function statusSeverity(status) {
+  if (status === 'disetujui') return 'success'
+  if (status === 'ditolak') return 'danger'
+  return 'warn'
+}
+
+function formatDate(v) {
+  if (!v) return '-'
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return v
+  return d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' })
+}
 
 onMounted(async () => {
-  const { data } = await api.get('/dashboard');
-  stat.value = data;
-});
+  try {
+    const { data: res } = await http.get('/dashboard')
+    data.value = res.data
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 
 <template>
-  <div>
-    <div class="page-head">
-      <div>
-        <h2>Selamat datang, {{ auth.user?.nama }}</h2>
-        <p>Ringkasan pengajuan cuti {{ auth.isAdmin ? 'seluruh pegawai' : 'Anda' }}.</p>
-      </div>
-      <router-link to="/cuti/ajukan" class="btn btn-terakota">✍️ Ajukan Cuti Baru</router-link>
+  <div class="page-wrap">
+    <div class="page-title">Selamat datang, {{ auth.user?.nama }}</div>
+    <p class="page-subtitle">Ringkasan data cuti pegawai</p>
+
+    <div v-if="loading" style="display: flex; justify-content: center; padding: 3rem">
+      <ProgressSpinner style="width: 42px; height: 42px" />
     </div>
 
-    <div v-if="stat" class="stat-grid">
-      <div v-if="auth.isAdmin" class="stat"><div class="angka">{{ stat.pegawaiAktif }}</div><div class="label">Pegawai Aktif</div></div>
-      <div class="stat kuning"><div class="angka">{{ stat.diajukan }}</div><div class="label">Cuti Menunggu Proses</div></div>
-      <div class="stat"><div class="angka">{{ stat.disetujui }}</div><div class="label">Cuti Disetujui</div></div>
-      <div class="stat aksen"><div class="angka">{{ stat.dikembalikan }}</div><div class="label">Cuti Dikembalikan</div></div>
-      <div class="stat merah"><div class="angka">{{ stat.ditolak }}</div><div class="label">Cuti Ditolak</div></div>
-      <div v-if="auth.isAdmin" class="stat aksen"><div class="angka">{{ stat.perubahanMenunggu }}</div><div class="label">Usulan Perubahan Data</div></div>
-    </div>
+    <template v-else-if="data">
+      <!-- administrator / admin -->
+      <template v-if="['administrator', 'admin'].includes(data.role)">
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-value">{{ data.total_pegawai }}</div><div class="stat-label">Total Pegawai</div></div>
+          <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Pengajuan Menunggu</div></div>
+          <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
+          <div class="stat-card" style="border-color: #ef4444"><div class="stat-value">{{ data.total_ditolak }}</div><div class="stat-label">Ditolak</div></div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top: 0">Pengajuan Cuti Terbaru</h3>
+          <div class="responsive-table-wrap">
+            <DataTable :value="data.pengajuan_terbaru" size="small" style="min-width: 600px">
+              <Column field="pegawai.nama" header="Pegawai" />
+              <Column field="jenis_cuti.jenis" header="Jenis Cuti" />
+              <Column header="Tanggal">
+                <template #body="{ data: row }">{{ formatDate(row.tgl_mulai) }} - {{ formatDate(row.tgl_selesai) }}</template>
+              </Column>
+              <Column header="Status">
+                <template #body="{ data: row }"><Tag :value="row.status" :severity="statusSeverity(row.status)" /></template>
+              </Column>
+            </DataTable>
+          </div>
+        </div>
+      </template>
 
-    <div class="card" v-if="stat">
-      <h3>Pengajuan Terbaru</h3>
-      <div class="tabel-scroll"><table class="dataTable" style="width:100%">
-        <thead>
-          <tr><th>Pegawai</th><th>Jenis Cuti</th><th>Tanggal</th><th>Status</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="c in stat.terbaru" :key="c.id">
-            <td><b>{{ c.pegawai.nama }}</b><br /><small style="color:var(--cokelat-lembut)">{{ c.pegawai.nip }}</small></td>
-            <td>{{ labelJenis(c.jenisCuti) }}</td>
-            <td>{{ formatTanggal(c.tanggalMulai) }} – {{ formatTanggal(c.tanggalSelesai) }} ({{ c.lamaCuti }} hari)</td>
-            <td><StatusBadge :status="c.status" /></td>
-            <td><router-link :to="`/cuti/${c.id}`" class="btn btn-putih btn-kecil">Detail</router-link></td>
-          </tr>
-          <tr v-if="!stat.terbaru.length"><td colspan="5" style="text-align:center; color:var(--cokelat-lembut)">Belum ada pengajuan. Mulai dengan menu Ajukan Cuti.</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+      <!-- atasan -->
+      <template v-else-if="data.role === 'atasan'">
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-value">{{ data.total_bawahan }}</div><div class="stat-label">Jumlah Bawahan</div></div>
+          <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Menunggu Persetujuan</div></div>
+          <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top: 0">Menunggu Persetujuan Anda</h3>
+          <p class="page-subtitle" style="margin-top: -0.5rem">Proses persetujuan lengkap ada di menu Pengajuan Cuti</p>
+          <div class="responsive-table-wrap">
+            <DataTable :value="data.menunggu_persetujuan" size="small" style="min-width: 600px">
+              <Column field="pegawai.nama" header="Pegawai" />
+              <Column field="jenis_cuti.jenis" header="Jenis Cuti" />
+              <Column header="Tanggal">
+                <template #body="{ data: row }">{{ formatDate(row.tgl_mulai) }} - {{ formatDate(row.tgl_selesai) }}</template>
+              </Column>
+              <Column field="jumlah_hari" header="Jumlah Hari" />
+            </DataTable>
+          </div>
+        </div>
+      </template>
+
+      <!-- pegawai -->
+      <template v-else-if="data.role === 'pegawai'">
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-value">{{ data.jatah_tahun_ini }}</div><div class="stat-label">Jatah Cuti Tahun Ini</div></div>
+          <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.terpakai }}</div><div class="stat-label">Terpakai</div></div>
+          <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.sisa }}</div><div class="stat-label">Sisa Cuti</div></div>
+          <div class="stat-card" style="border-color: #6366f1"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Menunggu Persetujuan</div></div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top: 0">Riwayat Pengajuan Cuti Saya</h3>
+          <div class="responsive-table-wrap">
+            <DataTable :value="data.riwayat_cuti" size="small" style="min-width: 600px">
+              <Column field="jenis_cuti.jenis" header="Jenis Cuti" />
+              <Column header="Tanggal">
+                <template #body="{ data: row }">{{ formatDate(row.tgl_mulai) }} - {{ formatDate(row.tgl_selesai) }}</template>
+              </Column>
+              <Column field="jumlah_hari" header="Jumlah Hari" />
+              <Column header="Status">
+                <template #body="{ data: row }"><Tag :value="row.status" :severity="statusSeverity(row.status)" /></template>
+              </Column>
+            </DataTable>
+          </div>
+        </div>
+      </template>
+    </template>
   </div>
 </template>

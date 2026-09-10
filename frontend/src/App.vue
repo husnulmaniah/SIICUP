@@ -1,10 +1,10 @@
 <script setup>
-import { useAuthStore } from './stores/auth';
-import AppLayout from './components/AppLayout.vue';
-const auth = useAuthStore();
+import Toast from 'primevue/toast'
+import ConfirmDialog from 'primevue/confirmdialog'
 </script>
 
 <template>
-  <AppLayout v-if="auth.isLoggedIn"><router-view /></AppLayout>
-  <router-view v-else />
+  <Toast />
+  <ConfirmDialog />
+  <router-view />
 </template>
