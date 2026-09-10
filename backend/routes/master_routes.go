@@ -12,8 +12,14 @@ import (
 )
 
 // RegisterMasterRoutes wires up all simple master/lookup tables through the
-// generic CRUD + excel engine. "role" is restricted to administrator only;
-// the rest are administrator + admin.
+// generic CRUD + excel engine. Only "tgl_merah" (Tanggal Merah / hari libur,
+// which role "admin"/Admin Kepegawaian keeps updated day-to-day) is opened to
+// administrator + admin; every other master/reference table (role, jabatan,
+// unit_kerja, status, pangkat, golongan, pangkat_gol, jenis_cuti,
+// pola_hari_kerja) is administrator-only. This does NOT affect the read-only
+// "/api/ref/*" lookup endpoints (reference.go) that dropdowns elsewhere
+// (Pegawai, Pengajuan Cuti, Profil Saya, dsb.) use -- those stay open to any
+// authenticated role regardless of who owns full CRUD rights here.
 func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 
 	// ---- role ----
@@ -36,7 +42,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 				Get: func(i interface{}) string { return i.(models.Jabatan).Jabatan },
 				Set: func(i interface{}, raw string) error { i.(*models.Jabatan).Jabatan = raw; return nil }},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- unit_kerja ----
 	handlers.RegisterCrud(mux, db, "/api/unit-kerja", handlers.CrudConfig[models.UnitKerja]{
@@ -47,7 +53,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 				Get: func(i interface{}) string { return i.(models.UnitKerja).Unit },
 				Set: func(i interface{}, raw string) error { i.(*models.UnitKerja).Unit = raw; return nil }},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- status ----
 	handlers.RegisterCrud(mux, db, "/api/status", handlers.CrudConfig[models.Status]{
@@ -58,7 +64,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 				Get: func(i interface{}) string { return i.(models.Status).Status },
 				Set: func(i interface{}, raw string) error { i.(*models.Status).Status = raw; return nil }},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- pangkat ----
 	handlers.RegisterCrud(mux, db, "/api/pangkat", handlers.CrudConfig[models.Pangkat]{
@@ -69,7 +75,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 				Get: func(i interface{}) string { return i.(models.Pangkat).Pangkat },
 				Set: func(i interface{}, raw string) error { i.(*models.Pangkat).Pangkat = raw; return nil }},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- golongan ----
 	handlers.RegisterCrud(mux, db, "/api/golongan", handlers.CrudConfig[models.Golongan]{
@@ -80,7 +86,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 				Get: func(i interface{}) string { return i.(models.Golongan).Gol },
 				Set: func(i interface{}, raw string) error { i.(*models.Golongan).Gol = raw; return nil }},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- pangkat_gol (foreign keys resolved by name during import/export) ----
 	handlers.RegisterCrud(mux, db, "/api/pangkat-gol", handlers.CrudConfig[models.PangkatGol]{
@@ -120,7 +126,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 					return nil
 				}},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- jenis_cuti ----
 	handlers.RegisterCrud(mux, db, "/api/jenis-cuti", handlers.CrudConfig[models.JenisCuti]{
@@ -144,7 +150,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 				Get: func(i interface{}) string { return i.(models.JenisCuti).Keterangan },
 				Set: func(i interface{}, raw string) error { i.(*models.JenisCuti).Keterangan = raw; return nil }},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- pola_hari_kerja ----
 	handlers.RegisterCrud(mux, db, "/api/pola-hari-kerja", handlers.CrudConfig[models.PolaHariKerja]{
@@ -155,7 +161,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 				Get: func(i interface{}) string { return i.(models.PolaHariKerja).Pola },
 				Set: func(i interface{}, raw string) error { i.(*models.PolaHariKerja).Pola = raw; return nil }},
 		},
-	}, "administrator", "admin")
+	}, "administrator")
 
 	// ---- tgl_merah ----
 	handlers.RegisterCrud(mux, db, "/api/tgl-merah", handlers.CrudConfig[models.TglMerah]{

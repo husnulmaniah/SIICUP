@@ -39,15 +39,25 @@ const navSections = computed(() => {
     })
     sections.push({
       header: 'Master Data',
+      // Tabel referensi inti (Jabatan, Unit Kerja, dst.) hanya boleh
+      // dilihat/diubah oleh administrator -- role "admin" (Admin
+      // Kepegawaian) hanya butuh mengelola "Tanggal Merah" (kalender hari
+      // libur dipakai saat menghitung hari cuti), jadi menu-menu lain
+      // disembunyikan untuknya agar tidak mengarah ke halaman yang memang
+      // akan ditolak backend.
       items: [
-        { label: 'Jabatan', icon: 'pi pi-id-card', to: '/master/jabatan' },
-        { label: 'Unit Kerja', icon: 'pi pi-sitemap', to: '/master/unit-kerja' },
-        { label: 'Status Pegawai', icon: 'pi pi-tag', to: '/master/status' },
-        { label: 'Pangkat', icon: 'pi pi-star', to: '/master/pangkat' },
-        { label: 'Golongan', icon: 'pi pi-hashtag', to: '/master/golongan' },
-        { label: 'Pangkat / Golongan', icon: 'pi pi-th-large', to: '/master/pangkat-gol' },
-        { label: 'Jenis Cuti', icon: 'pi pi-book', to: '/master/jenis-cuti' },
-        { label: 'Pola Hari Kerja', icon: 'pi pi-clock', to: '/master/pola-hari-kerja' },
+        ...(auth.isAdministrator
+          ? [
+              { label: 'Jabatan', icon: 'pi pi-id-card', to: '/master/jabatan' },
+              { label: 'Unit Kerja', icon: 'pi pi-sitemap', to: '/master/unit-kerja' },
+              { label: 'Status Pegawai', icon: 'pi pi-tag', to: '/master/status' },
+              { label: 'Pangkat', icon: 'pi pi-star', to: '/master/pangkat' },
+              { label: 'Golongan', icon: 'pi pi-hashtag', to: '/master/golongan' },
+              { label: 'Pangkat / Golongan', icon: 'pi pi-th-large', to: '/master/pangkat-gol' },
+              { label: 'Jenis Cuti', icon: 'pi pi-book', to: '/master/jenis-cuti' },
+              { label: 'Pola Hari Kerja', icon: 'pi pi-clock', to: '/master/pola-hari-kerja' },
+            ]
+          : []),
         { label: 'Tanggal Merah', icon: 'pi pi-calendar-times', to: '/master/tgl-merah' },
       ],
     })
