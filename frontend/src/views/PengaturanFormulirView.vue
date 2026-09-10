@@ -20,13 +20,20 @@ const calonPenandatangan = ref([])
 const calonLoading = ref(true)
 const selectedPenandatangan = ref(null)
 
-const calonOptionLabel = (o) => `${o.nama} (${o.jabatan?.jabatan || '-'})`
-
 async function loadCalonPenandatangan() {
   calonLoading.value = true
   try {
     const { data } = await http.get('/pengaturan-surat/calon-penandatangan')
-    calonPenandatangan.value = data.data || []
+    // PrimeVue Select memakai optionLabel juga sebagai field pencarian saat
+    // filter=true -- kalau optionLabel berupa function (bukan nama field
+    // string), pencarian bawaannya gagal resolve teksnya (hasil pencarian
+    // selalu kosong walau datanya ada). Jadi label gabungan "Nama (Jabatan)"
+    // dihitung sekali di sini jadi field string biasa ("label"), supaya
+    // optionLabel="label" bisa dipakai baik untuk tampilan maupun pencarian.
+    calonPenandatangan.value = (data.data || []).map((p) => ({
+      ...p,
+      label: `${p.nama} (${p.jabatan?.jabatan || '-'})`,
+    }))
   } catch (e) {
     calonPenandatangan.value = []
   } finally {
@@ -99,7 +106,7 @@ onMounted(() => {
           <Select
             v-model="selectedPenandatangan"
             :options="calonPenandatangan"
-            :optionLabel="calonOptionLabel"
+            optionLabel="label"
             optionValue="id"
             :loading="calonLoading"
             filter
