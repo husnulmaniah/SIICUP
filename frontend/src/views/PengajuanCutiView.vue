@@ -9,6 +9,7 @@ import { toApiDate } from '../utils/date'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
+import Menu from 'primevue/menu'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
@@ -622,6 +623,24 @@ async function doImport() {
   }
 }
 
+// ---- overlay menu: gabungkan Template/Import/Export (khusus isManage)
+// menjadi satu tombol trigger + dropdown, mengikuti pola "overlay menu".
+// Untuk role Pegawai biasa yang hanya punya aksi "Ajukan Cuti" (satu
+// aksi saja, tidak ada Template/Import/Export), tombol tetap tunggal
+// seperti semula -- tidak perlu dibungkus dropdown.
+const actionsMenuRef = ref(null)
+
+function toggleActionsMenu(event) {
+  actionsMenuRef.value?.toggle(event)
+}
+
+const actionsMenuItems = computed(() => [
+  { label: 'Ajukan Cuti', icon: 'pi pi-plus', command: () => openCreate() },
+  { label: 'Template', icon: 'pi pi-download', command: () => downloadFile('/pengajuan-cuti/template', 'template_pengajuan_cuti.xlsx') },
+  { label: 'Import', icon: 'pi pi-upload', command: () => openImport() },
+  { label: 'Export', icon: 'pi pi-file-export', command: () => downloadFile('/pengajuan-cuti/export', 'data_pengajuan_cuti.xlsx') },
+])
+
 onMounted(() => {
   loadOptions()
   fetchList()
@@ -638,19 +657,26 @@ onMounted(() => {
     </p>
 
     <div class="card">
+      <SelectButton
+        v-model="statusFilter"
+        :options="statusFilterOptions"
+        optionLabel="label"
+        optionValue="value"
+        class="tab-filter"
+        style="width: 100%; flex-wrap: wrap"
+      />
+
       <div class="toolbar-actions" style="justify-content: space-between; margin-bottom: 1rem; align-items: flex-end; flex-wrap: wrap; gap: .75rem">
         <div class="entries-picker">
           <span class="entries-picker-label">Tampilkan</span>
           <Select v-model="pageSize" :options="entriesOptions" @change="onEntriesChange" />
         </div>
         <div class="toolbar-actions" style="align-items: center; flex-wrap: wrap">
-          <SelectButton v-model="statusFilter" :options="statusFilterOptions" optionLabel="label" optionValue="value" style="display: flex; flex-wrap: wrap" />
-          <Button v-if="isPegawai || isManage" icon="pi pi-plus" label="Ajukan Cuti" @click="openCreate" />
           <template v-if="isManage">
-            <Button icon="pi pi-download" label="Template" severity="secondary" outlined @click="downloadFile('/pengajuan-cuti/template', 'template_pengajuan_cuti.xlsx')" />
-            <Button icon="pi pi-upload" label="Import" severity="secondary" outlined @click="openImport" />
-            <Button icon="pi pi-file-export" label="Export" severity="secondary" outlined @click="downloadFile('/pengajuan-cuti/export', 'data_pengajuan_cuti.xlsx')" />
+            <Button icon="pi pi-chevron-down" iconPos="right" label="Menu" class="overlay-menu-trigger" @click="toggleActionsMenu" aria-haspopup="true" />
+            <Menu ref="actionsMenuRef" :model="actionsMenuItems" popup class="overlay-actions-menu" />
           </template>
+          <Button v-else-if="isPegawai" icon="pi pi-plus" label="Ajukan Cuti" @click="openCreate" />
         </div>
       </div>
 

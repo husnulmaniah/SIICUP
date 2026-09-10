@@ -236,3 +236,85 @@ button.p-paginator-page.p-paginator-page-selected {
   border-color: #26c0c7 !important;
   color: #fff !important;
 }
+
+/* ============================================================
+   Gaya "tab menu" (garis-bawah) untuk filter status yang sebelumnya
+   dirender sebagai SelectButton bergaya pil/tombol (Pengajuan Cuti,
+   Perubahan Data Pegawai). Class ini SENGAJA dipisah dari `.p-selectbutton`
+   biasa -- SelectButton lain di aplikasi (mis. pilihan mode import di
+   dalam dialog) tetap tampil sebagai tombol pil, tidak ikut berubah.
+   Tab aktif: teks teal + garis bawah teal tebal. Tab tidak aktif: teks
+   abu-abu. Seluruh baris tab dibatasi garis abu-abu tipis di bawahnya. ============================================================ */
+.tab-filter.p-selectbutton {
+  display: flex;
+  gap: 1.75rem;
+  border-bottom: 1px solid var(--p-surface-200, #e2e8f0);
+  margin-bottom: 1.25rem;
+}
+
+.tab-filter.p-selectbutton .p-togglebutton {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 0.05rem 0.75rem 0.05rem;
+  margin: 0 0 -1px 0;
+  border-bottom: 3px solid transparent !important;
+  color: var(--p-text-muted-color, #94a3b8);
+  font-weight: 500;
+}
+
+.tab-filter.p-selectbutton .p-togglebutton:hover {
+  background: transparent !important;
+  color: var(--p-text-color, #334155);
+}
+
+.tab-filter.p-selectbutton .p-togglebutton.p-togglebutton-checked {
+  background: transparent !important;
+  color: #14b8a6;
+  border-bottom-color: #14b8a6 !important;
+}
+
+.tab-filter.p-selectbutton .p-togglebutton.p-togglebutton-checked:hover {
+  color: #14b8a6;
+}
+
+.tab-filter.p-selectbutton .p-togglebutton-label {
+  font-size: .92rem;
+}
+
+/* ============================================================
+   Overlay menu untuk tombol Tambah/Template/Import/Export -- gabungan
+   beberapa tombol terpisah jadi satu tombol trigger ("Menu" + ikon
+   chevron-down) yang saat diklik membuka panel dropdown berisi setiap
+   aksi sebagai baris ikon+label, dengan garis pemisah tipis sebelum
+   aksi yang sifatnya berbeda (mis. Generate Akun dari Pegawai).
+   ============================================================ */
+.overlay-menu-trigger.p-button {
+  border-radius: 8px;
+}
+
+.overlay-actions-menu.p-menu {
+  min-width: 230px;
+  border-radius: 10px;
+  padding: .4rem;
+}
+
+.overlay-actions-menu .p-menu-item-link {
+  border-radius: 8px;
+  padding: .65rem .75rem;
+  gap: .65rem;
+}
+
+.overlay-actions-menu .p-menu-item-icon {
+  color: var(--p-text-muted-color, #94a3b8);
+  font-size: .9rem;
+}
+
+.overlay-actions-menu .p-menu-item-label {
+  font-size: .88rem;
+}
+
+.overlay-actions-menu .p-menu-separator {
+  margin: .35rem .25rem;
+}

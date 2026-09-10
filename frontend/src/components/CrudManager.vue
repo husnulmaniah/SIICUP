@@ -8,6 +8,7 @@ import { toApiDate } from '../utils/date'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
+import Menu from 'primevue/menu'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
@@ -492,6 +493,29 @@ async function submitGenerate() {
   }
 }
 
+// ---- overlay menu: gabungkan Tambah/Template/Import/Export (dan Generate
+// Akun, khusus tabel Akun Pengguna) menjadi satu tombol trigger + dropdown,
+// mengikuti pola "overlay menu" (tombol + panel berisi aksi ikon+label). ----
+const actionsMenuRef = ref(null)
+
+function toggleActionsMenu(event) {
+  actionsMenuRef.value?.toggle(event)
+}
+
+const actionsMenuItems = computed(() => {
+  const items = [
+    { label: 'Tambah', icon: 'pi pi-plus', command: () => openCreate() },
+    { label: 'Template', icon: 'pi pi-download', command: () => downloadTemplate() },
+    { label: 'Import', icon: 'pi pi-upload', command: () => openImportDialog() },
+    { label: 'Export', icon: 'pi pi-file-export', command: () => (isPegawaiTable.value ? openExportFilterDialog() : exportData()) },
+  ]
+  if (isUserTable.value) {
+    items.push({ separator: true })
+    items.push({ label: 'Generate Akun dari Pegawai', icon: 'pi pi-users', command: () => openGenerateDialog() })
+  }
+  return items
+})
+
 onMounted(() => {
   fetchList()
   loadRemoteOptions()
@@ -526,11 +550,8 @@ const canManage = computed(() => true) // route guard already restricts page acc
             <InputText v-model="search" :placeholder="config.searchPlaceholder || 'Cari...'" style="width: 100%" />
             <InputIcon class="pi pi-search" />
           </IconField>
-          <Button icon="pi pi-plus" label="Tambah" @click="openCreate" />
-          <Button icon="pi pi-download" label="Template" severity="secondary" outlined @click="downloadTemplate" />
-          <Button icon="pi pi-upload" label="Import" severity="secondary" outlined @click="openImportDialog" />
-          <Button icon="pi pi-file-export" label="Export" severity="secondary" outlined @click="isPegawaiTable ? openExportFilterDialog() : exportData()" />
-          <Button v-if="isUserTable" icon="pi pi-users" label="Generate Akun dari Pegawai" severity="help" outlined @click="openGenerateDialog" />
+          <Button icon="pi pi-chevron-down" iconPos="right" label="Menu" class="overlay-menu-trigger" @click="toggleActionsMenu" aria-haspopup="true" />
+          <Menu ref="actionsMenuRef" :model="actionsMenuItems" popup class="overlay-actions-menu" />
         </div>
       </div>
 

@@ -231,9 +231,14 @@ async function downloadSk(row) {
     <p class="page-subtitle">Tinjau & setujui/tolak pengajuan perubahan data diri yang dikirim pegawai. Jika disetujui, data pegawai dan akun pegawai terkait diperbarui otomatis.</p>
 
     <div class="card">
-      <div style="margin-bottom: 1rem">
-        <SelectButton v-model="statusFilter" :options="statusFilterOptions" optionLabel="label" optionValue="value" style="display: flex; flex-wrap: wrap" />
-      </div>
+      <SelectButton
+        v-model="statusFilter"
+        :options="statusFilterOptions"
+        optionLabel="label"
+        optionValue="value"
+        class="tab-filter"
+        style="width: 100%; flex-wrap: wrap"
+      />
 
       <div class="responsive-table-wrap">
         <DataTable :value="items" :loading="loading" dataKey="id" stripedRows size="small" style="min-width: 640px">
