@@ -93,6 +93,28 @@ func namaOrDash(s string) string {
 	return s
 }
 
+// truncateToWidth shortens s (adding a trailing "...") so it renders within
+// maxWidth at the given font size. Used as a safety net for free-text
+// fields (nama, jabatan, unit kerja) on the printed forms: those columns are
+// sized for typical values, but an unusually long one should never be
+// allowed to visually collide with a neighboring column/label -- truncating
+// is far less confusing on a printed government form than overlapping text.
+func truncateToWidth(s string, maxWidth, size float64) string {
+	if utils.TextWidth(s, size) <= maxWidth {
+		return s
+	}
+	const ellipsis = "..."
+	r := []rune(s)
+	for len(r) > 1 {
+		r = r[:len(r)-1]
+		trimmed := strings.TrimRight(string(r), " ")
+		if utils.TextWidth(trimmed+ellipsis, size) <= maxWidth {
+			return trimmed + ellipsis
+		}
+	}
+	return ellipsis
+}
+
 // drawLetterhead draws the shared "PEMERINTAH KABUPATEN MOROWALI UTARA /
 // DINAS PENDIDIKAN DAN KEBUDAYAAN DAERAH / ... / KOLONODALE" header with the
 // instansi logo, followed by a horizontal rule. Returns the yTop just below
@@ -135,31 +157,37 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, pe
 
 	drawLetterhead(p, marginX, rightX)
 
+	// Isi surat (badan/body letter, di bawah kop) dipakai ukuran 12 -- lebih
+	// besar dari kop/tabel formulir lain -- supaya tampilan suratnya penuh
+	// mengisi halaman A4 selayaknya surat resmi cetak, bukan terlihat kosong
+	// di bagian bawah. Jarak antar baris (increment y) ikut diskalakan naik
+	// mengikuti ukuran font ini (kira-kira x1.2 dari versi ukuran 10 lama)
+	// supaya tetap proporsional dan tidak bertumpukan.
 	y := 112.0
 	nomor := fmt.Sprintf("800.1.11.4/     /Disdikbud /%s/ %d", romanMonth(tglApproval.Month()), tglApproval.Year())
-	p.SetFont(false, 10)
+	p.SetFont(false, 12)
 	p.Text(marginX, y, "Nomor")
 	p.Text(marginX+68, y, ": "+nomor)
-	y += 15
+	y += 18
 	p.Text(marginX, y, "Lampiran")
 	p.Text(marginX+68, y, ": Satu Berkas")
-	y += 15
+	y += 18
 	p.Text(marginX, y, "Perihal")
 	p.Text(marginX+68, y, ": Rekomendasi Izin Cuti")
-	y += 28
+	y += 32
 
-	p.SetFont(true, 10)
+	p.SetFont(true, 12)
 	p.Text(marginX, y, "Yth. Bupati Morowali Utara")
-	y += 14
+	y += 17
 	p.Text(marginX, y, "Cq Kepala Badan Kepegawaian dan")
-	y += 14
+	y += 17
 	p.Text(marginX, y, "Pengembangan SDM")
-	y += 14
-	p.SetFont(false, 10)
+	y += 17
+	p.SetFont(false, 12)
 	p.Text(marginX, y, "Di -")
-	y += 14
+	y += 17
 	p.Text(marginX+30, y, "Tempat")
-	y += 26
+	y += 30
 
 	jenisNama := ""
 	if item.JenisCuti != nil {
@@ -170,23 +198,23 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, pe
 		"Menindak lanjuti surat permohonan %s atas nama %s; Tanggal %s dengan ini kami tidak keberatan dan menyetujui permohonan tersebut kami teruskan kepada Bapak untuk ditindaklanjuti (Permohonan Terlampir).",
 		jenisNama, strings.ToUpper(pegawai.Nama), tglRange,
 	)
-	y = p.MultilineText(marginX, y, rightX-marginX, 14, para1) + 12
+	y = p.MultilineText(marginX, y, rightX-marginX, 17, para1) + 14
 
 	para2 := "Demikian Surat Permohonan Cuti ini kami teruskan kepada Bapak, atas pertimbangan Bapak kami ucapkan terima kasih."
-	y = p.MultilineText(marginX, y, rightX-marginX, 14, para2) + 34
+	y = p.MultilineText(marginX, y, rightX-marginX, 17, para2) + 40
 
 	sigX := pageW - 230
 	p.Text(sigX, y, "Kolonodale, "+formatDateID(tglApproval)+".")
-	y += 15
+	y += 18
 	p.Text(sigX, y, "Kepala Dinas")
-	y += 58
+	y += 64
 
 	kepalaDinasNama := namaOrDash(pengaturan.NamaKepalaDinas)
-	p.SetFont(true, 10)
+	p.SetFont(true, 12)
 	p.Text(sigX, y, kepalaDinasNama)
-	p.Line(sigX, y+3, sigX+utils.TextWidth(kepalaDinasNama, 10), y+3)
-	y += 14
-	p.SetFont(false, 10)
+	p.Line(sigX, y+3, sigX+utils.TextWidth(kepalaDinasNama, 12), y+3)
+	y += 16
+	p.SetFont(false, 12)
 	p.Text(sigX, y, "NIP: "+namaOrDash(pengaturan.NipKepalaDinas)+".")
 
 	return doc.Output()
@@ -233,11 +261,15 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	p.Text(blockX+20, y, "Kolonodale")
 
 	y = 218
-	p.SetFont(true, 12)
+	p.SetFont(true, 13)
 	p.TextCentered(pageW/2, y, "FORMULIR PERMINTAAN DAN PEMBERIAN CUTI")
-	y += 20
+	y += 24
 
 	// ---- tabel utama ----
+	// Ukuran huruf isi tabel (I-VII) dinaikkan (mengikuti perlakuan yang
+	// sama pada Surat Rekomendasi) dan tinggi tiap baris ikut diperbesar
+	// proporsional, supaya keseluruhan tabel memenuhi kertas Legal dengan
+	// baik alih-alih menyisakan banyak ruang kosong di bagian bawah.
 	tableX := marginX
 	tableTop := y
 	labelColW := 20.0
@@ -247,8 +279,8 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 
 	rowBottom := func(rowTop, rowH float64, romawi string) float64 {
 		bottom := rowTop + rowH
-		p.SetFont(true, 9)
-		p.Text(tableX+3, rowTop+13, romawi)
+		p.SetFont(true, 10)
+		p.Text(tableX+3, rowTop+15, romawi)
 		p.Line(tableX, bottom, rightX, bottom)
 		p.Line(tableX+labelColW, rowTop, tableX+labelColW, bottom)
 		return bottom
@@ -256,10 +288,10 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 
 	// Row I: Data Pegawai
 	rowTop := tableTop
-	rowH := 60.0
-	p.SetFont(true, 9)
-	p.Text(contentX+pad, rowTop+13, "Data Pegawai")
-	p.SetFont(false, 9)
+	rowH := 76.0
+	p.SetFont(true, 10.5)
+	p.Text(contentX+pad, rowTop+15, "Data Pegawai")
+	p.SetFont(false, 10.5)
 	rightHalfX := contentX + contentW*0.62
 	jabatanNama := "-"
 	if pegawai.Jabatan != nil {
@@ -269,18 +301,29 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	if pegawai.UnitKerja != nil {
 		unitNama = pegawai.UnitKerja.Unit
 	}
-	p.Text(contentX+pad, rowTop+29, "Nama")
-	p.SetFont(true, 9)
-	p.Text(contentX+pad+55, rowTop+29, ": "+strings.ToUpper(pegawai.Nama))
-	p.SetFont(false, 9)
-	p.Text(rightHalfX, rowTop+29, "NIP")
-	p.Text(rightHalfX+40, rowTop+29, ": "+namaOrDash(pegawai.NIP))
-	p.Text(contentX+pad, rowTop+43, "Jabatan")
-	p.Text(contentX+pad+55, rowTop+43, ": "+jabatanNama)
-	p.Text(rightHalfX, rowTop+43, "Masa Kerja")
-	p.Text(rightHalfX+55, rowTop+43, ": "+masaKerjaText(pegawai.TMT, tglApproval))
-	p.Text(contentX+pad, rowTop+57, "Unit Kerja")
-	p.Text(contentX+pad+55, rowTop+57, ": "+unitNama)
+	// Baris "Nama" & "Jabatan" berbagi baris yang sama dengan "NIP"/"Masa
+	// Kerja" di kolom kanan -- nilai yang tidak biasa panjangnya dipotong
+	// (truncateToWidth) supaya tidak pernah bertumpukan dengan label kolom
+	// kanan tersebut. Baris "Unit Kerja" berdiri sendiri (tanpa pasangan di
+	// kolom kanan) sehingga diberi jatah lebar penuh sampai tepi tabel.
+	valueX := contentX + pad + 58
+	pairedMaxW := rightHalfX - valueX - 6
+	fullMaxW := rightX - valueX - pad
+	namaValue := truncateToWidth(strings.ToUpper(pegawai.Nama), pairedMaxW, 10.5)
+	jabatanValue := truncateToWidth(jabatanNama, pairedMaxW, 10.5)
+	unitValue := truncateToWidth(unitNama, fullMaxW, 10.5)
+	p.Text(contentX+pad, rowTop+34, "Nama")
+	p.SetFont(true, 10.5)
+	p.Text(valueX, rowTop+34, ": "+namaValue)
+	p.SetFont(false, 10.5)
+	p.Text(rightHalfX, rowTop+34, "NIP")
+	p.Text(rightHalfX+42, rowTop+34, ": "+namaOrDash(pegawai.NIP))
+	p.Text(contentX+pad, rowTop+51, "Jabatan")
+	p.Text(valueX, rowTop+51, ": "+jabatanValue)
+	p.Text(rightHalfX, rowTop+51, "Masa Kerja")
+	p.Text(rightHalfX+58, rowTop+51, ": "+masaKerjaText(pegawai.TMT, tglApproval))
+	p.Text(contentX+pad, rowTop+68, "Unit Kerja")
+	p.Text(valueX, rowTop+68, ": "+unitValue)
 	y = rowBottom(rowTop, rowH, "I")
 
 	// Row II: Jenis Cuti yang di ambil -- dirender sebagai tabel bergrid
@@ -288,10 +331,10 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	// untuk kelompok kiri 1-3 dan kanan 4-6, dengan garis horizontal di
 	// antara tiap baris) supaya semirip mungkin dengan formulir cetak asli.
 	rowTop = y
-	rowH = 60.0
-	p.SetFont(true, 9)
-	p.Text(contentX+pad, rowTop+13, "Jenis Cuti yang di ambil")
-	p.SetFont(false, 8.5)
+	rowH = 80.0
+	p.SetFont(true, 10.5)
+	p.Text(contentX+pad, rowTop+15, "Jenis Cuti yang di ambil")
+	p.SetFont(false, 10)
 	selected := jenisCutiCheckboxIndex(func() string {
 		if item.JenisCuti != nil {
 			return item.JenisCuti.Jenis
@@ -307,19 +350,19 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 		label string
 	}{{4, "Cuti Besar"}, {5, "Cuti Melahirkan"}, {6, "Cuti di Luar Tanggungan Negara"}}
 	midX := contentX + contentW*0.52
-	checkSize := 9.0
+	checkSize := 10.5
 	blankColW := 6.0
-	checkColW := 22.0
+	checkColW := 24.0
 	trailColW := 6.0
 	leftNumX := contentX + blankColW
-	leftLabelX := leftNumX + 14.0
+	leftLabelX := leftNumX + 16.0
 	leftCheckX := midX - checkColW
 	rightNumX := midX + blankColW
-	rightLabelX := rightNumX + 14.0
+	rightLabelX := rightNumX + 16.0
 	rightCheckX := rightX - trailColW - checkColW
 
-	gridTop := rowTop + 20.0
-	itemH := (rowH - 20.0) / 3.0
+	gridTop := rowTop + 22.0
+	itemH := (rowH - 22.0) / 3.0
 	for i := 0; i < 3; i++ {
 		cellTop := gridTop + itemH*float64(i)
 		ly := cellTop + itemH*0.75
@@ -355,24 +398,26 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	// Row III: Alasan Cuti -- tinggi baris menyesuaikan panjang teks alasan
 	// (bebas diisi pegawai) supaya tidak pernah meluber ke baris berikutnya.
 	rowTop = y
-	alasanLines := utils.WrapText(namaOrDash(item.AlasanCuti), contentW-2*pad, 9)
-	rowH = 22.0 + float64(len(alasanLines))*12
-	if rowH < 34 {
-		rowH = 34
+	alasanFontSize := 10.5
+	alasanLineHeight := 15.0
+	alasanLines := utils.WrapText(namaOrDash(item.AlasanCuti), contentW-2*pad, alasanFontSize)
+	rowH = 27.0 + float64(len(alasanLines))*alasanLineHeight
+	if rowH < 44 {
+		rowH = 44
 	}
-	p.SetFont(true, 9)
-	p.Text(contentX+pad, rowTop+13, "Alasan Cuti")
-	p.SetFont(false, 9)
-	p.MultilineText(contentX+pad, rowTop+29, contentW-2*pad, 12, namaOrDash(item.AlasanCuti))
+	p.SetFont(true, 10.5)
+	p.Text(contentX+pad, rowTop+15, "Alasan Cuti")
+	p.SetFont(false, alasanFontSize)
+	p.MultilineText(contentX+pad, rowTop+34, contentW-2*pad, alasanLineHeight, namaOrDash(item.AlasanCuti))
 	y = rowBottom(rowTop, rowH, "III")
 
 	// Row IV: Lama Cuti
 	rowTop = y
-	rowH = 34.0
-	p.SetFont(true, 9)
-	p.Text(contentX+pad, rowTop+13, "Lama Cuti")
-	p.SetFont(false, 9)
-	p.Text(contentX+pad, rowTop+29, fmt.Sprintf("Selama %d Hari   Mulai Tanggal %s", item.JumlahHari, formatTanggalRentang(item.TglMulai, item.TglSelesai)))
+	rowH = 44.0
+	p.SetFont(true, 10.5)
+	p.Text(contentX+pad, rowTop+15, "Lama Cuti")
+	p.SetFont(false, 10.5)
+	p.Text(contentX+pad, rowTop+34, fmt.Sprintf("Selama %d Hari   Mulai Tanggal %s", item.JumlahHari, formatTanggalRentang(item.TglMulai, item.TglSelesai)))
 	y = rowBottom(rowTop, rowH, "IV")
 
 	// Row V: Catatan Cuti (riwayat kuota cuti tahunan N-2..N + legenda jenis
@@ -381,31 +426,31 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	// dan daftar legenda 1-6 di kanan (kolom kosong | nomor | label, dengan
 	// garis antar baris), meniru formulir cetak asli.
 	rowTop = y
-	rowH = 98.0
-	p.SetFont(true, 9)
-	p.Text(contentX+pad, rowTop+13, "Catatan Cuti")
+	rowH = 128.0
+	p.SetFont(true, 10.5)
+	p.Text(contentX+pad, rowTop+15, "Catatan Cuti")
 	quotaW := contentW * 0.5
 	blankColW2 := 6.0
 	quotaEnd := contentX + quotaW
 	numColX := contentX + blankColW2
-	colTahunX := numColX + 14.0
+	colTahunX := numColX + 16.0
 	remaining := quotaEnd - colTahunX
 	colSisaX := colTahunX + remaining*0.40
 	colKetX := colSisaX + remaining*0.32
-	p.SetFont(false, 8)
+	p.SetFont(false, 9.5)
 
 	// Tabel kuota kiri: baris "1 Cuti Tahunan" (judul, meniru penomoran
 	// jenis cuti #1), lalu baris header Tahun/Sisa/Keterangan, lalu 3 baris
 	// data (N-1/N-2/N) -- persis urutan & struktur pada formulir cetak asli.
-	gridTop3 := rowTop + 18.0
-	rowHLeft := (rowH - 18.0) / 5.0
+	gridTop3 := rowTop + 20.0
+	rowHLeft := (rowH - 20.0) / 5.0
 	titleTop := gridTop3
-	titleLy := titleTop + rowHLeft*0.72
+	titleLy := titleTop + rowHLeft*0.68
 	p.Text(numColX+2, titleLy, "1")
 	p.Text(colTahunX+3, titleLy, "Cuti Tahunan")
 
 	headerTop := gridTop3 + rowHLeft
-	headerLy := headerTop + rowHLeft*0.72
+	headerLy := headerTop + rowHLeft*0.68
 	p.Text(colTahunX+3, headerLy, "Tahun")
 	p.Text(colSisaX+3, headerLy, "Sisa")
 	p.Text(colKetX+3, headerLy, "Keterangan")
@@ -416,7 +461,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	}{{"N-1", item.TglMulai.Year() - 1}, {"N-2", item.TglMulai.Year() - 2}, {"N", item.TglMulai.Year()}}
 	for i, yr := range years {
 		cellTop := gridTop3 + rowHLeft*float64(2+i)
-		ly := cellTop + rowHLeft*0.72
+		ly := cellTop + rowHLeft*0.68
 		p.Text(colTahunX+3, ly, yr.label)
 		if jc, ok := jatah[yr.year]; ok {
 			p.Text(colSisaX+3, ly, fmt.Sprintf("%d", jc.Sisa()))
@@ -433,13 +478,13 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	}
 
 	legendNumX := quotaEnd + blankColW2
-	legendLabelX := legendNumX + 14.0
+	legendLabelX := legendNumX + 16.0
 	legendTrailW := 6.0
-	itemH2 := (rowH - 18.0) / 6.0
+	itemH2 := (rowH - 20.0) / 6.0
 	legend := []string{"Cuti Tahunan", "Cuti Sakit", "Cuti Karena Alasan Penting", "Cuti Besar", "Cuti Melahirkan", "Cuti di Luar Tanggungan Negara"}
 	for i, l := range legend {
 		cellTop := gridTop3 + itemH2*float64(i)
-		ly := cellTop + itemH2*0.72
+		ly := cellTop + itemH2*0.68
 		p.Text(legendNumX+2, ly, fmt.Sprintf("%d", i+1))
 		p.Text(legendLabelX+3, ly, l)
 		if i > 0 {
@@ -461,21 +506,26 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 
 	// Row VI: Alamat Selama Menjalankan Cuti + tanda tangan pegawai
 	rowTop = y
-	rowH = 98.0
-	p.SetFont(true, 9)
-	p.Text(contentX+pad, rowTop+13, "Alamat Selama Menjalankan Cuti")
-	p.SetFont(false, 9)
-	p.MultilineText(contentX+pad, rowTop+29, rightHalfX-contentX-pad-8, 12, namaOrDash(item.AlamatSelamaCuti))
-	p.Text(rightHalfX, rowTop+29, "Telp: "+namaOrDash(pegawai.NoHP))
-	p.SetFont(false, 8.5)
-	p.TextCentered(rightHalfX+70, rowTop+45, "Hormat Saya")
-	p.SetFont(true, 9)
-	namaPegawaiUpper := strings.ToUpper(pegawai.Nama)
-	p.TextCentered(rightHalfX+70, rowTop+82, namaPegawaiUpper)
-	w := utils.TextWidth(namaPegawaiUpper, 9)
-	p.Line(rightHalfX+70-w/2, rowTop+85, rightHalfX+70+w/2, rowTop+85)
-	p.SetFont(false, 8.5)
-	p.TextCentered(rightHalfX+70, rowTop+96, "NIP: "+namaOrDash(pegawai.NIP)+".")
+	rowH = 128.0
+	p.SetFont(true, 10.5)
+	p.Text(contentX+pad, rowTop+15, "Alamat Selama Menjalankan Cuti")
+	p.SetFont(false, 10.5)
+	p.MultilineText(contentX+pad, rowTop+34, rightHalfX-contentX-pad-8, 14, namaOrDash(item.AlamatSelamaCuti))
+	p.Text(rightHalfX, rowTop+34, "Telp: "+namaOrDash(pegawai.NoHP))
+	// Blok tanda tangan pegawai diposisikan di tengah kolom kanan (bukan
+	// titik tetap) dan nama yang tidak biasa panjangnya dipotong supaya
+	// tidak pernah meluber melewati batas kanan tabel.
+	sigColCenterVI := rightHalfX + (rightX-rightHalfX)/2
+	sigMaxWVI := (rightX - rightHalfX) - 16
+	p.SetFont(false, 10)
+	p.TextCentered(sigColCenterVI, rowTop+58, "Hormat Saya")
+	p.SetFont(true, 10.5)
+	namaPegawaiUpper := truncateToWidth(strings.ToUpper(pegawai.Nama), sigMaxWVI, 10.5)
+	p.TextCentered(sigColCenterVI, rowTop+100, namaPegawaiUpper)
+	w := utils.TextWidth(namaPegawaiUpper, 10.5)
+	p.Line(sigColCenterVI-w/2, rowTop+103, sigColCenterVI+w/2, rowTop+103)
+	p.SetFont(false, 10)
+	p.TextCentered(sigColCenterVI, rowTop+116, "NIP: "+namaOrDash(pegawai.NIP)+".")
 	y = rowBottom(rowTop, rowH, "VI")
 
 	// Row VII: Pertimbangan Atasan Langsung -- 4 opsi hanya dibingkai pada
@@ -483,20 +533,20 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	// menyisakan area kosong besar di bawahnya untuk catatan/tanda tangan
 	// atasan langsung), diikuti kolom tanda tangan Kepala Dinas di kanan.
 	rowTop = y
-	rowH = 92.0
-	p.SetFont(true, 9)
-	p.Text(contentX+pad, rowTop+13, "Pertimbangan Atasan Langsung")
+	rowH = 120.0
+	p.SetFont(true, 10.5)
+	p.Text(contentX+pad, rowTop+15, "Pertimbangan Atasan Langsung")
 	opts := []string{"Disetujui", "Perubahan", "Ditangguhkan", "Tidak Disetujui"}
 	optRegionEnd := rightHalfX
 	optW := (optRegionEnd - contentX) / float64(len(opts))
-	gridTopVII := rowTop + 18.0
-	optHeaderH := 16.0
-	checkSize2 := 8.0
-	p.SetFont(false, 8)
+	gridTopVII := rowTop + 20.0
+	optHeaderH := 19.0
+	checkSize2 := 9.5
+	p.SetFont(false, 9.5)
 	for i, opt := range opts {
 		colStart := contentX + optW*float64(i)
 		colCenter := colStart + optW/2
-		tw := utils.TextWidth(opt, 8)
+		tw := utils.TextWidth(opt, 9.5)
 		// pengajuan hanya dicetak setelah status "disetujui", jadi opsi
 		// pertama otomatis ditandai centang -- langsung di dalam sel,
 		// tanpa kotak tambahan (meniru gaya centang pada Baris II).
@@ -516,15 +566,16 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	dividerX := optRegionEnd
 	p.Line(dividerX, rowTop, dividerX, rowTop+rowH)
 	sigColCenter := dividerX + (rightX-dividerX)/2
-	p.SetFont(false, 8.5)
-	p.TextCentered(sigColCenter, rowTop+27, "Kepala Dinas")
-	kepalaDinasNama := namaOrDash(pengaturan.NamaKepalaDinas)
-	p.SetFont(true, 9)
-	p.TextCentered(sigColCenter, rowTop+70, kepalaDinasNama)
-	w2 := utils.TextWidth(kepalaDinasNama, 9)
-	p.Line(sigColCenter-w2/2, rowTop+73, sigColCenter+w2/2, rowTop+73)
-	p.SetFont(false, 8.5)
-	p.TextCentered(sigColCenter, rowTop+84, "NIP: "+namaOrDash(pengaturan.NipKepalaDinas)+".")
+	sigMaxWVII := (rightX - dividerX) - 16
+	p.SetFont(false, 10)
+	p.TextCentered(sigColCenter, rowTop+35, "Kepala Dinas")
+	kepalaDinasNama := truncateToWidth(namaOrDash(pengaturan.NamaKepalaDinas), sigMaxWVII, 10.5)
+	p.SetFont(true, 10.5)
+	p.TextCentered(sigColCenter, rowTop+91, kepalaDinasNama)
+	w2 := utils.TextWidth(kepalaDinasNama, 10.5)
+	p.Line(sigColCenter-w2/2, rowTop+94, sigColCenter+w2/2, rowTop+94)
+	p.SetFont(false, 10)
+	p.TextCentered(sigColCenter, rowTop+108, "NIP: "+namaOrDash(pengaturan.NipKepalaDinas)+".")
 	y = rowBottom(rowTop, rowH, "VII")
 
 	// bingkai luar tabel
