@@ -157,6 +157,10 @@ Setiap tabel punya 3 tombol:
 
    Setiap baris divalidasi; jika ada baris yang gagal (misal kolom wajib kosong, atau relasi seperti nama Jabatan belum terdaftar), sistem akan menampilkan nomor baris dan pesan errornya tanpa membatalkan baris lain yang valid. Baris yang kosong sepenuhnya di excel otomatis dilewati (tidak dihitung gagal).
 
+   Khusus menu **Data Pegawai**: memilih "Hapus semua data lama, lalu import" akan menghapus seluruh data pegawai beserta riwayat pengajuan cuti dan jatah cuti tahunan yang terhubung ke pegawai tersebut (karena identitas pegawainya diganti total oleh data baru dari excel). Akun user yang terhubung ke pegawai lama **tidak dihapus**, hanya terlepas hubungannya (kolom "Hubungkan ke Pegawai" jadi kosong) dan bisa dihubungkan ulang lewat menu Akun Pengguna setelah import selesai.
+
+   Menu **Data Pegawai** juga menyediakan filter saat **Export**: bisa memilih hanya mengekspor pegawai dengan tempat tugas "Dinas/Kantor" atau "Sekolah" (dideteksi dari kata "Sekolah" di kolom Tempat Tugas — pola yang sama dipakai untuk menghitung hari kerja otomatis), dan/atau berdasarkan Status Kepegawaian (PNS, PPPK, PPPK Paruh Waktu, atau status lain yang dikelola lewat menu Status Pegawai).
+
 Untuk kolom yang berupa relasi (misalnya Jabatan, Unit Kerja, Pangkat/Golongan pada data Pegawai), isi menggunakan **nama/teksnya** (bukan ID) — sistem otomatis mencocokkan ke data master yang sudah ada. Pastikan data master tersebut sudah dibuat lebih dulu sebelum import data yang mereferensikannya.
 
 Semua kolom **tanggal** (TMT, Tanggal Mulai/Selesai Cuti, Tanggal Merah, dll) menggunakan format **DD-MM-YYYY** (contoh: `17-08-2026`), baik di template, hasil export, maupun saat mengisi ulang file untuk diimport.

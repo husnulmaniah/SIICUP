@@ -115,6 +115,25 @@ func Seed(db *gorm.DB) {
 	log.Println("  siti (pegawai)/ admin123")
 }
 
+// EnsureStatusPegawai melengkapi data master Status (status kepegawaian)
+// dengan kategori PNS/PPPK/PPPK Paruh Waktu yang dipakai untuk memfilter
+// export data pegawai, tanpa menghapus/mengubah nilai yang sudah ada
+// (misalnya "Aktif"/"Nonaktif"). Idempotent, dijalankan setiap server start.
+func EnsureStatusPegawai(db *gorm.DB) {
+	wanted := []string{"PNS", "PPPK", "PPPK Paruh Waktu"}
+	for _, nama := range wanted {
+		var existing models.Status
+		if err := db.Where("status ILIKE ?", nama).First(&existing).Error; err == nil {
+			continue
+		}
+		if err := db.Create(&models.Status{Status: nama}).Error; err != nil {
+			log.Printf("gagal menambahkan status pegawai '%s': %v", nama, err)
+		} else {
+			log.Printf("status pegawai '%s' ditambahkan", nama)
+		}
+	}
+}
+
 // EnsureJenisCuti melengkapi data master Jenis Cuti dengan jenis-jenis yang
 // dibutuhkan alur kelengkapan berkas (Cuti Tahunan Umroh, Cuti Alasan
 // Penting), tanpa mengganggu database yang sudah berjalan. Dijalankan setiap

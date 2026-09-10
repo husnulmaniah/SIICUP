@@ -538,12 +538,28 @@ func deletePegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	utils.Success(w, "pegawai berhasil dihapus", nil)
 }
 
+// exportPegawai supports two optional filters, applied independently (both
+// may be combined): tempat_tugas=dinas|sekolah filters by the same "sekolah"
+// keyword used to auto-detect the work-week pattern, and id_status filters
+// by a specific Status master row (e.g. PNS/PPPK/PPPK Paruh Waktu/Aktif/dst).
 func exportPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var items []models.Pegawai
 	query := db.Omit(dokumenFileFields...)
 	for _, p := range pegawaiPreloads {
 		query = query.Preload(p)
 	}
+
+	q := r.URL.Query()
+	switch strings.ToLower(strings.TrimSpace(q.Get("tempat_tugas"))) {
+	case "sekolah":
+		query = query.Where("tempat_tgs ILIKE ?", "%sekolah%")
+	case "dinas":
+		query = query.Where("tempat_tgs IS NULL OR tempat_tgs NOT ILIKE ?", "%sekolah%")
+	}
+	if idStatus := strings.TrimSpace(q.Get("id_status")); idStatus != "" {
+		query = query.Where("id_status = ?", idStatus)
+	}
+
 	query.Order("nama asc").Find(&items)
 	f, err := utils.ExportData(items, pegawaiExcelColumns(db))
 	if err != nil {
@@ -551,6 +567,39 @@ func exportPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	writeXlsxResponse(w, f, "data_pegawai.xlsx")
+}
+
+// deleteAllPegawaiCascade wipes every pegawai row for "replace" imports.
+// A plain DELETE on pegawai fails because several tables reference it via
+// foreign keys (user.id_pegawai, jatah_cuti.id_pegawai, pengajuan_cuti's
+// id_pegawai/id_atasan_approve, pengajuan_dokumen via pengajuan_cuti, and
+// pegawai's own self-referencing id_atasan). Since a fresh pegawai import
+// replaces employee identities wholesale, their historical leave data
+// (pengajuan cuti + dokumen, jatah cuti) is cleared along with them, and any
+// user account that was linked to a pegawai is unlinked (not deleted) so an
+// admin can relink it afterwards.
+func deleteAllPegawaiCascade(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		g := func(m interface{}) error {
+			return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(m).Error
+		}
+		if err := g(&models.PengajuanDokumen{}); err != nil {
+			return err
+		}
+		if err := g(&models.PengajuanCuti{}); err != nil {
+			return err
+		}
+		if err := g(&models.JatahCuti{}); err != nil {
+			return err
+		}
+		if err := tx.Exec(`UPDATE "user" SET id_pegawai = NULL WHERE id_pegawai IS NOT NULL`).Error; err != nil {
+			return err
+		}
+		if err := g(&models.Pegawai{}); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func importPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -571,8 +620,8 @@ func importPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	if isReplaceMode(r) {
-		if err := deleteAllRows(db, &models.Pegawai{}); err != nil {
-			utils.Error(w, http.StatusBadRequest, "gagal menghapus data lama (kemungkinan masih ada akun user/pengajuan cuti yang terhubung): "+err.Error())
+		if err := deleteAllPegawaiCascade(db); err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal menghapus data lama: "+err.Error())
 			return
 		}
 	}

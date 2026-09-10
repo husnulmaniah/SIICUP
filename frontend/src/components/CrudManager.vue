@@ -325,6 +325,42 @@ async function exportData() {
   await downloadFile(`${props.config.endpoint}/export`, `data_${props.config.endpoint.replace('/', '')}.xlsx`)
 }
 
+// ---- export dengan filter (khusus tabel Data Pegawai) ----
+const exportFilterDialogVisible = ref(false)
+const exportFilterTempatTugas = ref('')
+const exportFilterStatus = ref(null)
+const exportFilterTempatTugasOptions = [
+  { label: 'Semua Tempat Tugas', value: '' },
+  { label: 'Dinas / Kantor', value: 'dinas' },
+  { label: 'Sekolah', value: 'sekolah' },
+]
+
+function openExportFilterDialog() {
+  exportFilterTempatTugas.value = ''
+  exportFilterStatus.value = null
+  exportFilterDialogVisible.value = true
+}
+
+async function exportPegawaiFiltered() {
+  const params = {}
+  if (exportFilterTempatTugas.value) params.tempat_tugas = exportFilterTempatTugas.value
+  if (exportFilterStatus.value) params.id_status = exportFilterStatus.value
+  try {
+    const res = await http.get(`${props.config.endpoint}/export`, { params, responseType: 'blob' })
+    const blobUrl = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.setAttribute('download', `data_pegawai.xlsx`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(blobUrl)
+    exportFilterDialogVisible.value = false
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh file', detail: e.message, life: 4000 })
+  }
+}
+
 async function downloadFile(url, filename) {
   try {
     const res = await http.get(url, { responseType: 'blob' })
@@ -359,8 +395,11 @@ function onFileChosen(e) {
 function submitImport() {
   if (!importFile.value) return
   if (importMode.value === 'replace') {
+    const message = isPegawaiTable.value
+      ? 'Semua data pegawai akan DIHAPUS, termasuk riwayat pengajuan cuti & jatah cuti tahunan yang terhubung (akun user hanya akan terlepas, tidak terhapus), sebelum data dari file excel dimasukkan. Aksi ini tidak bisa dibatalkan. Lanjutkan?'
+      : 'Semua data yang sudah ada di tabel ini akan DIHAPUS sebelum data dari file excel dimasukkan. Aksi ini tidak bisa dibatalkan. Lanjutkan?'
     confirm.require({
-      message: 'Semua data yang sudah ada di tabel ini akan DIHAPUS sebelum data dari file excel dimasukkan. Aksi ini tidak bisa dibatalkan. Lanjutkan?',
+      message,
       header: 'Konfirmasi Hapus & Import Ulang',
       icon: 'pi pi-exclamation-triangle',
       acceptLabel: 'Ya, Hapus & Import',
@@ -426,7 +465,7 @@ const canManage = computed(() => true) // route guard already restricts page acc
           <Button icon="pi pi-plus" label="Tambah" @click="openCreate" />
           <Button icon="pi pi-download" label="Template" severity="secondary" outlined @click="downloadTemplate" />
           <Button icon="pi pi-upload" label="Import" severity="secondary" outlined @click="openImportDialog" />
-          <Button icon="pi pi-file-export" label="Export" severity="secondary" outlined @click="exportData" />
+          <Button icon="pi pi-file-export" label="Export" severity="secondary" outlined @click="isPegawaiTable ? openExportFilterDialog() : exportData()" />
         </div>
       </div>
 
@@ -520,7 +559,10 @@ const canManage = computed(() => true) // route guard already restricts page acc
       <div style="margin-bottom: 1rem">
         <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem">Jika ada data sebelumnya</label>
         <SelectButton v-model="importMode" :options="importModeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" style="display: flex; flex-wrap: wrap" />
-        <small v-if="importMode === 'replace'" style="color: #ef4444; display: block; margin-top: 0.4rem">
+        <small v-if="importMode === 'replace' && isPegawaiTable" style="color: #ef4444; display: block; margin-top: 0.4rem">
+          Semua data pegawai akan dihapus permanen, termasuk riwayat pengajuan cuti & jatah cuti tahunan yang terhubung. Akun user yang terhubung hanya akan terlepas (tidak terhapus).
+        </small>
+        <small v-else-if="importMode === 'replace'" style="color: #ef4444; display: block; margin-top: 0.4rem">
           Semua data lama di tabel ini akan dihapus permanen sebelum data baru dari file dimasukkan.
         </small>
       </div>
@@ -550,6 +592,37 @@ const canManage = computed(() => true) // route guard already restricts page acc
       <template #footer>
         <Button label="Tutup" severity="secondary" outlined @click="importDialogVisible = false" />
         <Button label="Upload & Import" icon="pi pi-upload" :loading="importing" :disabled="!importFile" @click="submitImport" />
+      </template>
+    </Dialog>
+
+    <!-- Export filter dialog (khusus Data Pegawai) -->
+    <Dialog v-model:visible="exportFilterDialogVisible" modal header="Export Data Pegawai" :style="{ width: '28rem', maxWidth: '95vw' }">
+      <p style="margin-top: 0; color: var(--p-text-muted-color); font-size: 0.9rem">
+        Pilih filter (opsional) sebelum mengunduh data pegawai ke excel. Kosongkan / pilih "Semua" untuk mengekspor seluruh data.
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 1rem">
+        <div>
+          <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem">Tempat Tugas</label>
+          <Select v-model="exportFilterTempatTugas" :options="exportFilterTempatTugasOptions" optionLabel="label" optionValue="value" style="width: 100%" />
+        </div>
+        <div>
+          <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem">Status Kepegawaian</label>
+          <Select
+            v-model="exportFilterStatus"
+            :options="remoteOptions.status || []"
+            optionLabel="status"
+            optionValue="id"
+            showClear
+            filter
+            placeholder="Semua Status"
+            style="width: 100%"
+          />
+          <small style="color: var(--p-text-muted-color)">Tambah/kelola pilihan status (mis. PNS, PPPK, PPPK Paruh Waktu) lewat menu Status Pegawai.</small>
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Batal" severity="secondary" outlined @click="exportFilterDialogVisible = false" />
+        <Button label="Export" icon="pi pi-file-export" @click="exportPegawaiFiltered" />
       </template>
     </Dialog>
 
