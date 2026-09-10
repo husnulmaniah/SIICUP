@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"cuti-app/middleware"
 	"cuti-app/models"
@@ -30,22 +31,31 @@ func RegisterPengaturanSuratRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/pengaturan-surat/calon-penandatangan", manage(func(w http.ResponseWriter, r *http.Request) { listCalonPenandatangan(w, r, db) }))
 }
 
-// jabatanPenandatangan adalah nama jabatan (huruf kecil) yang pemegangnya
-// boleh dipilih sebagai penandatangan formulir cuti -- normalnya Kepala
-// Dinas, tapi Sekretaris Dinas Pendidikan dan Kebudayaan Daerah juga boleh
-// (mis. saat jabatan Kepala Dinas sedang lowong/menandatangani sebagai
-// pelaksana tugas).
-var jabatanPenandatangan = []string{"kepala dinas", "sekretaris dinas pendidikan dan kebudayaan daerah"}
+// jabatanPenandatanganKeywords adalah potongan nama jabatan (huruf kecil)
+// yang pemegangnya boleh dipilih sebagai penandatangan formulir cuti --
+// dicocokkan sebagai SUBSTRING (bukan sama-persis-seluruhnya), karena nama
+// jabatan asli biasanya lebih panjang/lengkap, mis. "Kepala Dinas
+// Pendidikan dan Kebudayaan Daerah" (bukan cuma "Kepala Dinas"). Sekretaris
+// Dinas Pendidikan dan Kebudayaan Daerah juga boleh (mis. saat jabatan
+// Kepala Dinas sedang lowong/menandatangani sebagai pelaksana tugas).
+var jabatanPenandatanganKeywords = []string{"%kepala dinas%", "%sekretaris dinas pendidikan dan kebudayaan daerah%"}
 
 // listCalonPenandatangan mengambil data pegawai yang jabatannya cocok
-// dengan jabatanPenandatangan, supaya halaman Pengaturan Formulir bisa
-// menyediakan pilihan otomatis (nama & NIP langsung terisi dari data
+// dengan jabatanPenandatanganKeywords, supaya halaman Pengaturan Formulir
+// bisa menyediakan pilihan otomatis (nama & NIP langsung terisi dari data
 // pegawai) selain input manual.
 func listCalonPenandatangan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	conds := make([]string, 0, len(jabatanPenandatanganKeywords))
+	args := make([]interface{}, 0, len(jabatanPenandatanganKeywords))
+	for _, kw := range jabatanPenandatanganKeywords {
+		conds = append(conds, "LOWER(jabatan.jabatan) LIKE ?")
+		args = append(args, kw)
+	}
+
 	var items []models.Pegawai
 	if err := db.Preload("Jabatan").
 		Joins("JOIN jabatan ON jabatan.id = pegawai.id_jabatan").
-		Where("LOWER(jabatan.jabatan) IN (?)", jabatanPenandatangan).
+		Where(strings.Join(conds, " OR "), args...).
 		Order("pegawai.nama asc").
 		Find(&items).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pegawai")
