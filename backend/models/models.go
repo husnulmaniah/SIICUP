@@ -230,3 +230,32 @@ type PengaturanSurat struct {
 func (PengaturanSurat) TableName() string { return "pengaturan_surat" }
 
 func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
+
+// ============================================================
+// PERUBAHAN DATA PEGAWAI (self-service edit request + approval workflow)
+// ============================================================
+
+// PerubahanDataPegawai menyimpan pengajuan perubahan data diri yang dibuat
+// sendiri oleh pegawai (lewat halaman "Profil Saya"). Data baru yang
+// diajukan TIDAK langsung mengubah tabel pegawai -- baru diterapkan
+// (ditulis ke tabel pegawai, dan disinkronkan ke akun user yang terhubung)
+// begitu administrator/admin menyetujuinya. DataLama & DataBaru disimpan
+// sebagai JSON text (lihat handlers/perubahan_data.go, struct
+// pegawaiEditableData) supaya halaman review admin bisa menampilkan
+// perbandingan sebelum/sesudah.
+type PerubahanDataPegawai struct {
+	ID             uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai      uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai        *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	DataLama       string     `json:"data_lama" gorm:"column:data_lama;type:text"`
+	DataBaru       string     `json:"data_baru" gorm:"column:data_baru;type:text"`
+	SkNamaFile     string     `json:"sk_nama_file" gorm:"column:sk_nama_file;size:255"`
+	SkFile         []byte     `json:"-" gorm:"column:sk_file;type:bytea"`
+	Status         string     `json:"status" gorm:"size:20;default:pending"`
+	CatatanAdmin   string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
+	DiputuskanOleh string     `json:"diputuskan_oleh" gorm:"column:diputuskan_oleh;size:150"`
+	TglKeputusan   *time.Time `json:"tgl_keputusan" gorm:"column:tgl_keputusan"`
+	CreatedAt      time.Time  `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (PerubahanDataPegawai) TableName() string { return "perubahan_data_pegawai" }

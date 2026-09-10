@@ -8,6 +8,8 @@ import DashboardView from '../views/DashboardView.vue'
 import PengajuanCutiView from '../views/PengajuanCutiView.vue'
 import MasterDataView from '../views/MasterDataView.vue'
 import PengaturanFormulirView from '../views/PengaturanFormulirView.vue'
+import ProfilSayaView from '../views/ProfilSayaView.vue'
+import PerubahanDataView from '../views/PerubahanDataView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -21,6 +23,8 @@ const routes = [
       { path: 'pengajuan-cuti', name: 'pengajuan-cuti', component: PengajuanCutiView },
       { path: 'master/:tableKey', name: 'master', component: MasterDataView },
       { path: 'pengaturan-formulir', name: 'pengaturan-formulir', component: PengaturanFormulirView, meta: { roles: ['administrator', 'admin'] } },
+      { path: 'profil-saya', name: 'profil-saya', component: ProfilSayaView, meta: { roles: ['pegawai'] } },
+      { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },

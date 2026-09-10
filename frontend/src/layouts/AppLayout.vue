@@ -24,11 +24,16 @@ const navSections = computed(() => {
     { header: null, items: [{ label: 'Pengajuan Cuti', icon: 'pi pi-calendar', to: '/pengajuan-cuti' }] },
   ]
 
+  if (auth.isPegawai) {
+    sections.push({ header: null, items: [{ label: 'Profil Saya', icon: 'pi pi-user-edit', to: '/profil-saya' }] })
+  }
+
   if (auth.canManageMaster) {
     sections.push({
       header: 'Data Kepegawaian',
       items: [
         { label: 'Data Pegawai', icon: 'pi pi-users', to: '/master/pegawai' },
+        { label: 'Perubahan Data Pegawai', icon: 'pi pi-user-edit', to: '/perubahan-data' },
         { label: 'Jatah Cuti Tahunan', icon: 'pi pi-briefcase', to: '/master/jatah-cuti' },
       ],
     })
