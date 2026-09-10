@@ -130,8 +130,11 @@ Proyek sudah **Vercel-ready**: PostgreSQL + Vercel Blob (dengan fallback disk lo
 
 ## Catatan produksi
 
+<<<<<<< HEAD
 - Jika frontend dan backend berbeda domain dan muncul error CORS, ikuti bagian **Mengatasi error CORS** di `DEPLOY_VERCEL.md` (gunakan rewrite `/api` atau set `ALLOWED_ORIGINS` di backend).
 
+=======
+>>>>>>> f1249a356178981b02639d968356a5a7494816f5
 - Wajib set `JWT_SECRET` acak dan `DATABASE_URL` di environment (jangan pakai nilai contoh).
 - Batas upload di Vercel ±4,5 MB per request; berkas cuti dibatasi 5 MB per file.
 - Untuk VPS sendiri: `npm run build && npm start` di kedua folder, reverse proxy meneruskan `/api` ke port 3001.

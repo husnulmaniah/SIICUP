@@ -87,6 +87,7 @@ Deploy berikutnya cukup mengandalkan `prisma migrate deploy` yang sudah ada di b
 - **Ukuran upload**: request body serverless Vercel dibatasi ±4,5 MB. Batas 5 MB/berkas cuti masih pas-pasan; jika sering gagal, kecilkan batas di kode atau unggah berkas satu per satu (form sudah mendukung per-jenis).
 - **Region**: pilih region Vercel & database yang sama/berdekatan (mis. Singapore `sin1` + Neon Singapore) agar cepat dari Indonesia.
 - **VPS/lokal**: tetap didukung — isi `DATABASE_URL` ke Postgres lokal, kosongkan `BLOB_READ_WRITE_TOKEN`, berkas tersimpan di `./uploads` seperti semula.
+<<<<<<< HEAD
 
 ---
 
@@ -119,3 +120,5 @@ Error ini muncul bila frontend dan backend berada di domain berbeda, misalnya fr
 Buka langsung di browser: `https://DOMAIN-BACKEND/api/dashboard`.
 - Muncul JSON atau pesan `{"error":"Tidak terautentikasi..."}` → backend benar, lanjutkan Cara A/B.
 - Muncul halaman HTML aplikasi (SICUTI) → domain tersebut mengarah ke **frontend**, bukan backend. Perbaiki pengaturan domain di Vercel: arahkan subdomain terpisah (mis. `api.`) ke project backend.
+=======
+>>>>>>> f1249a356178981b02639d968356a5a7494816f5

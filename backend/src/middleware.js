@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+<<<<<<< HEAD
 // Daftar origin yang diizinkan. Kosongkan ALLOWED_ORIGINS untuk mengizinkan semua (*).
 // Contoh isi env: ALLOWED_ORIGINS="https://app.siicupdisdikbud.com,https://sicuti-app.vercel.app"
 const daftarIzin = (process.env.ALLOWED_ORIGINS || '')
@@ -32,6 +33,21 @@ export function middleware(req) {
   const res = NextResponse.next();
   for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
   return res;
+=======
+export function middleware(req) {
+  if (req.method === 'OPTIONS') {
+    return new NextResponse(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }
+  return NextResponse.next();
+>>>>>>> f1249a356178981b02639d968356a5a7494816f5
 }
 
 export const config = { matcher: '/api/:path*' };
