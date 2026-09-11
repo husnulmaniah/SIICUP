@@ -175,7 +175,16 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, pe
 	// penuh mengisi halaman A4 selayaknya surat resmi cetak.
 	const lineH = 15.0
 	y := 120.0
-	nomor := fmt.Sprintf("800.1.11.4/     /Disdikbud /%s/ %d", romanMonth(tglApproval.Month()), tglApproval.Year())
+	// Bagian nomor urut (di antara "800.1.11.4/" dan "/Disdikbud") diisi
+	// manual oleh administrator/admin lewat updateNomorSurat di
+	// pengajuan_cuti.go (item.NomorSurat) -- kalau belum diisi, tetap
+	// dikosongkan seperti sebelum field ini ada supaya layout suratnya tidak
+	// berubah.
+	noBagian := strings.TrimSpace(item.NomorSurat)
+	if noBagian == "" {
+		noBagian = "    "
+	}
+	nomor := fmt.Sprintf("800.1.11.4/%s/Disdikbud /%s/ %d", noBagian, romanMonth(tglApproval.Month()), tglApproval.Year())
 	p.SetFont(false, 12)
 	p.Text(marginX, y, "Nomor")
 	p.Text(marginX+68, y, ": "+nomor)

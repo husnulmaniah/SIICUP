@@ -366,6 +366,35 @@ const previewDialog = ref(false)
 const previewUrl = ref('')
 const previewType = ref('pdf') // 'pdf' | 'image' | 'other'
 const previewTitle = ref('')
+const previewKind = ref('') // 'rekomendasi' | 'cuti' | '' -- dipakai untuk tahu kapan menampilkan input Nomor Surat
+const previewPengajuanId = ref(null)
+
+// ---- nomor surat pada Surat Rekomendasi Izin Cuti -- opsional, hanya
+// administrator/admin yang boleh mengisi (lihat isManage). Diedit langsung
+// dari dialog pratinjau surat rekomendasi, lalu suratnya di-generate ulang
+// supaya nomor barunya langsung terlihat tanpa perlu tutup-buka dialog.
+const nomorSuratInput = ref('')
+const savingNomorSurat = ref(false)
+
+async function saveNomorSurat() {
+  if (!previewPengajuanId.value) return
+  savingNomorSurat.value = true
+  try {
+    await http.put(`/pengajuan-cuti/${previewPengajuanId.value}/nomor-surat`, { nomor_surat: nomorSuratInput.value })
+    if (previewUrl.value) window.URL.revokeObjectURL(previewUrl.value)
+    const res = await http.get(`/pengajuan-cuti/${previewPengajuanId.value}/form/rekomendasi`, {
+      params: { inline: 1 },
+      responseType: 'blob',
+    })
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Nomor surat berhasil disimpan', life: 3000 })
+    fetchList()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    savingNomorSurat.value = false
+  }
+}
 
 async function previewDoc(pengajuanId, doc) {
   try {
@@ -387,13 +416,16 @@ async function previewDoc(pengajuanId, doc) {
 // tanpa memaksa download -- pakai dialog+iframe yang sama seperti previewDoc.
 // Karena backend mengirim PDF dengan Content-Disposition: inline, browser
 // menampilkan viewer PDF bawaan yang sudah punya tombol print/download sendiri.
-async function previewForm(pengajuanId, kind, title) {
+async function previewForm(pengajuanId, kind, title, nomorSurat) {
   try {
     const url = kind === 'rekomendasi' ? `/pengajuan-cuti/${pengajuanId}/form/rekomendasi` : `/pengajuan-cuti/${pengajuanId}/form/cuti`
     const res = await http.get(url, { params: { inline: 1 }, responseType: 'blob' })
     previewType.value = 'pdf'
     previewUrl.value = window.URL.createObjectURL(res.data)
     previewTitle.value = title
+    previewKind.value = kind
+    previewPengajuanId.value = pengajuanId
+    nomorSuratInput.value = nomorSurat || ''
     previewDialog.value = true
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat formulir', detail: e.response?.data?.message || e.message, life: 4000 })
@@ -403,6 +435,8 @@ async function previewForm(pengajuanId, kind, title) {
 function closePreview() {
   if (previewUrl.value) window.URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = ''
+  previewKind.value = ''
+  previewPengajuanId.value = null
 }
 
 // ---- upload/lihat/hapus scan formulir yang sudah ditandatangani basah oleh
@@ -720,7 +754,7 @@ onMounted(() => {
                       rounded
                       text
                       title="Lihat & Cetak Surat Rekomendasi"
-                      @click="previewForm(data.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti')"
+                      @click="previewForm(data.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti', data.nomor_surat)"
                     />
                     <Button
                       icon="pi pi-file-pdf"
@@ -912,7 +946,7 @@ onMounted(() => {
               size="small"
               outlined
               label="Surat Rekomendasi"
-              @click="previewForm(detailRow.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti')"
+              @click="previewForm(detailRow.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti', detailRow.nomor_surat)"
             />
             <Button
               icon="pi pi-eye"
@@ -994,6 +1028,17 @@ onMounted(() => {
 
     <!-- lihat dokumen (tanpa download) -->
     <Dialog v-model:visible="previewDialog" modal :header="previewTitle" :style="{ width: '95vw', maxWidth: '62rem' }" @hide="closePreview">
+      <!-- Nomor Surat pada Surat Rekomendasi Izin Cuti -- opsional (boleh
+           dikosongkan), hanya administrator/admin yang bisa mengisi/mengubah.
+           Setelah disimpan, pratinjau PDF di bawah otomatis dimuat ulang
+           supaya nomor barunya langsung terlihat. -->
+      <div v-if="previewKind === 'rekomendasi' && isManage" style="display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.75rem">
+        <div style="flex: 1; min-width: 220px">
+          <label class="field-label">Nomor Surat (opsional)</label>
+          <InputText v-model="nomorSuratInput" placeholder="mis. 123" style="width: 100%" />
+        </div>
+        <Button label="Simpan Nomor Surat" icon="pi pi-save" size="small" :loading="savingNomorSurat" @click="saveNomorSurat" />
+      </div>
       <div v-if="previewType === 'pdf'" style="width: 100%; height: 75vh">
         <iframe :src="previewUrl" style="width: 100%; height: 100%; border: none" title="Pratinjau dokumen"></iframe>
       </div>

@@ -183,7 +183,13 @@ type PengajuanCuti struct {
 	AtasanApprove    *Pegawai       `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
 	TglApproval      *time.Time     `json:"tgl_approval" gorm:"column:tgl_approval"`
 	CatatanApproval  string         `json:"catatan_approval" gorm:"column:catatan_approval;size:255"`
-	CreatedAt        time.Time      `json:"created_at"`
+	// NomorSurat: nomor surat pada Surat Rekomendasi Izin Cuti (mis.
+	// "800.1.11.4/123/Disdikbud"). Opsional -- boleh dikosongkan (tetap
+	// tampil sebagai kolom kosong di suratnya seperti sebelum field ini ada)
+	// -- dan hanya administrator/admin yang boleh mengisi/mengubahnya
+	// (lihat updateNomorSurat di handlers/pengajuan_cuti.go).
+	NomorSurat string    `json:"nomor_surat" gorm:"column:nomor_surat;size:100"`
+	CreatedAt  time.Time `json:"created_at"`
 
 	// Dokumen kelengkapan yang diupload saat pengajuan dibuat (wajib untuk
 	// pengajuan mandiri oleh pegawai/atasan, opsional bila dibuatkan oleh admin).

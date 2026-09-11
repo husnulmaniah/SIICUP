@@ -296,6 +296,9 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("DELETE /api/pengajuan-cuti/{id}/form/ttd", manage(func(w http.ResponseWriter, r *http.Request) {
 		deleteFormSigned(w, r, db, "ttd_formulir")
 	}))
+	// nomor surat pada Surat Rekomendasi Izin Cuti -- boleh diisi manual atau
+	// dibiarkan kosong, dan hanya administrator/admin yang boleh mengisinya.
+	mux.Handle("PUT /api/pengajuan-cuti/{id}/nomor-surat", manage(func(w http.ResponseWriter, r *http.Request) { updateNomorSurat(w, r, db) }))
 }
 
 // dokumenContentType maps a stored filename's extension to a real MIME type
@@ -719,6 +722,36 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	preloadPengajuan(db).First(&item, item.ID)
 	utils.Success(w, "pengajuan cuti berhasil diperbarui", item)
+}
+
+type nomorSuratPayload struct {
+	NomorSurat string `json:"nomor_surat"`
+}
+
+// updateNomorSurat sets (or clears) the nomor surat printed on the Surat
+// Rekomendasi Izin Cuti (see buildSuratRekomendasi in formulir.go). It's
+// intentionally optional -- an empty string is accepted and simply leaves the
+// number blank on the printed letter, same as before this field existed --
+// and restricted to administrator/admin only (see the route registration
+// above, wrapped in manage(...)).
+func updateNomorSurat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	var item models.PengajuanCuti
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	var p nomorSuratPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+		return
+	}
+	item.NomorSurat = strings.TrimSpace(p.NomorSurat)
+	if err := db.Model(&item).Update("nomor_surat", item.NomorSurat).Error; err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal menyimpan nomor surat: "+err.Error())
+		return
+	}
+	utils.Success(w, "nomor surat berhasil disimpan", item)
 }
 
 func deletePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
