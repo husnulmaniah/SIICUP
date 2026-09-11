@@ -124,6 +124,44 @@ func truncateToWidth(s string, maxWidth, size float64) string {
 	return ellipsis
 }
 
+// wrapCapped bungkus teks ke beberapa baris (utils.WrapText) tapi dibatasi
+// maksimal maxLines baris -- dipakai untuk jabatan penandatangan (mis. "Plt.
+// Kepala Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara")
+// yang kadang terlalu panjang untuk satu baris tapi tetap harus terbaca utuh
+// (bukan dipotong "...") selama masih muat dalam maxLines baris. Kalau
+// setelah dibungkus tetap lebih dari maxLines baris, baris terakhir baru
+// dipotong (truncateToWidth) sebagai jaring pengaman supaya tinggi blok
+// tanda tangan tidak pernah membengkak tak terkendali.
+func wrapCapped(s string, maxWidth, size float64, maxLines int) []string {
+	lines := utils.WrapText(s, maxWidth, size)
+	if maxLines <= 0 || len(lines) <= maxLines {
+		return lines
+	}
+	head := append([]string{}, lines[:maxLines-1]...)
+	rest := strings.Join(lines[maxLines-1:], " ")
+	return append(head, truncateToWidth(rest, maxWidth, size))
+}
+
+// wrapJabatan bungkus teks jabatan ke maxLines baris, mencoba sizes dari yang
+// terbesar ke terkecil sampai ketemu satu yang muat tanpa perlu dipotong "..."
+// -- beberapa jabatan Plt./Kepala Dinas nama lengkapnya sangat panjang (mis.
+// "Plt. Kepala Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali
+// Utara") dan kalau dipaksa pakai satu ukuran huruf tetap, 2 baris saja
+// kadang tidak cukup -- mengecilkan huruf sedikit lebih baik daripada
+// memotong sebagian jabatannya. Kalau bahkan pada ukuran terkecil di sizes
+// tetap tidak muat, baris terakhir dipotong (wrapCapped) sebagai jaring
+// pengaman terakhir.
+func wrapJabatan(s string, maxWidth float64, maxLines int, sizes []float64) (lines []string, size float64) {
+	for _, sz := range sizes {
+		l := utils.WrapText(s, maxWidth, sz)
+		if len(l) <= maxLines {
+			return l, sz
+		}
+	}
+	smallest := sizes[len(sizes)-1]
+	return wrapCapped(s, maxWidth, smallest, maxLines), smallest
+}
+
 // drawLetterhead draws the shared "PEMERINTAH KABUPATEN MOROWALI UTARA /
 // DINAS PENDIDIKAN DAN KEBUDAYAAN DAERAH / ... / KOLONODALE" header with the
 // instansi logo, followed by a horizontal rule. Returns the yTop just below
@@ -336,22 +374,39 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, si
 	y = p.MultilineText(marginX, y, rightX-marginX, lineH, para2) + lineH*2
 
 	sigX := pageW - 230
-	p.Text(sigX, y, "Kolonodale, "+formatDateID(tglApproval)+".")
-	y += lineH
-	p.Text(sigX, y, namaOrDash(signerJabatan))
-	// Barcode/QR tanda tangan otomatis -- ditempatkan di ruang kosong yang
-	// dulunya disediakan untuk tanda tangan basah, di atas nama penandatangan
-	// (lihat drawSignatureQR/buildSignatureQR).
-	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, sigX, y+6, 46)
-	y += lineH * 4
+	sigColW := rightX - sigX
 
 	// Nama penandatangan dipotong (truncateToWidth) bila tidak biasa
-	// panjangnya, supaya tidak pernah meluber melewati tepi kanan halaman --
-	// sama seperti perlakuan pada Formulir Cuti.
-	signerNamaDisp := truncateToWidth(namaOrDash(signerNama), (rightX-sigX)*boldWidthSafety, 12)
+	// panjangnya. Jabatan (kadang cukup panjang, mis. "Plt. Kepala Dinas
+	// Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara") dibungkus
+	// ke maks. 2 baris, mengecilkan huruf lebih dulu (wrapJabatan) sebelum
+	// akhirnya dipotong, supaya tetap terbaca utuh -- semuanya supaya tidak
+	// pernah meluber melewati tepi kanan halaman.
+	signerNamaDisp := truncateToWidth(namaOrDash(signerNama), sigColW*boldWidthSafety, 12)
+	nameW := utils.TextWidth(signerNamaDisp, 12)
+	nameCenterX := sigX + nameW/2
+	jabatanLines, jabatanSize := wrapJabatan(namaOrDash(signerJabatan), sigColW, 2, []float64{12, 11, 10.5, 10, 9.5, 9, 8.5, 8})
+	jabatanLineH := jabatanSize + 2
+
+	p.Text(sigX, y, "Kolonodale, "+formatDateID(tglApproval)+".")
+	y += lineH
+	p.SetFont(false, jabatanSize)
+	for _, jl := range jabatanLines {
+		p.Text(sigX, y, jl)
+		y += jabatanLineH
+	}
+	p.SetFont(false, 12)
+	// Barcode/QR tanda tangan otomatis -- diposisikan di tengah lebar nama
+	// penandatangan (bukan rata kiri kolom), di ruang kosong yang dulunya
+	// disediakan untuk tanda tangan basah (lihat drawSignatureQR/
+	// buildSignatureQR).
+	const qrSide = 40.0
+	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, nameCenterX-qrSide/2, y+2, qrSide)
+	y += qrSide + 16
+
 	p.SetFont(true, 12)
 	p.Text(sigX, y, signerNamaDisp)
-	p.Line(sigX, y+3, sigX+utils.TextWidth(signerNamaDisp, 12), y+3)
+	p.Line(sigX, y+3, sigX+nameW, y+3)
 	y += 16
 	p.SetFont(false, 12)
 	p.Text(sigX, y, "NIP: "+namaOrDash(signerNip)+".")
@@ -682,7 +737,21 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	// menyisakan area kosong besar di bawahnya untuk catatan/tanda tangan
 	// atasan langsung), diikuti kolom tanda tangan Kepala Dinas di kanan.
 	rowTop = y
+	// Kolom tanda tangan Kepala Dinas ada di kanan garis pembagi
+	// (optRegionEnd/rightHalfX) -- dihitung di sini (sebelum rowH) supaya
+	// jabatan yang panjang (mis. "Plt. Kepala Dinas Pendidikan dan
+	// Kebudayaan Daerah Kabupaten Morowali Utara") bisa dibungkus ke maks. 2
+	// baris, mengecilkan huruf lebih dulu (wrapJabatan) sebelum dipotong,
+	// tanpa bertumpukan dengan opsi Disetujui/dst di atasnya -- rowH
+	// ditambah proporsional kalau jabatan butuh 2 baris.
+	sigColCenter := rightHalfX + (rightX-rightHalfX)/2
+	sigMaxWVII := (rightX - rightHalfX) - 16
+	jabatanLinesVII, jabatanSizeVII := wrapJabatan(namaOrDash(signerJabatan), sigMaxWVII, 2, []float64{11, 10, 9.5, 9, 8.5, 8, 7.5})
+	jabatanLineHVII := jabatanSizeVII + 3
 	rowH = 130.0
+	if len(jabatanLinesVII) > 1 {
+		rowH += jabatanLineHVII * float64(len(jabatanLinesVII)-1)
+	}
 	p.SetFont(true, 12)
 	p.Text(contentX+pad, rowTop+18, "Pertimbangan Atasan Langsung")
 	opts := []string{"Disetujui", "Perubahan", "Ditangguhkan", "Tidak Disetujui"}
@@ -714,18 +783,22 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	p.Line(contentX, gridTopVII+optHeaderH, optRegionEnd, gridTopVII+optHeaderH)
 	dividerX := optRegionEnd
 	p.Line(dividerX, rowTop, dividerX, rowTop+rowH)
-	sigColCenter := dividerX + (rightX-dividerX)/2
-	sigMaxWVII := (rightX - dividerX) - 16
-	p.SetFont(false, 11)
-	p.TextCentered(sigColCenter, rowTop+41, namaOrDash(signerJabatan))
-	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, sigColCenter-23, rowTop+48, 46)
+	p.SetFont(false, jabatanSizeVII)
+	jabatanTopVII := rowTop + 41.0
+	for i, jl := range jabatanLinesVII {
+		p.TextCentered(sigColCenter, jabatanTopVII+float64(i)*jabatanLineHVII, jl)
+	}
+	const qrSideVII = 40.0
+	qrTopVII := jabatanTopVII + float64(len(jabatanLinesVII)-1)*jabatanLineHVII + 7
+	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, sigColCenter-qrSideVII/2, qrTopVII, qrSideVII)
+	nameTopVII := qrTopVII + qrSideVII + 18
 	kepalaDinasNama := truncateToWidth(namaOrDash(signerNama), sigMaxWVII*boldWidthSafety, 12)
 	p.SetFont(true, 12)
-	p.TextCentered(sigColCenter, rowTop+106, kepalaDinasNama)
+	p.TextCentered(sigColCenter, nameTopVII, kepalaDinasNama)
 	w2 := utils.TextWidth(kepalaDinasNama, 12)
-	p.Line(sigColCenter-w2/2, rowTop+110, sigColCenter+w2/2, rowTop+110)
+	p.Line(sigColCenter-w2/2, nameTopVII+4, sigColCenter+w2/2, nameTopVII+4)
 	p.SetFont(false, 11)
-	p.TextCentered(sigColCenter, rowTop+126, "NIP: "+namaOrDash(signerNip)+".")
+	p.TextCentered(sigColCenter, nameTopVII+20, "NIP: "+namaOrDash(signerNip)+".")
 	y = rowBottom(rowTop, rowH, "VII")
 
 	// bingkai luar tabel
