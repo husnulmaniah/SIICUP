@@ -475,7 +475,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 
 	// Jarak ke judul & ke tabel dipadatkan (dari 249/+24 semula) supaya ada
 	// ruang ekstra di tabel Baris VII untuk QR tanda tangan otomatis yang
-	// diperbesar (150x150) tanpa membuat formulir meluber ke halaman ke-2.
+	// diperbesar (170x170) tanpa membuat formulir meluber ke halaman ke-2.
 	y = 225
 	p.SetFont(true, 13)
 	p.TextCentered(pageW/2, y, "FORMULIR PERMINTAAN DAN PEMBERIAN CUTI")
@@ -504,7 +504,12 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 
 	// Row I: Data Pegawai
 	rowTop := tableTop
-	rowH := 80.0
+	// Dipadatkan dari 80 -- baris ini hanya berisi 3 baris teks tetap
+	// (Nama/NIP, Jabatan/Masa Kerja, Unit Kerja) yang berakhir di rowTop+63,
+	// jadi 72 masih menyisakan margin bawah yang wajar. Ruang yang dihemat
+	// dialihkan ke Baris VII supaya QR tanda tangan bisa diperbesar lagi
+	// (150->170) tanpa membuat formulir meluber ke halaman ke-2.
+	rowH := 72.0
 	p.SetFont(true, 12)
 	p.Text(contentX+pad, rowTop+18, "Data Pegawai")
 	p.SetFont(false, 12)
@@ -620,7 +625,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	// Dibatasi maks. 3 baris (baris terakhir dipotong "..." kalau lebih
 	// panjang, lihat wrapCapped) -- alasan cuti bebas diisi pegawai dan bisa
 	// sangat panjang; tanpa batas ini baris III bisa tumbuh tak terbatas dan
-	// mendorong Baris VII (yang kini perlu ruang ekstra untuk QR 150x150)
+	// mendorong Baris VII (yang kini perlu ruang ekstra untuk QR 170x170)
 	// meluber ke halaman ke-2.
 	const alasanMaxLines = 3
 	alasanLines := wrapCapped(namaOrDash(item.AlasanCuti), contentW-2*pad, alasanFontSize, alasanMaxLines)
@@ -640,7 +645,10 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 
 	// Row IV: Lama Cuti
 	rowTop = y
-	rowH = 48.0
+	// Dipadatkan dari 48 -- isinya cuma 1 baris teks tetap (rowTop+33) yang
+	// tidak pernah wrap, jadi 40 masih aman. Ruang yang dihemat dialihkan ke
+	// Baris VII (lihat komentar di Baris I).
+	rowH = 40.0
 	p.SetFont(true, 12)
 	p.Text(contentX+pad, rowTop+18, "Lama Cuti")
 	p.SetFont(false, 12)
@@ -743,7 +751,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 
 	// Row VI: Alamat Selama Menjalankan Cuti + tanda tangan pegawai. Jarak
 	// dipadatkan (dari 140/68/117/121/136 semula) untuk memberi ruang ekstra
-	// ke Baris VII (QR tanda tangan otomatis 150x150) tanpa meluber ke
+	// ke Baris VII (QR tanda tangan otomatis 170x170) tanpa meluber ke
 	// halaman ke-2 -- alamat juga dibatasi maks. 4 baris (jaring pengaman
 	// yang sama seperti Alasan Cuti di Baris III).
 	rowTop = y
@@ -777,7 +785,8 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	// Row VII: Pertimbangan Atasan Langsung -- 4 opsi dibingkai pada satu
 	// baris penuh di bawah judul (seperti formulir cetak asli), diikuti
 	// stempel tanda tangan otomatis (QR + jabatan/nama/NIP Kepala Dinas) di
-	// bawahnya. QR (150x150, diperbesar dari 80x80 supaya mudah dipindai HP)
+	// bawahnya. QR (170x170, diperbesar dari 150x150 lalu 80x80 supaya mudah
+	// dipindai HP)
 	// digambar SEJAJAR di kiri dengan blok jabatan/nama/NIP di kanan --
 	// bukan ditumpuk vertikal seperti sebelumnya -- supaya tinggi baris ini
 	// ditentukan oleh sisi QR (yang jauh lebih tinggi dari 3-4 baris teks),
@@ -813,13 +822,23 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	p.Line(contentX, gridTopVII, rightX, gridTopVII)
 	p.Line(contentX, gridTopVII+optHeaderH, rightX, gridTopVII+optHeaderH)
 
-	const qrSideVII = 150.0
+	// QR diperbesar lagi dari 150->170 (ruang ekstra didapat dari pemadatan
+	// Baris I & IV di atas). Kolom teks jabatan/nama/NIP di sebelah kanan
+	// SENGAJA dibatasi (maxTextWVII) alih-alih dibiarkan melebar mengisi
+	// sisa lebar baris -- tanpa batas ini teksnya jadi terlalu lebar &
+	// menyisakan banyak spasi kosong di kanan, membuat QR di sisi kiri
+	// terlihat sempit/kurang mendapat "tempat" dibanding proporsi baris.
+	const qrSideVII = 170.0
 	qrX := contentX + pad
 	qrTopVII := gridTopVII + optHeaderH + 8.0
 	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, "Formulir Permintaan dan Pemberian Cuti", qrX, qrTopVII, qrSideVII)
 
 	textXVII := qrX + qrSideVII + 20.0
+	const maxTextWVII = 260.0
 	textWVII := rightX - textXVII - pad
+	if textWVII > maxTextWVII {
+		textWVII = maxTextWVII
+	}
 	textCenterVII := textXVII + textWVII/2
 	jabatanLinesVII, jabatanSizeVII := wrapJabatan(namaOrDash(signerJabatan), textWVII, 2, []float64{11, 10, 9.5, 9, 8.5, 8, 7.5})
 	jabatanLineHVII := jabatanSizeVII + 3
