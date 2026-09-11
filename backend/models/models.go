@@ -282,3 +282,97 @@ type PerubahanDataPegawai struct {
 }
 
 func (PerubahanDataPegawai) TableName() string { return "perubahan_data_pegawai" }
+
+// ============================================================
+// ABSENSI (daily attendance: camera + blink-liveness check-in/out)
+// ============================================================
+
+// Absensi menyimpan satu baris absen per pegawai per tanggal -- diisi lewat
+// menu "Absen" pegawai (kamera + verifikasi kedipan mata), bukan lewat CRUD
+// admin. JamMasuk/JamPulang diisi terpisah (dua aksi berbeda: absen masuk di
+// pagi hari, absen pulang di sore hari), sehingga keduanya nullable -- baris
+// baru dibuat begitu pegawai absen masuk, lalu diperbarui (bukan dibuat lagi)
+// saat pegawai absen pulang hari yang sama. Unique index (id_pegawai, tanggal)
+// mencegah lebih dari satu baris absen per pegawai per hari.
+type Absensi struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	IDPegawai uint      `json:"id_pegawai" gorm:"column:id_pegawai;not null;uniqueIndex:idx_absensi_pegawai_tgl"`
+	Pegawai   *Pegawai  `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	Tanggal   time.Time `json:"tanggal" gorm:"column:tanggal;type:date;not null;uniqueIndex:idx_absensi_pegawai_tgl"`
+
+	JamMasuk       *time.Time `json:"jam_masuk" gorm:"column:jam_masuk"`
+	TerlambatMenit int        `json:"terlambat_menit" gorm:"column:terlambat_menit;default:0"`
+	// FotoMasuk/FotoPulang disimpan sebagai bytea (bukan file di disk) supaya
+	// tidak hilang saat container backend di-redeploy/restart, mengikuti pola
+	// dokumen lain (lihat Pegawai.SkTerakhirFile, PengajuanDokumen.File).
+	FotoMasuk []byte   `json:"-" gorm:"column:foto_masuk;type:bytea"`
+	LatMasuk  *float64 `json:"lat_masuk" gorm:"column:lat_masuk"`
+	LngMasuk  *float64 `json:"lng_masuk" gorm:"column:lng_masuk"`
+	// KedipanMasukOk mencatat hasil verifikasi kedipan mata dari kamera pada
+	// SAAT capture (dikirim oleh frontend) -- dipakai untuk menampilkan
+	// peringatan "gambar tidak menunjukkan kedipan mata" pada riwayat absen,
+	// bukan untuk menolak absennya (kamera/pencahayaan pegawai bisa saja gagal
+	// mendeteksi kedipan walau pegawainya asli hadir).
+	KedipanMasukOk bool `json:"kedipan_masuk_ok" gorm:"column:kedipan_masuk_ok;default:true"`
+
+	JamPulang       *time.Time `json:"jam_pulang" gorm:"column:jam_pulang"`
+	FotoPulang      []byte     `json:"-" gorm:"column:foto_pulang;type:bytea"`
+	LatPulang       *float64   `json:"lat_pulang" gorm:"column:lat_pulang"`
+	LngPulang       *float64   `json:"lng_pulang" gorm:"column:lng_pulang"`
+	KedipanPulangOk bool       `json:"kedipan_pulang_ok" gorm:"column:kedipan_pulang_ok;default:true"`
+
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (Absensi) TableName() string { return "absensi" }
+
+// AbsensiJenisDokumen adalah jenis-jenis surat pendukung yang bisa diupload
+// pegawai untuk menutupi tanggal absen yang terlewat (hari kerja tanpa
+// baris Absensi sama sekali).
+const (
+	AbsensiDokumenSKS         = "sks"
+	AbsensiDokumenSuratTugas  = "surat_tugas"
+	AbsensiDokumenBeritaAcara = "berita_acara"
+	AbsensiDokumenSuratIzin   = "surat_izin"
+)
+
+// AbsensiDokumen menyimpan surat yang diupload pegawai untuk tanggal absen
+// yang terlewat (SKS/Surat Tugas/Berita Acara/Surat Izin) -- mengikuti pola
+// file-di-database yang sama dengan PengajuanDokumen.
+type AbsensiDokumen struct {
+	ID         uint      `json:"id" gorm:"primaryKey"`
+	IDPegawai  uint      `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
+	Pegawai    *Pegawai  `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	Tanggal    time.Time `json:"tanggal" gorm:"column:tanggal;type:date;not null;index"`
+	Jenis      string    `json:"jenis" gorm:"column:jenis;size:30;not null"`
+	Label      string    `json:"label" gorm:"column:label;size:150"`
+	NamaFile   string    `json:"nama_file" gorm:"column:nama_file;size:255"`
+	File       []byte    `json:"-" gorm:"column:file;type:bytea"`
+	Keterangan string    `json:"keterangan" gorm:"column:keterangan;size:255"`
+	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
+
+// PengaturanAbsensi menyimpan pengaturan menu Absen -- selalu ada tepat satu
+// baris (ID = 1), mengikuti pola PengaturanSurat. Jam disimpan sebagai teks
+// "HH:MM" (bukan time.Time) karena hanya dipakai sebagai jam patokan harian,
+// bukan tanggal tertentu.
+//
+//   - Aktif: administrator bisa menonaktifkan seluruh menu Absen (mis. kalau
+//     sudah tidak dipakai) tanpa menghapus data riwayat yang sudah ada.
+//   - JamMulaiPagi..JamBatasPagi: jendela waktu absen masuk dianggap TIDAK
+//     terlambat. Absen masuk sebelum JamMulaiPagi ditolak (belum waktunya),
+//     setelah JamBatasPagi tetap diterima tapi dihitung terlambat sejumlah
+//     menit dari JamBatasPagi.
+//   - JamMulaiPulang: absen pulang baru dibuka (tombolnya aktif) mulai jam
+//     ini -- sebelum itu pegawai belum bisa absen pulang.
+type PengaturanAbsensi struct {
+	ID             uint   `json:"id" gorm:"primaryKey"`
+	Aktif          bool   `json:"aktif" gorm:"column:aktif;default:true"`
+	JamMulaiPagi   string `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5;default:'06:00'"`
+	JamBatasPagi   string `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5;default:'07:30'"`
+	JamMulaiPulang string `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
+}
+
+func (PengaturanAbsensi) TableName() string { return "pengaturan_absensi" }

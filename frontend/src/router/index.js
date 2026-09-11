@@ -10,6 +10,8 @@ import MasterDataView from '../views/MasterDataView.vue'
 import PengaturanFormulirView from '../views/PengaturanFormulirView.vue'
 import ProfilSayaView from '../views/ProfilSayaView.vue'
 import PerubahanDataView from '../views/PerubahanDataView.vue'
+import AbsensiView from '../views/AbsensiView.vue'
+import RekapAbsensiView from '../views/RekapAbsensiView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -24,6 +26,8 @@ const routes = [
       { path: 'master/:tableKey', name: 'master', component: MasterDataView },
       { path: 'pengaturan-formulir', name: 'pengaturan-formulir', component: PengaturanFormulirView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'profil-saya', name: 'profil-saya', component: ProfilSayaView, meta: { roles: ['pegawai'] } },
+      { path: 'absen', name: 'absen', component: AbsensiView, meta: { roles: ['pegawai'] } },
+      { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
     ],
   },

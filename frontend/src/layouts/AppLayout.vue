@@ -25,7 +25,17 @@ const navSections = computed(() => {
   ]
 
   if (auth.isPegawai) {
-    sections.push({ header: null, items: [{ label: 'Profil Saya', icon: 'pi pi-user-edit', to: '/profil-saya' }] })
+    sections.push({
+      header: null,
+      items: [
+        { label: 'Absen', icon: 'pi pi-camera', to: '/absen' },
+        { label: 'Profil Saya', icon: 'pi pi-user-edit', to: '/profil-saya' },
+      ],
+    })
+  }
+
+  if (auth.canManageMaster) {
+    sections.push({ header: null, items: [{ label: 'Rekap Absen', icon: 'pi pi-camera', to: '/rekap-absen' }] })
   }
 
   if (auth.canManageMaster) {

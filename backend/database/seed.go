@@ -182,3 +182,26 @@ func EnsurePengaturanSurat(db *gorm.DB) {
 		log.Println("pengaturan surat default dibuat (bisa diubah dari menu Pengaturan Formulir)")
 	}
 }
+
+// EnsurePengaturanAbsensi memastikan selalu ada tepat satu baris pengaturan
+// (ID=1) untuk menu Absen (aktif/nonaktif modul & jendela waktu absen masuk/
+// pulang). Idempotent -- hanya membuat baris default sekali; setelah itu
+// nilainya hanya diubah lewat halaman Pengaturan Absen (admin/administrator).
+func EnsurePengaturanAbsensi(db *gorm.DB) {
+	var count int64
+	db.Model(&models.PengaturanAbsensi{}).Count(&count)
+	if count > 0 {
+		return
+	}
+	if err := db.Create(&models.PengaturanAbsensi{
+		ID:             1,
+		Aktif:          true,
+		JamMulaiPagi:   "06:00",
+		JamBatasPagi:   "07:30",
+		JamMulaiPulang: "15:00",
+	}).Error; err != nil {
+		log.Printf("gagal membuat pengaturan absensi default: %v", err)
+	} else {
+		log.Println("pengaturan absensi default dibuat (bisa diubah dari menu Pengaturan Absen)")
+	}
+}

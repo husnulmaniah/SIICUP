@@ -18,6 +18,7 @@ func main() {
 	database.EnsureJenisCuti(config.DB)
 	database.EnsureStatusPegawai(config.DB)
 	database.EnsurePengaturanSurat(config.DB)
+	database.EnsurePengaturanAbsensi(config.DB)
 
 	handler := routes.SetupRoutes(config.DB)
 
