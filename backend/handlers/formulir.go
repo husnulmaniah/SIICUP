@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -248,41 +249,49 @@ func resolveSignerInfo(db *gorm.DB, pengaturan models.PengaturanSurat) (nama, ni
 	return
 }
 
-// buildSignatureQR encodes a compact verification payload for the automatic
-// digital-signature stamp printed on both forms (Formulir Cuti & Surat
-// Rekomendasi) -- scanning it with any QR reader shows who the leave is for,
-// who signed as penandatangan, and which account processed the approval in
-// SIICUP, without anyone having to physically sign each printed copy. A
-// failure here (extremely unlikely -- the payload is short plain text) is
-// meant to be treated by the caller as "skip the stamp", not a hard error:
-// it's a supplementary trust marker, not the form's substance.
+// buildSignatureQR encodes a Google Search URL for the automatic digital-
+// signature stamp printed on both forms (Formulir Cuti & Surat Rekomendasi)
+// -- scanning it with an ordinary phone camera opens straight to a Google
+// search (not just raw text in a QR-reader app) showing: nama surat, NIP,
+// nama pegawai, jenis cuti, lama cuti, siapa yang bertanda tangan beserta
+// jabatannya, dan tanggal disetujuinya pengajuan cuti tersebut. A failure
+// here (extremely unlikely) is meant to be treated by the caller as "skip
+// the stamp", not a hard error: it's a supplementary trust marker, not the
+// form's substance.
 //
-// The payload is kept deliberately short (no jabatan title, which is already
-// printed as plain text right next to the stamp, and no verbose sentences)
-// -- a QR printed at only ~40pt (roughly 14mm) needs to stay at a low QR
-// "version" (few modules) to still be reliably scannable by an ordinary
-// phone camera. A long jabatan (e.g. "Plt. Kepala Dinas Pendidikan dan
-// Kebudayaan Daerah Kabupaten Morowali Utara") pushed the old, verbose
-// payload into a QR version with modules too fine to survive printing at
-// that size, making the stamp effectively unscannable -- defeating its whole
-// purpose.
-func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai) ([]byte, error) {
-	lines := []string{
-		fmt.Sprintf("SIICUP-CUTI #%d", item.ID),
-		"Pegawai: " + pegawai.Nama + "/" + namaOrDash(pegawai.NIP),
-		"TTD: " + namaOrDash(item.TtdNama) + "/" + namaOrDash(item.TtdNip),
+// namaSurat identifies which document this stamp belongs to ("Surat
+// Rekomendasi Izin Cuti" / "Formulir Permintaan dan Pemberian Cuti") since
+// the same function serves both forms.
+func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai, namaSurat string) ([]byte, error) {
+	jenisNama := "-"
+	if item.JenisCuti != nil {
+		jenisNama = item.JenisCuti.Jenis
 	}
-	if item.DisetujuiOlehUsername != "" {
-		lines = append(lines, "ACC: "+item.DisetujuiOlehUsername)
+	tglDisetujui := "-"
+	if item.TglApproval != nil {
+		tglDisetujui = formatDateID(*item.TglApproval)
 	}
-	return qrcode.Encode(strings.Join(lines, "\n"), qrcode.Medium, 240)
+	query := fmt.Sprintf(
+		"%s - NIP %s - %s - %s - Lama Cuti %d Hari (%s) - Ditandatangani %s (%s) - Disetujui %s",
+		namaSurat,
+		namaOrDash(pegawai.NIP),
+		pegawai.Nama,
+		jenisNama,
+		item.JumlahHari,
+		formatTanggalRentang(item.TglMulai, item.TglSelesai),
+		namaOrDash(item.TtdNama),
+		namaOrDash(item.TtdJabatan),
+		tglDisetujui,
+	)
+	googleURL := "https://www.google.com/search?q=" + neturl.QueryEscape(query)
+	return qrcode.Encode(googleURL, qrcode.Medium, 240)
 }
 
 // drawSignatureQR registers (under a page-unique name) and draws the
 // automatic signature QR at (x, yTop) sized side x side pt square. Any error
 // (encoding or registration) is swallowed on purpose -- see buildSignatureQR.
-func drawSignatureQR(doc *utils.PDFDoc, p *utils.PDFPage, name string, item models.PengajuanCuti, pegawai models.Pegawai, x, yTop, side float64) {
-	png, err := buildSignatureQR(item, pegawai)
+func drawSignatureQR(doc *utils.PDFDoc, p *utils.PDFPage, name string, item models.PengajuanCuti, pegawai models.Pegawai, namaSurat string, x, yTop, side float64) {
+	png, err := buildSignatureQR(item, pegawai, namaSurat)
 	if err != nil {
 		return
 	}
@@ -403,7 +412,7 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, si
 	// untuk dipindai kamera HP dengan mudah, mendekati ukuran QR tanda tangan
 	// pada formulir resmi lain (mis. Surat Izin Cuti BKPSDM).
 	const qrSide = 80.0
-	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, nameCenterX-qrSide/2, y+2, qrSide)
+	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, "Surat Rekomendasi Izin Cuti", nameCenterX-qrSide/2, y+2, qrSide)
 	y += qrSide + 14
 
 	p.SetFont(true, 12)
@@ -807,7 +816,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 		p.TextCentered(sigColCenter, jabatanTopVII+float64(i)*jabatanLineHVII, jl)
 	}
 	qrTopVII := jabatanTopVII + float64(len(jabatanLinesVII)-1)*jabatanLineHVII + 7
-	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, sigColCenter-qrSideVII/2, qrTopVII, qrSideVII)
+	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, "Formulir Permintaan dan Pemberian Cuti", sigColCenter-qrSideVII/2, qrTopVII, qrSideVII)
 	nameTopVII := qrTopVII + qrSideVII + 14
 	kepalaDinasNama := truncateToWidth(namaOrDash(signerNama), sigMaxWVII*boldWidthSafety, 12)
 	p.SetFont(true, 12)
