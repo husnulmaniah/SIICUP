@@ -181,6 +181,36 @@ func isAnnualLeave(jenis models.JenisCuti) bool {
 	return strings.Contains(strings.ToLower(jenis.Jenis), "tahunan")
 }
 
+// syncJumlahHariWithHolidays recalculates JumlahHari using the current
+// tgl_merah (hari libur) data and, if it no longer matches what was stored
+// when the pengajuan was submitted/edited, persists the correction. This is
+// what makes a newly-added tanggal merah get picked up automatically by an
+// existing pengajuan cuti the moment the page is refreshed (GET list/detail)
+// -- nobody needs to open and re-save the pengajuan by hand.
+//
+// Only "masih berjalan" statuses (menunggu/disetujui) are synced: a pengajuan
+// yang sudah ditolak/dikembalikan is a closed-out record and its historical
+// JumlahHari is left alone. When the affected pengajuan is an approved cuti
+// tahunan, the difference is also applied to the pegawai's jatah cuti tahunan
+// (kolom "terpakai") so a hari libur baru that falls inside an already
+// disetujui range is no longer counted against the quota either.
+func syncJumlahHariWithHolidays(db *gorm.DB, item *models.PengajuanCuti) {
+	if item.Pegawai == nil || (item.Status != models.StatusPending && item.Status != models.StatusDisetuju) {
+		return
+	}
+	sixDayWeek := sixDayWeekForTempatTgs(item.Pegawai.TempatTgs)
+	newJumlahHari := calculateWorkingDays(db, item.TglMulai, item.TglSelesai, sixDayWeek)
+	if newJumlahHari == item.JumlahHari {
+		return
+	}
+	if item.Status == models.StatusDisetuju && item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
+		delta := newJumlahHari - item.JumlahHari
+		_ = adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, delta)
+	}
+	item.JumlahHari = newJumlahHari
+	db.Model(item).Update("jumlah_hari", newJumlahHari)
+}
+
 func adjustQuotaUsage(db *gorm.DB, pegawaiID uint, tahun int, defaultJumlah int, delta int) error {
 	var jatah models.JatahCuti
 	err := db.Where("id_pegawai = ? AND tahun = ?", pegawaiID, tahun).First(&jatah).Error
@@ -339,6 +369,9 @@ func listPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	countQuery.Count(&total)
 	var items []models.PengajuanCuti
 	query.Order("created_at desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items)
+	for i := range items {
+		syncJumlahHariWithHolidays(db, &items[i])
+	}
 	utils.SuccessMeta(w, "ok", items, map[string]interface{}{"page": page, "pageSize": pageSize, "total": total})
 }
 
@@ -366,6 +399,7 @@ func getPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
 		return
 	}
+	syncJumlahHariWithHolidays(db, &item)
 	utils.Success(w, "ok", item)
 }
 
@@ -683,6 +717,7 @@ func deletePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "pengajuan yang sudah diproses tidak dapat dihapus")
 		return
 	}
+	syncJumlahHariWithHolidays(db, &item)
 	if item.Status == models.StatusDisetuju && item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
 		_ = adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, -item.JumlahHari)
 	}
@@ -716,6 +751,7 @@ func approvePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p approvalPayload
 	_ = json.NewDecoder(r.Body).Decode(&p)
 
+	syncJumlahHariWithHolidays(db, &item)
 	if item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
 		if err := adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, item.JumlahHari); err != nil {
 			utils.Error(w, http.StatusBadRequest, err.Error())
@@ -853,6 +889,7 @@ func returnPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "pengajuan ini masih menunggu, tidak perlu dikembalikan")
 		return
 	}
+	syncJumlahHariWithHolidays(db, &item)
 	if item.Status == models.StatusDisetuju && item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
 		if err := adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, -item.JumlahHari); err != nil {
 			utils.Error(w, http.StatusBadRequest, err.Error())
