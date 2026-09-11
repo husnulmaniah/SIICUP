@@ -166,7 +166,9 @@ const pegawaiKeyword = ref('')
 const pegawaiTerpilihCache = ref([])
 
 function toPegawaiOption(p) {
-  return { label: `${p.nama} (${p.nip})`, value: p.id }
+  // tempat_tgs ikut dibawa karena menentukan pola hari kerja pegawai
+  // (lihat hariNonaktif) saat memilih rentang tanggal surat kolektif
+  return { label: `${p.nama} (${p.nip})`, value: p.id, tempat_tgs: p.tempat_tgs || '' }
 }
 
 function gabungDenganTerpilih(list) {
@@ -381,6 +383,39 @@ watch(
   () => [selectedPegawai.value, ...kolektifForm.id_pegawai],
   (ids) => ingatOpsiTerpilih(ids),
 )
+
+// ------------------------------------------------------------
+// pola hari kerja pegawai yang dipilih -> hari apa saja yang tidak bisa
+// dipilih pada rentang tanggal surat.
+//
+// Aturannya sama dengan sixDayWeekForTempatTgs di backend: pegawai yang
+// bertugas di sekolah masuk Senin-Sabtu (hanya Minggu libur), pegawai kantor
+// dinas masuk Senin-Jumat (Sabtu & Minggu libur). Kalau pegawai yang dipilih
+// bercampur, hanya Minggu yang dimatikan di kalender -- tanggal Sabtu tetap
+// bisa dipilih untuk pegawai sekolah, dan backend yang melewati tanggal
+// Sabtu itu khusus untuk pegawai kantor dinas (lihat
+// inputAbsensiDokumenKolektif).
+// ------------------------------------------------------------
+
+function polaSekolah(tempatTgs) {
+  return (tempatTgs || '').toLowerCase().includes('sekolah')
+}
+
+const pegawaiKolektifTerpilih = computed(() =>
+  kolektifForm.id_pegawai
+    .map(
+      (id) =>
+        pegawaiOptions.value.find((o) => o.value === id) || pegawaiTerpilihCache.value.find((o) => o.value === id),
+    )
+    .filter(Boolean),
+)
+
+const adaPegawaiSekolah = computed(() => pegawaiKolektifTerpilih.value.some((o) => polaSekolah(o.tempat_tgs)))
+const semuaPegawaiDinas = computed(
+  () => pegawaiKolektifTerpilih.value.length > 0 && !adaPegawaiSekolah.value,
+)
+// 0 = Minggu, 6 = Sabtu
+const hariNonaktif = computed(() => (semuaPegawaiDinas.value ? [0, 6] : [0]))
 
 function pickKolektifFile() {
   kolektifFileInput.value?.click()
@@ -757,11 +792,23 @@ function kodeDokumen(jenis) {
 
         <div>
           <label class="field-label">Tanggal Mulai</label>
-          <DatePicker v-model="kolektifForm.tanggal_mulai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
+          <DatePicker
+            v-model="kolektifForm.tanggal_mulai"
+            dateFormat="dd-mm-yy"
+            showIcon
+            :disabledDays="hariNonaktif"
+            style="width: 100%"
+          />
         </div>
         <div>
           <label class="field-label">Tanggal Selesai</label>
-          <DatePicker v-model="kolektifForm.tanggal_selesai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
+          <DatePicker
+            v-model="kolektifForm.tanggal_selesai"
+            dateFormat="dd-mm-yy"
+            showIcon
+            :disabledDays="hariNonaktif"
+            style="width: 100%"
+          />
         </div>
         <div>
           <label class="field-label">Jenis Surat</label>
@@ -790,6 +837,16 @@ function kodeDokumen(jenis) {
             outlined
             @click="pickKolektifFile"
           />
+        </div>
+
+        <div class="kolektif-span">
+          <Message severity="info" :closable="false">
+            Tanggal di luar hari kerja otomatis dilewati saat disimpan, mengikuti tempat tugas masing-masing pegawai:
+            pegawai <b>kantor dinas</b> tidak diinput pada <b>Sabtu &amp; Minggu</b>, pegawai <b>sekolah</b> tidak
+            diinput pada <b>Minggu</b>, dan <b>tanggal merah</b> dilewati untuk keduanya
+            <span v-if="semuaPegawaiDinas">-- semua pegawai yang dipilih bertugas di kantor dinas, jadi Sabtu &amp; Minggu dinonaktifkan di kalender.</span>
+            <span v-else-if="adaPegawaiSekolah">-- ada pegawai sekolah di antara yang dipilih, jadi tanggal Sabtu tetap bisa dipilih (hanya berlaku untuk pegawai sekolah).</span>
+          </Message>
         </div>
 
         <div class="kolektif-span">

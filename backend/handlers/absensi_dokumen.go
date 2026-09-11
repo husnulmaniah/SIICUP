@@ -133,17 +133,35 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	}
 	keterangan := strings.TrimSpace(r.FormValue("keterangan"))
 
-	var tanggalList []time.Time
-	for d := tglMulai; !d.After(tglSelesai); d = d.AddDate(0, 0, 1) {
-		tanggalList = append(tanggalList, d)
+	// Pola hari kerja dihitung PER PEGAWAI dari tempat tugasnya (lihat
+	// sixDayWeekForTempatTgs di pengajuan_cuti.go): pegawai yang bertugas di
+	// sekolah masuk Senin-Sabtu (hanya Minggu yang libur), pegawai kantor
+	// dinas masuk Senin-Jumat (Sabtu & Minggu libur). Tanggal merah juga
+	// dilewati untuk keduanya. Tanggal di luar hari kerja TIDAK diinput
+	// walaupun ikut dipilih admin dalam rentang tanggal -- aturannya sama
+	// persis dengan perhitungan "tanggal terlewat" pada rekap absen, supaya
+	// tidak ada surat untuk hari yang memang bukan hari kerja.
+	var pegawaiTerpilih []models.Pegawai
+	if err := db.Where("id IN ?", idList).Find(&pegawaiTerpilih).Error; err != nil || len(pegawaiTerpilih) == 0 {
+		utils.Error(w, http.StatusBadRequest, "data pegawai yang dipilih tidak ditemukan")
+		return
 	}
 
+	totalHari := 0
+	for d := tglMulai; !d.After(tglSelesai); d = d.AddDate(0, 0, 1) {
+		totalHari++
+	}
+	holidaySet := holidaySetInRange(db, tglMulai, tglSelesai)
+
 	jumlah := 0
-	for _, idPegawai := range idList {
-		for _, tgl := range tanggalList {
+	dilewati := 0
+	for _, p := range pegawaiTerpilih {
+		hariKerja := workingDaysWithHolidaySet(tglMulai, tglSelesai, sixDayWeekForTempatTgs(p.TempatTgs), holidaySet)
+		dilewati += totalHari - len(hariKerja)
+		for _, tgl := range hariKerja {
 			var existing models.AbsensiDokumen
-			found := db.Where("id_pegawai = ? AND tanggal = ?", idPegawai, tgl).First(&existing).Error == nil
-			existing.IDPegawai = idPegawai
+			found := db.Where("id_pegawai = ? AND tanggal = ?", p.ID, tgl).First(&existing).Error == nil
+			existing.IDPegawai = p.ID
 			existing.Tanggal = tgl
 			existing.Jenis = jenis
 			existing.Label = label
@@ -160,7 +178,17 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 		}
 	}
 
-	utils.Created(w, fmt.Sprintf("surat berhasil diinput untuk %d pegawai x %d tanggal (%d baris)", len(idList), len(tanggalList), jumlah), nil)
+	if jumlah == 0 {
+		utils.Error(w, http.StatusBadRequest,
+			"tidak ada tanggal yang bisa diinput -- semua tanggal pada rentang itu bukan hari kerja bagi pegawai yang dipilih (Sabtu/Minggu untuk pegawai kantor dinas, Minggu untuk pegawai sekolah, atau tanggal merah)")
+		return
+	}
+
+	pesan := fmt.Sprintf("surat berhasil diinput untuk %d pegawai (%d baris)", len(pegawaiTerpilih), jumlah)
+	if dilewati > 0 {
+		pesan += fmt.Sprintf(" -- %d tanggal dilewati karena bukan hari kerja pegawai bersangkutan (Sabtu/Minggu/tanggal merah)", dilewati)
+	}
+	utils.Created(w, pesan, nil)
 }
 
 // listAbsensiDokumenAdmin dipakai administrator/admin untuk melihat/mengelola
