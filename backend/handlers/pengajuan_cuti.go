@@ -708,12 +708,20 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	item.JumlahHari = calculateWorkingDays(db, start, end, sixDayWeek)
 	item.IDPolaHariKerja = autoPolaID(db, sixDayWeek)
 
-	// editing resets it back to pending so the approval flow runs again
+	// editing resets it back to pending so the approval flow runs again --
+	// snapshot penandatangan/ACC lama juga dikosongkan supaya persetujuan
+	// berikutnya menghitung ulang dari Pengaturan Formulir yang berlaku saat
+	// itu (lihat catatan pada field TtdNama dkk. di models.go).
 	if item.Status != models.StatusPending {
 		item.Status = models.StatusPending
 		item.IDAtasanApprove = nil
 		item.TglApproval = nil
 		item.CatatanApproval = ""
+		item.TtdNama = ""
+		item.TtdNip = ""
+		item.TtdJabatan = ""
+		item.DisetujuiOlehUsername = ""
+		item.DisetujuiOlehRole = ""
 	}
 
 	if err := db.Save(&item).Error; err != nil {
@@ -811,6 +819,17 @@ func approvePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			return
 		}
 	}
+
+	// Ambil snapshot penandatangan (nama/NIP/jabatan Kepala Dinas atau
+	// pelaksana tugasnya) dari Pengaturan Formulir yang berlaku SEKARANG, dan
+	// bekukan ke pengajuan ini -- lihat catatan pada field TtdNama dkk. di
+	// models.go untuk alasannya. DisetujuiOlehUsername/Role merekam siapa
+	// yang meng-ACC di sistem (dipakai juga sebagai isi barcode/QR tanda
+	// tangan otomatis pada formulir cetak).
+	pengaturan := pengaturanSuratOrDefault(db)
+	item.TtdNama, item.TtdNip, item.TtdJabatan = resolveSignerInfo(db, pengaturan)
+	item.DisetujuiOlehUsername = claims.Username
+	item.DisetujuiOlehRole = claims.RoleName
 
 	now := time.Now()
 	item.Status = models.StatusDisetuju
@@ -953,6 +972,14 @@ func returnPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	item.IDAtasanApprove = nil
 	item.TglApproval = nil
 	item.CatatanApproval = ""
+	// snapshot penandatangan/ACC lama juga dikosongkan -- kalau nanti
+	// disetujui ulang, dihitung ulang dari Pengaturan Formulir yang berlaku
+	// saat itu (lihat catatan pada field TtdNama dkk. di models.go).
+	item.TtdNama = ""
+	item.TtdNip = ""
+	item.TtdJabatan = ""
+	item.DisetujuiOlehUsername = ""
+	item.DisetujuiOlehRole = ""
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengembalikan pengajuan: "+err.Error())
 		return

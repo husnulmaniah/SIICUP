@@ -13,6 +13,7 @@ import (
 	"cuti-app/models"
 	"cuti-app/utils"
 
+	"github.com/skip2/go-qrcode"
 	"gorm.io/gorm"
 )
 
@@ -181,10 +182,83 @@ func suratNomorKode(jenisNama string) string {
 	}
 }
 
+// resolveSignerInfo looks up the Pegawai record matching pengaturan's
+// configured NIP (if any) to determine their CURRENT jabatan, so the
+// signature block shows the penandatangan's actual position (e.g. "Kepala
+// Dinas Pendidikan dan Kebudayaan Daerah" or, if a Sekretaris is signing as
+// pelaksana tugas, "Sekretaris Dinas Pendidikan dan Kebudayaan Daerah")
+// instead of a hardcoded "Kepala Dinas" label. Falls back to the generic
+// "Kepala Dinas" label when no matching pegawai/jabatan is found (e.g. the
+// configured NIP doesn't exist in Data Pegawai, or hasn't been set at all).
+//
+// Called from two places: approvePengajuan (pengajuan_cuti.go) freezes the
+// result onto the pengajuan's TtdNama/TtdNip/TtdJabatan at approval time, and
+// downloadFormRekomendasi/downloadFormCuti below fall back to calling it
+// live only for pengajuan approved before that snapshot existed (empty
+// TtdNip/TtdNama).
+func resolveSignerInfo(db *gorm.DB, pengaturan models.PengaturanSurat) (nama, nip, jabatan string) {
+	nama = pengaturan.NamaKepalaDinas
+	nip = pengaturan.NipKepalaDinas
+	jabatan = "Kepala Dinas"
+	if strings.TrimSpace(nip) == "" {
+		return
+	}
+	var pegawai models.Pegawai
+	if err := db.Preload("Jabatan").Where("nip = ?", nip).First(&pegawai).Error; err == nil && pegawai.Jabatan != nil {
+		jabatan = pegawai.Jabatan.Jabatan
+	}
+	return
+}
+
+// buildSignatureQR encodes a compact verification payload for the automatic
+// digital-signature stamp printed on both forms (Formulir Cuti & Surat
+// Rekomendasi) -- scanning it with any QR reader shows who the leave is for,
+// who signed as penandatangan, and which account processed the approval in
+// SIICUP, without anyone having to physically sign each printed copy. A
+// failure here (extremely unlikely -- the payload is short plain text) is
+// meant to be treated by the caller as "skip the stamp", not a hard error:
+// it's a supplementary trust marker, not the form's substance.
+func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai) ([]byte, error) {
+	jenisNama := "-"
+	if item.JenisCuti != nil {
+		jenisNama = item.JenisCuti.Jenis
+	}
+	lines := []string{
+		"SIICUP - Verifikasi Dokumen Cuti",
+		fmt.Sprintf("Pengajuan #%d", item.ID),
+		"Pegawai Cuti: " + pegawai.Nama + " (NIP " + namaOrDash(pegawai.NIP) + ")",
+		"Jenis Cuti: " + jenisNama,
+		"Tanggal Cuti: " + formatTanggalRentang(item.TglMulai, item.TglSelesai),
+		"Ditandatangani: " + namaOrDash(item.TtdNama) + " (" + namaOrDash(item.TtdJabatan) + "), NIP " + namaOrDash(item.TtdNip) + ".",
+	}
+	if item.DisetujuiOlehUsername != "" {
+		lines = append(lines, fmt.Sprintf("Disetujui di SIICUP oleh: %s (%s)", item.DisetujuiOlehUsername, namaOrDash(item.DisetujuiOlehRole)))
+	}
+	if item.TglApproval != nil {
+		lines = append(lines, "Tanggal Persetujuan: "+formatDateID(*item.TglApproval))
+	}
+	return qrcode.Encode(strings.Join(lines, "\n"), qrcode.Medium, 240)
+}
+
+// drawSignatureQR registers (under a page-unique name) and draws the
+// automatic signature QR at (x, yTop) sized side x side pt square. Any error
+// (encoding or registration) is swallowed on purpose -- see buildSignatureQR.
+func drawSignatureQR(doc *utils.PDFDoc, p *utils.PDFPage, name string, item models.PengajuanCuti, pegawai models.Pegawai, x, yTop, side float64) {
+	png, err := buildSignatureQR(item, pegawai)
+	if err != nil {
+		return
+	}
+	if err := doc.RegisterImage(name, png); err != nil {
+		return
+	}
+	p.Image(name, x, yTop, side, side)
+}
+
 // buildSuratRekomendasi generates the "Surat Rekomendasi Izin Cuti" -- the
 // cover letter the Dinas sends to the Bupati/BKPSDM forwarding an approved
-// leave request.
-func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, pengaturan models.PengaturanSurat) ([]byte, error) {
+// leave request. signerNama/signerNip/signerJabatan identify the
+// penandatangan (see resolveSignerInfo / the TtdNama et al. fields).
+func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, signerNama, signerNip, signerJabatan string) ([]byte, error) {
 	doc := utils.NewPDFDoc()
 	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
 		return nil, err
@@ -264,26 +338,30 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, pe
 	sigX := pageW - 230
 	p.Text(sigX, y, "Kolonodale, "+formatDateID(tglApproval)+".")
 	y += lineH
-	p.Text(sigX, y, "Kepala Dinas")
+	p.Text(sigX, y, namaOrDash(signerJabatan))
+	// Barcode/QR tanda tangan otomatis -- ditempatkan di ruang kosong yang
+	// dulunya disediakan untuk tanda tangan basah, di atas nama penandatangan
+	// (lihat drawSignatureQR/buildSignatureQR).
+	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, sigX, y+6, 46)
 	y += lineH * 4
 
-	// Nama Kepala Dinas dipotong (truncateToWidth) bila tidak biasa
+	// Nama penandatangan dipotong (truncateToWidth) bila tidak biasa
 	// panjangnya, supaya tidak pernah meluber melewati tepi kanan halaman --
 	// sama seperti perlakuan pada Formulir Cuti.
-	kepalaDinasNama := truncateToWidth(namaOrDash(pengaturan.NamaKepalaDinas), (rightX-sigX)*boldWidthSafety, 12)
+	signerNamaDisp := truncateToWidth(namaOrDash(signerNama), (rightX-sigX)*boldWidthSafety, 12)
 	p.SetFont(true, 12)
-	p.Text(sigX, y, kepalaDinasNama)
-	p.Line(sigX, y+3, sigX+utils.TextWidth(kepalaDinasNama, 12), y+3)
+	p.Text(sigX, y, signerNamaDisp)
+	p.Line(sigX, y+3, sigX+utils.TextWidth(signerNamaDisp, 12), y+3)
 	y += 16
 	p.SetFont(false, 12)
-	p.Text(sigX, y, "NIP: "+namaOrDash(pengaturan.NipKepalaDinas)+".")
+	p.Text(sigX, y, "NIP: "+namaOrDash(signerNip)+".")
 
 	return doc.Output()
 }
 
 // buildFormulirCuti generates the official "Formulir Permintaan dan
 // Pemberian Cuti" (leave request/grant form).
-func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengaturan models.PengaturanSurat, jatah map[int]models.JatahCuti) ([]byte, error) {
+func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signerNama, signerNip, signerJabatan string, jatah map[int]models.JatahCuti) ([]byte, error) {
 	doc := utils.NewPDFDoc()
 	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
 		return nil, err
@@ -639,14 +717,15 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, pengat
 	sigColCenter := dividerX + (rightX-dividerX)/2
 	sigMaxWVII := (rightX - dividerX) - 16
 	p.SetFont(false, 11)
-	p.TextCentered(sigColCenter, rowTop+41, "Kepala Dinas")
-	kepalaDinasNama := truncateToWidth(namaOrDash(pengaturan.NamaKepalaDinas), sigMaxWVII*boldWidthSafety, 12)
+	p.TextCentered(sigColCenter, rowTop+41, namaOrDash(signerJabatan))
+	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, sigColCenter-23, rowTop+48, 46)
+	kepalaDinasNama := truncateToWidth(namaOrDash(signerNama), sigMaxWVII*boldWidthSafety, 12)
 	p.SetFont(true, 12)
 	p.TextCentered(sigColCenter, rowTop+106, kepalaDinasNama)
 	w2 := utils.TextWidth(kepalaDinasNama, 12)
 	p.Line(sigColCenter-w2/2, rowTop+110, sigColCenter+w2/2, rowTop+110)
 	p.SetFont(false, 11)
-	p.TextCentered(sigColCenter, rowTop+126, "NIP: "+namaOrDash(pengaturan.NipKepalaDinas)+".")
+	p.TextCentered(sigColCenter, rowTop+126, "NIP: "+namaOrDash(signerNip)+".")
 	y = rowBottom(rowTop, rowH, "VII")
 
 	// bingkai luar tabel
@@ -716,13 +795,25 @@ func loadApprovedPengajuanForForm(w http.ResponseWriter, r *http.Request, db *go
 	return item, pegawai, true
 }
 
+// resolveItemSignerTrio returns the signer nama/nip/jabatan snapshot frozen
+// onto the pengajuan at approval time (TtdNama/TtdNip/TtdJabatan). For
+// pengajuan approved before this feature existed (snapshot empty), it falls
+// back to resolving the CURRENT signer from pengaturan surat live, matching
+// the old (pre-snapshot) behaviour for those legacy documents.
+func resolveItemSignerTrio(db *gorm.DB, item models.PengajuanCuti) (nama, nip, jabatan string) {
+	if strings.TrimSpace(item.TtdNama) != "" || strings.TrimSpace(item.TtdNip) != "" {
+		return item.TtdNama, item.TtdNip, item.TtdJabatan
+	}
+	return resolveSignerInfo(db, pengaturanSuratOrDefault(db))
+}
+
 func downloadFormRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	item, pegawai, ok := loadApprovedPengajuanForForm(w, r, db)
 	if !ok {
 		return
 	}
-	pengaturan := pengaturanSuratOrDefault(db)
-	pdfBytes, err := buildSuratRekomendasi(item, pegawai, pengaturan)
+	signerNama, signerNip, signerJabatan := resolveItemSignerTrio(db, item)
+	pdfBytes, err := buildSuratRekomendasi(item, pegawai, signerNama, signerNip, signerJabatan)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat formulir: "+err.Error())
 		return
@@ -735,10 +826,10 @@ func downloadFormCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if !ok {
 		return
 	}
-	pengaturan := pengaturanSuratOrDefault(db)
+	signerNama, signerNip, signerJabatan := resolveItemSignerTrio(db, item)
 	year := item.TglMulai.Year()
 	jatah := loadJatahHistory(db, pegawai.ID, []int{year, year - 1, year - 2})
-	pdfBytes, err := buildFormulirCuti(item, pegawai, pengaturan, jatah)
+	pdfBytes, err := buildFormulirCuti(item, pegawai, signerNama, signerNip, signerJabatan, jatah)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat formulir: "+err.Error())
 		return

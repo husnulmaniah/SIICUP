@@ -188,8 +188,25 @@ type PengajuanCuti struct {
 	// tampil sebagai kolom kosong di suratnya seperti sebelum field ini ada)
 	// -- dan hanya administrator/admin yang boleh mengisi/mengubahnya
 	// (lihat updateNomorSurat di handlers/pengajuan_cuti.go).
-	NomorSurat string    `json:"nomor_surat" gorm:"column:nomor_surat;size:100"`
-	CreatedAt  time.Time `json:"created_at"`
+	NomorSurat string `json:"nomor_surat" gorm:"column:nomor_surat;size:100"`
+	// Snapshot penandatangan (Kepala Dinas/pelaksana tugas) & siapa yang
+	// meng-ACC pengajuan ini di sistem -- diisi SEKALI oleh approvePengajuan
+	// (handlers/pengajuan_cuti.go) saat status berubah jadi disetujui, dari
+	// Pengaturan Formulir yang berlaku SAAT ITU. Sengaja tidak ikut berubah
+	// lagi walau Pengaturan Formulir diubah setelahnya -- supaya pengajuan
+	// yang sudah disetujui dengan tanda tangan lama tetap menampilkan tanda
+	// tangan lama di formulirnya; hanya pengajuan yang belum/akan disetujui
+	// yang memakai pengaturan terbaru. Dikosongkan lagi oleh returnPengajuan
+	// (batal setuju -> pending) atau updatePengajuan (reset ke pending saat
+	// diedit), supaya persetujuan berikutnya menghitung ulang dari pengaturan
+	// yang berlaku saat itu. Dipakai juga sebagai isi barcode/QR tanda tangan
+	// otomatis pada formulir cetak (lihat buildSignatureQR di formulir.go).
+	TtdNama               string    `json:"ttd_nama" gorm:"column:ttd_nama;size:150"`
+	TtdNip                string    `json:"ttd_nip" gorm:"column:ttd_nip;size:30"`
+	TtdJabatan            string    `json:"ttd_jabatan" gorm:"column:ttd_jabatan;size:150"`
+	DisetujuiOlehUsername string    `json:"disetujui_oleh_username" gorm:"column:disetujui_oleh_username;size:100"`
+	DisetujuiOlehRole     string    `json:"disetujui_oleh_role" gorm:"column:disetujui_oleh_role;size:20"`
+	CreatedAt             time.Time `json:"created_at"`
 
 	// Dokumen kelengkapan yang diupload saat pengajuan dibuat (wajib untuk
 	// pengajuan mandiri oleh pegawai/atasan, opsional bila dibuatkan oleh admin).
