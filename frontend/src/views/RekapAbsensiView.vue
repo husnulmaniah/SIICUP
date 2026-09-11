@@ -338,6 +338,41 @@ function formatKoordinat(row, jenis) {
 }
 
 // ============================================================
+// titik koordinat -> tautan Google Maps
+// ============================================================
+
+// Format "?api=1&query=lat,lng" adalah format resmi Google Maps: sekali klik
+// langsung terbuka dengan penanda pada titik itu, baik di browser maupun di
+// aplikasi Google Maps pada HP.
+function mapsUrl(lat, lng) {
+  return `https://www.google.com/maps/search/?api=1&query=${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`
+}
+
+// koordinat absen TERAKHIR pada satu baris absensi: pakai titik absen pulang
+// bila sudah ada, kalau belum pakai titik absen masuk
+function koordinatTerakhir(row) {
+  if (row?.lat_pulang != null && row?.lng_pulang != null) {
+    return { lat: row.lat_pulang, lng: row.lng_pulang, jenis: 'pulang' }
+  }
+  if (row?.lat_masuk != null && row?.lng_masuk != null) {
+    return { lat: row.lat_masuk, lng: row.lng_masuk, jenis: 'masuk' }
+  }
+  return null
+}
+
+// lokasi absen TERAKHIR seorang pegawai pada periode yang sedang dilihat --
+// dipakai kolom "Lokasi Terakhir" pada tabel rekap. item.absensi sudah urut
+// dari tanggal terbaru (lihat buildRekapItems di backend), jadi baris pertama
+// yang punya koordinat adalah absen terakhirnya.
+function lokasiTerakhirPegawai(item) {
+  for (const a of item?.absensi || []) {
+    const k = koordinatTerakhir(a)
+    if (k) return { ...k, tanggal: dateKey(a.tanggal) }
+  }
+  return null
+}
+
+// ============================================================
 // foto absen masuk/pulang (admin/administrator) -- thumbnail langsung di
 // tabel detail, klik untuk memperbesar
 // ============================================================
@@ -699,6 +734,22 @@ function kodeDokumen(jenis) {
             </span>
           </template>
         </Column>
+        <Column header="Lokasi Terakhir">
+          <template #body="{ data }">
+            <a
+              v-if="lokasiTerakhirPegawai(data)"
+              class="koordinat-link"
+              :href="mapsUrl(lokasiTerakhirPegawai(data).lat, lokasiTerakhirPegawai(data).lng)"
+              target="_blank"
+              rel="noopener"
+              :title="`Buka lokasi absen ${lokasiTerakhirPegawai(data).jenis} tanggal ${formatTanggal(lokasiTerakhirPegawai(data).tanggal)} di Google Maps`"
+            >
+              <i class="pi pi-map-marker"></i>
+              {{ formatTanggal(lokasiTerakhirPegawai(data).tanggal) }}
+            </a>
+            <span v-else>-</span>
+          </template>
+        </Column>
         <Column header="Aksi">
           <template #body="{ data }">
             <Button icon="pi pi-eye" size="small" text rounded title="Lihat Detail" @click="openDetail(data)" />
@@ -790,8 +841,32 @@ function kodeDokumen(jenis) {
               <span v-else>-</span>
             </template>
           </Column>
-          <Column header="Koordinat">
-            <template #body="{ data }">{{ formatKoordinat(data, data.jam_pulang ? 'pulang' : 'masuk') }}</template>
+          <Column header="Titik Koordinat">
+            <template #body="{ data }">
+              <div class="koordinat-cell">
+                <a
+                  v-if="data.lat_masuk != null && data.lng_masuk != null"
+                  class="koordinat-link"
+                  :href="mapsUrl(data.lat_masuk, data.lng_masuk)"
+                  target="_blank"
+                  rel="noopener"
+                  title="Buka lokasi absen masuk di Google Maps"
+                >
+                  <i class="pi pi-map-marker"></i> Masuk: {{ formatKoordinat(data, 'masuk') }}
+                </a>
+                <a
+                  v-if="data.lat_pulang != null && data.lng_pulang != null"
+                  class="koordinat-link"
+                  :href="mapsUrl(data.lat_pulang, data.lng_pulang)"
+                  target="_blank"
+                  rel="noopener"
+                  title="Buka lokasi absen pulang di Google Maps"
+                >
+                  <i class="pi pi-map-marker"></i> Pulang: {{ formatKoordinat(data, 'pulang') }}
+                </a>
+                <span v-if="!koordinatTerakhir(data)">-</span>
+              </div>
+            </template>
           </Column>
           <template #empty>Belum ada absen pada bulan ini.</template>
         </DataTable>
@@ -1090,6 +1165,25 @@ function kodeDokumen(jenis) {
 }
 .foto-thumb:hover {
   border-color: #6366f1;
+}
+
+/* ---------- tautan titik koordinat ke Google Maps ---------- */
+.koordinat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.koordinat-link {
+  color: #4f46e5;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+.koordinat-link:hover {
+  text-decoration: underline;
+}
+.koordinat-link i {
+  font-size: 0.72rem;
 }
 
 /* ---------- tampilan HP ---------- */

@@ -205,6 +205,29 @@ function formatKoordinat(row, jenis) {
 }
 
 // ============================================================
+// titik koordinat -> tautan Google Maps
+// ============================================================
+
+// Format "?api=1&query=lat,lng" adalah format resmi Google Maps: sekali klik
+// langsung terbuka dengan penanda pada titik tersebut, di browser maupun di
+// aplikasi Google Maps pada HP -- jadi koordinat tidak perlu disalin manual.
+function mapsUrl(lat, lng) {
+  return `https://www.google.com/maps/search/?api=1&query=${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`
+}
+
+function punyaKoordinat(row, jenis) {
+  const lat = jenis === 'masuk' ? row.lat_masuk : row.lat_pulang
+  const lng = jenis === 'masuk' ? row.lng_masuk : row.lng_pulang
+  return lat != null && lng != null
+}
+
+function mapsUrlBaris(row, jenis) {
+  const lat = jenis === 'masuk' ? row.lat_masuk : row.lat_pulang
+  const lng = jenis === 'masuk' ? row.lng_masuk : row.lng_pulang
+  return lat == null || lng == null ? '' : mapsUrl(lat, lng)
+}
+
+// ============================================================
 // kamera + verifikasi kedipan mata + capture otomatis
 // ============================================================
 
@@ -643,7 +666,31 @@ async function downloadDokumen(item) {
             </template>
           </Column>
           <Column header="Titik Koordinat">
-            <template #body="{ data }">{{ formatKoordinat(data, data.jam_pulang ? 'pulang' : 'masuk') }}</template>
+            <template #body="{ data }">
+              <div class="koordinat-cell">
+                <a
+                  v-if="punyaKoordinat(data, 'masuk')"
+                  class="koordinat-link"
+                  :href="mapsUrlBaris(data, 'masuk')"
+                  target="_blank"
+                  rel="noopener"
+                  title="Buka lokasi absen masuk di Google Maps"
+                >
+                  <i class="pi pi-map-marker"></i> Masuk: {{ formatKoordinat(data, 'masuk') }}
+                </a>
+                <a
+                  v-if="punyaKoordinat(data, 'pulang')"
+                  class="koordinat-link"
+                  :href="mapsUrlBaris(data, 'pulang')"
+                  target="_blank"
+                  rel="noopener"
+                  title="Buka lokasi absen pulang di Google Maps"
+                >
+                  <i class="pi pi-map-marker"></i> Pulang: {{ formatKoordinat(data, 'pulang') }}
+                </a>
+                <span v-if="!punyaKoordinat(data, 'masuk') && !punyaKoordinat(data, 'pulang')">-</span>
+              </div>
+            </template>
           </Column>
           <template #empty>Belum ada riwayat absen pada bulan ini.</template>
         </DataTable>
@@ -786,6 +833,23 @@ async function downloadDokumen(item) {
 }
 .foto-thumb:hover {
   border-color: #6366f1;
+}
+.koordinat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.koordinat-link {
+  color: #4f46e5;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+.koordinat-link:hover {
+  text-decoration: underline;
+}
+.koordinat-link i {
+  font-size: 0.72rem;
 }
 .text-muted {
   color: #6b7280;

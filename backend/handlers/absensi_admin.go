@@ -284,6 +284,7 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		Terlambat string
 		JamPulang string
 		Koordinat string
+		LinkMaps  string
 		Status    string
 	}
 	var rows []row
@@ -319,21 +320,25 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 				} else {
 					out.JamPulang = "-"
 				}
-				if a.LatMasuk != nil && a.LngMasuk != nil {
-					out.Koordinat = strconv.FormatFloat(*a.LatMasuk, 'f', 6, 64) + ", " + strconv.FormatFloat(*a.LngMasuk, 'f', 6, 64)
+				// koordinat & tautan Maps mengikuti absen TERAKHIR hari itu
+				// (pulang bila ada, kalau belum ya masuk)
+				if lat, lng, ok := koordinatTerakhir(a); ok {
+					out.Koordinat = strconv.FormatFloat(lat, 'f', 6, 64) + ", " + strconv.FormatFloat(lng, 'f', 6, 64)
+					out.LinkMaps = mapsURL(lat, lng)
 				} else {
 					out.Koordinat = "-"
+					out.LinkMaps = "-"
 				}
 				out.Status = "Hadir"
 			case terlewatSet[key]:
-				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat = "-", "-", "-", "-"
+				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat, out.LinkMaps = "-", "-", "-", "-", "-"
 				out.Status = "Tidak Hadir"
 			case tercoverByTanggal[key].Kode != "":
-				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat = "-", "-", "-", "-"
+				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat, out.LinkMaps = "-", "-", "-", "-", "-"
 				t := tercoverByTanggal[key]
 				out.Status = fmt.Sprintf("%s (%s)", t.Label, t.Kode)
 			default:
-				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat = "-", "-", "-", "-"
+				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat, out.LinkMaps = "-", "-", "-", "-", "-"
 				out.Status = "Tidak Hadir"
 			}
 			rows = append(rows, out)
@@ -348,6 +353,7 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		{Header: "Terlambat", Get: func(item interface{}) string { return item.(row).Terlambat }},
 		{Header: "Jam Pulang", Get: func(item interface{}) string { return item.(row).JamPulang }},
 		{Header: "Koordinat", Get: func(item interface{}) string { return item.(row).Koordinat }},
+		{Header: "Link Maps", Get: func(item interface{}) string { return item.(row).LinkMaps }},
 		{Header: "Status", Get: func(item interface{}) string { return item.(row).Status }},
 	}
 	f, err := utils.ExportData(rows, columns)

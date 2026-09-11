@@ -44,6 +44,7 @@ type barisRekapPDF struct {
 	JamPulang  string
 	Status     string
 	Koordinat  string
+	MapsURL    string // tautan Google Maps ke titik koordinat baris ini
 	FotoMasuk  string // nama gambar yang sudah diregistrasi ke PDFDoc ("" = tidak ada)
 	FotoPulang string
 }
@@ -137,10 +138,12 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 				row.Terlambat = strconv.Itoa(a.TerlambatMenit) + " mnt"
 				ringkasan.Terlambat++
 			}
-			if a.LatMasuk != nil && a.LngMasuk != nil {
-				row.Koordinat = fmt.Sprintf("%.5f, %.5f", *a.LatMasuk, *a.LngMasuk)
-			} else if a.LatPulang != nil && a.LngPulang != nil {
-				row.Koordinat = fmt.Sprintf("%.5f, %.5f", *a.LatPulang, *a.LngPulang)
+			// titik koordinat yang ditampilkan mengikuti absen TERAKHIR pada
+			// hari itu (pulang kalau sudah ada, kalau belum ya masuk) dan
+			// dibuat bisa diklik langsung ke Google Maps.
+			if lat, lng, ok := koordinatTerakhir(a); ok {
+				row.Koordinat = fmt.Sprintf("%.5f, %.5f", lat, lng)
+				row.MapsURL = mapsURL(lat, lng)
 			}
 			// foto dikecilkan dulu (64px) lalu diubah ke PNG karena penulis PDF
 			// hanya menerima PNG -- lihat fotoThumbPNG di absensi.go
@@ -307,7 +310,17 @@ func buildRekapAbsensiPDF(
 			x += lebar
 		}
 
-		p.TextCentered(x+kolom[9].lebar/2, teksY, b.Koordinat)
+		// kolom koordinat: teksnya digarisbawahi dan seluruh selnya dijadikan
+		// area klik yang membuka Google Maps pada titik tersebut
+		lebarKoord := kolom[9].lebar
+		p.TextCentered(x+lebarKoord/2, teksY, b.Koordinat)
+		if b.MapsURL != "" {
+			lebarTeks := utils.TextWidth(b.Koordinat, fontBaris)
+			xTeks := x + (lebarKoord-lebarTeks)/2
+			p.Line(xTeks, teksY+1.5, xTeks+lebarTeks, teksY+1.5)
+			p.Link(x, yTop, lebarKoord, rowH, b.MapsURL)
+		}
+
 		p.Line(marginX, yTop+rowH, rightX, yTop+rowH)
 	}
 
@@ -369,6 +382,8 @@ func buildRekapAbsensiPDF(
 				"Hadir %d hari  |  Terlambat %d kali  |  Dinas Dalam %d  |  Izin %d  |  Sakit %d  |  Tidak Absen %d",
 				ringkasan.Hadir, ringkasan.Terlambat, ringkasan.DinasDalam, ringkasan.Izin, ringkasan.Sakit, ringkasan.TidakAbsen,
 			))
+			p.SetFont(false, 7.5)
+			p.Text(marginX, 265, "Titik koordinat pada tabel bisa diklik untuk membuka lokasi absen di Google Maps.")
 
 			yTabel = yTabelHal1
 		} else {

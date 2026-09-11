@@ -105,10 +105,19 @@ func pdfEscape(s string) string {
 // PDF's native bottom-left origin internally.
 // ---------------------------------------------------------------------------
 
+// pdfLink adalah satu area klik pada halaman yang membuka URL (annotation
+// /Link pada PDF) -- dipakai mis. untuk membuat titik koordinat absen bisa
+// langsung diklik dan terbuka di Google Maps.
+type pdfLink struct {
+	x, yTop, w, h float64
+	url           string
+}
+
 type PDFPage struct {
-	W, H float64
-	buf  bytes.Buffer
-	size float64
+	W, H  float64
+	buf   bytes.Buffer
+	size  float64
+	links []pdfLink
 }
 
 func NewPDFPage(w, h float64) *PDFPage {
@@ -183,6 +192,16 @@ func (p *PDFPage) Cross(x, yTop, size float64) {
 func (p *PDFPage) Checkmark(x, yTop, size float64) {
 	p.Line(x+size*0.12, yTop+size*0.55, x+size*0.4, yTop+size*0.85)
 	p.Line(x+size*0.4, yTop+size*0.85, x+size*0.92, yTop+size*0.12)
+}
+
+// Link marks a rectangular area (top-left corner at (x, yTop)) as clickable:
+// membuka url saat diklik di pembaca PDF. Tidak menggambar apa pun -- teks/
+// garis bawahnya digambar sendiri oleh pemanggil.
+func (p *PDFPage) Link(x, yTop, w, h float64, url string) {
+	if url == "" || w <= 0 || h <= 0 {
+		return
+	}
+	p.links = append(p.links, pdfLink{x: x, yTop: yTop, w: w, h: h, url: url})
 }
 
 // Image draws a previously registered (via PDFDoc.RegisterImage) image by
@@ -283,10 +302,17 @@ func (d *PDFDoc) Output() ([]byte, error) {
 		imageIDs[name] = alloc()
 	}
 
-	type pageIDs struct{ page, content int }
+	type pageIDs struct {
+		page, content int
+		annots        []int // satu objek annotation per link pada halaman itu
+	}
 	pIDs := make([]pageIDs, len(d.pages))
-	for i := range d.pages {
-		pIDs[i] = pageIDs{alloc(), alloc()}
+	for i, page := range d.pages {
+		ids := pageIDs{page: alloc(), content: alloc()}
+		for range page.links {
+			ids.annots = append(ids.annots, alloc())
+		}
+		pIDs[i] = ids
 	}
 
 	offsets := make([]int, nextID)
@@ -337,8 +363,34 @@ func (d *PDFDoc) Output() ([]byte, error) {
 	for i, page := range d.pages {
 		ids := pIDs[i]
 		content := page.buf.Bytes()
-		writeObj(ids.page, fmt.Sprintf("<< /Type /Page /Parent %s /MediaBox [0 0 %.2f %.2f] /Contents %s >>", pdfRef(pagesID), page.W, page.H, pdfRef(ids.content)))
+
+		// daftar area klik (kalau ada) dilampirkan ke halaman lewat /Annots
+		annots := ""
+		if len(ids.annots) > 0 {
+			var ab bytes.Buffer
+			ab.WriteString(" /Annots [")
+			for j, id := range ids.annots {
+				if j > 0 {
+					ab.WriteString(" ")
+				}
+				ab.WriteString(pdfRef(id))
+			}
+			ab.WriteString("]")
+			annots = ab.String()
+		}
+
+		writeObj(ids.page, fmt.Sprintf("<< /Type /Page /Parent %s /MediaBox [0 0 %.2f %.2f] /Contents %s%s >>", pdfRef(pagesID), page.W, page.H, pdfRef(ids.content), annots))
 		writeStreamObj(ids.content, fmt.Sprintf("<< /Length %d >>", len(content)), content)
+
+		for j, lk := range page.links {
+			// koordinat annotation memakai titik asal kiri-BAWAH seperti PDF
+			// aslinya, jadi yTop dibalik dulu (lihat komentar pada PDFPage).
+			y2 := page.H - lk.yTop
+			y1 := y2 - lk.h
+			writeObj(ids.annots[j], fmt.Sprintf(
+				"<< /Type /Annot /Subtype /Link /Rect [%.2f %.2f %.2f %.2f] /Border [0 0 0] /F 4 /A << /S /URI /URI (%s) >> >>",
+				lk.x, y1, lk.x+lk.w, y2, pdfEscape(lk.url)))
+		}
 	}
 
 	xrefStart := buf.Len()

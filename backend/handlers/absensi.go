@@ -53,6 +53,28 @@ func absensiToday() time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 }
 
+// mapsURL membuat tautan Google Maps ke satu titik koordinat. Format
+// "?api=1&query=lat,lng" adalah format resmi Google Maps yang langsung
+// membuka penanda pada titik tersebut, baik di browser maupun di aplikasi
+// Google Maps pada HP -- dipakai pada riwayat/rekap absen, export Excel, dan
+// PDF supaya titik koordinat tidak perlu disalin-tempel manual.
+func mapsURL(lat, lng float64) string {
+	return fmt.Sprintf("https://www.google.com/maps/search/?api=1&query=%.6f,%.6f", lat, lng)
+}
+
+// koordinatTerakhir mengambil titik koordinat dari absen TERAKHIR pada satu
+// baris absensi: koordinat absen pulang bila sudah ada, kalau belum memakai
+// koordinat absen masuk.
+func koordinatTerakhir(a models.Absensi) (lat, lng float64, ok bool) {
+	if a.LatPulang != nil && a.LngPulang != nil {
+		return *a.LatPulang, *a.LngPulang, true
+	}
+	if a.LatMasuk != nil && a.LngMasuk != nil {
+		return *a.LatMasuk, *a.LngMasuk, true
+	}
+	return 0, 0, false
+}
+
 // formatJamAbsensi memformat jam absen (jam masuk/pulang) ke "HH:MM" dalam
 // zona WITA. Konversi zonanya WAJIB: driver database mengembalikan kolom
 // timestamptz apa adanya (UTC), jadi memformat langsung tanpa .In() membuat
