@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +80,151 @@ func getPengaturanAbsensi(db *gorm.DB) (models.PengaturanAbsensi, error) {
 	return item, err
 }
 
+// distanceMeters menghitung jarak (meter) antara dua titik koordinat bumi
+// memakai formula Haversine -- dipakai untuk memvalidasi radius absen
+// terhadap titik koordinat kantor (lihat absensiCekRadius).
+func distanceMeters(lat1, lng1, lat2, lng2 float64) float64 {
+	const bumiRadiusMeter = 6371000.0
+	toRad := func(deg float64) float64 { return deg * math.Pi / 180 }
+	dLat := toRad(lat2 - lat1)
+	dLng := toRad(lng2 - lng1)
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(toRad(lat1))*math.Cos(toRad(lat2))*math.Sin(dLng/2)*math.Sin(dLng/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return bumiRadiusMeter * c
+}
+
+// absensiCekRadius memvalidasi titik koordinat (lat,lng) hasil GPS pegawai
+// terhadap titik koordinat kantor yang diatur administrator. Kalau
+// KantorLat/KantorLng belum diatur (nil), geofence dianggap belum aktif dan
+// absen tetap diperbolehkan tanpa validasi jarak (default terbuka, sama
+// seperti filter tempat tugas/jabatan). Kalau geofence aktif tapi lat/lng
+// pegawai tidak terdeteksi (GPS ditolak/gagal), absen ditolak karena jarak
+// tidak bisa dipastikan.
+func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng *float64) (ok bool, pesan string) {
+	if setting.KantorLat == nil || setting.KantorLng == nil {
+		return true, ""
+	}
+	radius := setting.RadiusMeter
+	if radius <= 0 {
+		radius = 20
+	}
+	if lat == nil || lng == nil {
+		return false, "lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi pada perangkat/browser Anda dan izinkan akses lokasi, lalu coba lagi."
+	}
+	jarak := distanceMeters(*setting.KantorLat, *setting.KantorLng, *lat, *lng)
+	if jarak > float64(radius) {
+		return false, fmt.Sprintf("Anda berada di luar radius kantor (jarak sekitar %.0f meter, maksimal %d meter dari titik kantor). Absen tidak dapat dilakukan dari lokasi ini.", jarak, radius)
+	}
+	return true, ""
+}
+
+// absensiAllowedTempatTugas/absensiAllowedJabatanIDs mem-parse kolom JSON
+// text PengaturanAbsensi.TempatTugasAllowed/JabatanAllowedIDs -- lihat
+// komentar pada model untuk format & artinya (daftar kosong = filter itu
+// tidak diberlakukan).
+func absensiAllowedTempatTugas(item models.PengaturanAbsensi) []string {
+	if strings.TrimSpace(item.TempatTugasAllowed) == "" {
+		return nil
+	}
+	var out []string
+	_ = json.Unmarshal([]byte(item.TempatTugasAllowed), &out)
+	return out
+}
+
+func absensiAllowedJabatanIDs(item models.PengaturanAbsensi) []uint {
+	if strings.TrimSpace(item.JabatanAllowedIDs) == "" {
+		return nil
+	}
+	var out []uint
+	_ = json.Unmarshal([]byte(item.JabatanAllowedIDs), &out)
+	return out
+}
+
+// absensiEligible menentukan apakah seorang pegawai boleh memakai menu
+// Absen berdasarkan filter tempat tugas & jabatan yang diatur administrator.
+// Kalau KEDUA filter kosong (belum pernah diatur), menu Absen terbuka untuk
+// semua pegawai -- filter baru berlaku begitu administrator mengisi salah
+// satu/kedua daftarnya lewat halaman Rekap Absen.
+func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai) bool {
+	if allowed := absensiAllowedTempatTugas(setting); len(allowed) > 0 {
+		match := false
+		for _, t := range allowed {
+			if strings.EqualFold(strings.TrimSpace(t), strings.TrimSpace(pegawai.TempatTgs)) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	if allowed := absensiAllowedJabatanIDs(setting); len(allowed) > 0 {
+		if pegawai.IDJabatan == nil {
+			return false
+		}
+		match := false
+		for _, id := range allowed {
+			if id == *pegawai.IDJabatan {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	return true
+}
+
+// pengaturanAbsensiOut adalah bentuk PengaturanAbsensi yang dikirim ke
+// frontend: TempatTugasAllowed/JabatanAllowedIDs (kolom JSON text mentah,
+// gorm json:"-") diparsing jadi array asli, dan Eligible dihitung khusus
+// untuk pegawai/atasan yang login (true untuk administrator/admin/pegawai
+// yang belum diketahui kelayakannya, supaya default aman dan endpoint ini
+// tidak mengubah perilaku untuk role yang tidak relevan dengan filter ini).
+type pengaturanAbsensiOut struct {
+	ID                 uint     `json:"id"`
+	Aktif              bool     `json:"aktif"`
+	JamMulaiPagi       string   `json:"jam_mulai_pagi"`
+	JamBatasPagi       string   `json:"jam_batas_pagi"`
+	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
+	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
+	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
+	KantorLat          *float64 `json:"kantor_lat"`
+	KantorLng          *float64 `json:"kantor_lng"`
+	RadiusMeter        int      `json:"radius_meter"`
+	Eligible           bool     `json:"eligible"`
+}
+
+func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut {
+	tempat := absensiAllowedTempatTugas(item)
+	if tempat == nil {
+		tempat = []string{}
+	}
+	jabatan := absensiAllowedJabatanIDs(item)
+	if jabatan == nil {
+		jabatan = []uint{}
+	}
+	radius := item.RadiusMeter
+	if radius <= 0 {
+		radius = 20
+	}
+	return pengaturanAbsensiOut{
+		ID:                 item.ID,
+		Aktif:              item.Aktif,
+		JamMulaiPagi:       item.JamMulaiPagi,
+		JamBatasPagi:       item.JamBatasPagi,
+		JamMulaiPulang:     item.JamMulaiPulang,
+		TempatTugasAllowed: tempat,
+		JabatanAllowedIDs:  jabatan,
+		KantorLat:          item.KantorLat,
+		KantorLng:          item.KantorLng,
+		RadiusMeter:        radius,
+		Eligible:           true,
+	}
+}
+
 func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
 		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
@@ -95,14 +243,18 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/absensi/saya", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { riwayatAbsenSaya(w, r, db) }))
 	mux.Handle("GET /api/absensi/foto/{id}/{jenis}", anyRole(func(w http.ResponseWriter, r *http.Request) { fotoAbsensi(w, r, db) }))
 
-	// surat pengganti tanggal terlewat
-	mux.Handle("POST /api/absensi/dokumen", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { uploadAbsensiDokumen(w, r, db) }))
+	// surat pendukung (BA/Surat Tugas/Surat Izin/SKS) -- pegawai hanya bisa
+	// melihat/mengunduh, input & hapus khusus admin/administrator (lihat
+	// handlers/absensi_dokumen.go).
 	mux.Handle("GET /api/absensi/dokumen", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { listAbsensiDokumenSaya(w, r, db) }))
+	mux.Handle("GET /api/absensi/dokumen/rekap", manage(func(w http.ResponseWriter, r *http.Request) { listAbsensiDokumenAdmin(w, r, db) }))
+	mux.Handle("POST /api/absensi/dokumen/kolektif", manage(func(w http.ResponseWriter, r *http.Request) { inputAbsensiDokumenKolektif(w, r, db) }))
 	mux.Handle("GET /api/absensi/dokumen/{id}/file", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadAbsensiDokumen(w, r, db) }))
-	mux.Handle("DELETE /api/absensi/dokumen/{id}", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { deleteAbsensiDokumen(w, r, db) }))
+	mux.Handle("DELETE /api/absensi/dokumen/{id}", manage(func(w http.ResponseWriter, r *http.Request) { deleteAbsensiDokumen(w, r, db) }))
 
 	// admin/administrator saja
 	mux.Handle("PUT /api/absensi/pengaturan", manage(func(w http.ResponseWriter, r *http.Request) { updatePengaturanAbsensi(w, r, db) }))
+	mux.Handle("GET /api/absensi/opsi-tempat-tugas", manage(func(w http.ResponseWriter, r *http.Request) { opsiTempatTugasAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap", manage(func(w http.ResponseWriter, r *http.Request) { rekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/export", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensi(w, r, db) }))
 }
@@ -113,7 +265,28 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 		utils.Error(w, http.StatusNotFound, "pengaturan absensi belum tersedia")
 		return
 	}
-	utils.Success(w, "ok", item)
+	out := toPengaturanAbsensiOut(item)
+	if claims, ok := middleware.GetClaims(r); ok && claims.IDPegawai != nil {
+		var pegawai models.Pegawai
+		if err := db.First(&pegawai, *claims.IDPegawai).Error; err == nil {
+			out.Eligible = absensiEligible(item, pegawai)
+		}
+	}
+	utils.Success(w, "ok", out)
+}
+
+// opsiTempatTugasAbsensi mengambil daftar nilai tempat_tgs unik yang benar-
+// benar ada di data pegawai, dipakai administrator untuk memilih tempat
+// tugas mana yang boleh memakai menu Absen (lihat pengaturanAbsensiPayload
+// di absensi_admin.go) -- tempat_tgs adalah field teks bebas (bukan tabel
+// referensi), jadi tidak ada daftar master untuk itu.
+func opsiTempatTugasAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	var values []string
+	db.Model(&models.Pegawai{}).
+		Where("tempat_tgs IS NOT NULL AND tempat_tgs <> ''").
+		Distinct().Pluck("tempat_tgs", &values)
+	sort.Strings(values)
+	utils.Success(w, "ok", values)
 }
 
 // holidaySetInRange mengambil semua tgl_merah dalam rentang sekali saja,
@@ -180,6 +353,16 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	var pegawaiSelf models.Pegawai
+	if err := db.First(&pegawaiSelf, *claims.IDPegawai).Error; err != nil {
+		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
+		return
+	}
+	if !absensiEligible(setting, pegawaiSelf) {
+		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
+		return
+	}
+
 	now := absensiNow()
 	today := absensiToday()
 	nowMin := now.Hour()*60 + now.Minute()
@@ -220,6 +403,11 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	kedipanOk := r.FormValue("kedipan_ok") != "false"
 	lat := parseFloatForm(r, "lat")
 	lng := parseFloatForm(r, "lng")
+
+	if ok, pesan := absensiCekRadius(setting, lat, lng); !ok {
+		utils.Error(w, http.StatusForbidden, pesan)
+		return
+	}
 
 	terlambat := 0
 	if batasMin, ok := parseJamToMinutes(setting.JamBatasPagi); ok && nowMin > batasMin {
@@ -288,6 +476,16 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	var pegawaiSelf models.Pegawai
+	if err := db.First(&pegawaiSelf, *claims.IDPegawai).Error; err != nil {
+		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
+		return
+	}
+	if !absensiEligible(setting, pegawaiSelf) {
+		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
+		return
+	}
+
 	now := absensiNow()
 	today := absensiToday()
 	nowMin := now.Hour()*60 + now.Minute()
@@ -328,6 +526,12 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	kedipanOk := r.FormValue("kedipan_ok") != "false"
 	lat := parseFloatForm(r, "lat")
 	lng := parseFloatForm(r, "lng")
+
+	if ok, pesan := absensiCekRadius(setting, lat, lng); !ok {
+		utils.Error(w, http.StatusForbidden, pesan)
+		return
+	}
+
 	jamPulang := now
 
 	if found {
@@ -365,19 +569,43 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	utils.Created(w, msg, existing)
 }
 
+// tanggalTercoverEntry menjelaskan satu tanggal hari kerja yang tertutup
+// oleh dokumen (surat) yang diinput administrator (Surat Tugas/Berita
+// Acara/Surat Izin/SKS) -- Kode/Label mengikuti models.AbsensiDokumenKode
+// (DD = Dinas Dalam, I = Izin, S = Sakit).
+type tanggalTercoverEntry struct {
+	Tanggal string `json:"tanggal"`
+	Jenis   string `json:"jenis"`
+	Kode    string `json:"kode"`
+	Label   string `json:"label"`
+}
+
+func tercoverEntryFromDokumen(d models.AbsensiDokumen) tanggalTercoverEntry {
+	kode := models.AbsensiDokumenKode[d.Jenis]
+	return tanggalTercoverEntry{
+		Tanggal: d.Tanggal.Format("2006-01-02"),
+		Jenis:   d.Jenis,
+		Kode:    kode,
+		Label:   models.AbsensiDokumenKodeLabel[kode],
+	}
+}
+
 type riwayatAbsenResponse struct {
-	Bulan           int              `json:"bulan"`
-	Tahun           int              `json:"tahun"`
-	Absensi         []models.Absensi `json:"absensi"`
-	TanggalTerlewat []string         `json:"tanggal_terlewat"`
+	Bulan           int                    `json:"bulan"`
+	Tahun           int                    `json:"tahun"`
+	Absensi         []models.Absensi       `json:"absensi"`
+	TanggalTerlewat []string               `json:"tanggal_terlewat"`
+	TanggalTercover []tanggalTercoverEntry `json:"tanggal_tercover"`
 }
 
 // riwayatAbsenSaya mengembalikan riwayat absen pegawai yang login untuk satu
-// bulan (default bulan & tahun berjalan, WITA), plus daftar tanggal_terlewat
-// -- hari kerja pegawai (mengikuti pola 5/6 hari sesuai tempat tugas, sama
-// seperti pengajuan cuti) sampai hari ini yang tidak punya baris Absensi
-// (jam_masuk terisi) DAN tidak punya AbsensiDokumen (surat pengganti) --
-// itulah tanggal yang perlu diupload suratnya.
+// bulan (default bulan & tahun berjalan, WITA), plus dua daftar: tanggal_
+// terlewat (hari kerja -- mengikuti pola 5/6 hari sesuai tempat tugas, sama
+// seperti pengajuan cuti -- yang TIDAK punya baris Absensi dan TIDAK punya
+// AbsensiDokumen sama sekali, sehingga pegawai hanya perlu diberi peringatan
+// karena surat pendukungnya sekarang diinput administrator, bukan diupload
+// sendiri -- lihat handlers/absensi_dokumen.go) dan tanggal_tercover (hari
+// kerja yang sudah ada AbsensiDokumen-nya, ditampilkan dengan kode DD/I/S).
 func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	if claims.IDPegawai == nil {
@@ -434,10 +662,13 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		}
 	}
 	var dokumen []models.AbsensiDokumen
-	db.Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, limit).Find(&dokumen)
+	db.Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, limit).
+		Order("tanggal desc").Find(&dokumen)
 	tercoverSet := map[string]bool{}
+	tercover := []tanggalTercoverEntry{}
 	for _, d := range dokumen {
 		tercoverSet[d.Tanggal.Format("2006-01-02")] = true
+		tercover = append(tercover, tercoverEntryFromDokumen(d))
 	}
 
 	sixDayWeek := sixDayWeekForTempatTgs(pegawai.TempatTgs)
@@ -456,6 +687,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		Tahun:           tahun,
 		Absensi:         rows,
 		TanggalTerlewat: terlewat,
+		TanggalTercover: tercover,
 	})
 }
 

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"cuti-app/middleware"
 	"cuti-app/models"
@@ -13,9 +15,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// absensi_dokumen.go menangani upload surat pengganti (SKS/Surat Tugas/
-// Berita Acara/Surat Izin) untuk tanggal absen yang terlewat -- lihat
-// riwayatAbsenSaya (absensi.go) untuk bagaimana tanggal_terlewat dihitung.
+// absensi_dokumen.go menangani surat pendukung (SKS/Surat Tugas/Berita
+// Acara/Surat Izin) untuk tanggal absen yang terlewat -- lihat
+// riwayatAbsenSaya (absensi.go) untuk bagaimana tanggal_terlewat/tanggal_
+// tercover dihitung. Sejak fitur ini diubah, surat HANYA diinput oleh
+// administrator/admin (bisa kolektif -- beberapa pegawai & rentang tanggal
+// sekaligus lewat inputAbsensiDokumenKolektif), tidak lagi diupload sendiri
+// oleh pegawai -- pegawai hanya bisa melihat/mengunduh surat yang sudah
+// diinput untuknya (listAbsensiDokumenSaya/downloadAbsensiDokumen).
 
 var absensiDokumenLabels = map[string]string{
 	models.AbsensiDokumenSKS:         "Surat Keterangan Sakit (SKS)",
@@ -34,29 +41,65 @@ func canAccessAbsensiDokumen(claims *utils.Claims, item models.AbsensiDokumen) b
 	return false
 }
 
-// uploadAbsensiDokumen menerima multipart/form-data: "tanggal" (tanggal yang
-// terlewat, format DD-MM-YYYY atau YYYY-MM-DD), "jenis" (sks/surat_tugas/
-// berita_acara/surat_izin), "keterangan" (opsional), dan file "file".
-func uploadAbsensiDokumen(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
-	claims, _ := middleware.GetClaims(r)
-	if claims.IDPegawai == nil {
-		utils.Error(w, http.StatusBadRequest, "akun anda belum terhubung dengan data pegawai")
-		return
-	}
-
+// inputAbsensiDokumenKolektif dipakai administrator/admin untuk menginput
+// surat pendukung (BA/Surat Tugas/Surat Izin/SKS) sekaligus untuk beberapa
+// pegawai & rentang tanggal -- menerima multipart/form-data: "id_pegawai"
+// (bisa dikirim berulang untuk pilih beberapa pegawai), "tanggal_mulai" &
+// "tanggal_selesai" (format DD-MM-YYYY atau YYYY-MM-DD; tanggal_selesai
+// opsional, default sama dengan tanggal_mulai kalau hanya satu tanggal),
+// "jenis" (sks/surat_tugas/berita_acara/surat_izin), "keterangan" (opsional)
+// dan file "file" -- satu berkas yang sama dipakai untuk semua pegawai &
+// tanggal yang dipilih (mis. satu Berita Acara untuk banyak pegawai).
+// Kalau untuk (pegawai, tanggal) tertentu sudah ada dokumen sebelumnya, baris
+// itu DIPERBARUI (bukan dibuat lagi) supaya tidak dobel.
+func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return
 	}
 
-	tanggalRaw := strings.TrimSpace(r.FormValue("tanggal"))
-	if tanggalRaw == "" {
-		utils.Error(w, http.StatusBadRequest, "tanggal wajib diisi")
+	idPegawaiRaw := r.Form["id_pegawai"]
+	idList := make([]uint, 0, len(idPegawaiRaw))
+	for _, raw := range idPegawaiRaw {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		v, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			continue
+		}
+		idList = append(idList, uint(v))
+	}
+	if len(idList) == 0 {
+		utils.Error(w, http.StatusBadRequest, "pilih minimal satu pegawai")
 		return
 	}
-	tanggal, err := utils.ParseDateCell(tanggalRaw)
+
+	mulaiRaw := strings.TrimSpace(r.FormValue("tanggal_mulai"))
+	if mulaiRaw == "" {
+		utils.Error(w, http.StatusBadRequest, "tanggal mulai wajib diisi")
+		return
+	}
+	tglMulai, err := utils.ParseDateCell(mulaiRaw)
 	if err != nil {
-		utils.Error(w, http.StatusBadRequest, "tanggal tidak valid")
+		utils.Error(w, http.StatusBadRequest, "tanggal mulai tidak valid")
+		return
+	}
+	tglSelesai := tglMulai
+	if selesaiRaw := strings.TrimSpace(r.FormValue("tanggal_selesai")); selesaiRaw != "" {
+		tglSelesai, err = utils.ParseDateCell(selesaiRaw)
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal selesai tidak valid")
+			return
+		}
+	}
+	if tglSelesai.Before(tglMulai) {
+		utils.Error(w, http.StatusBadRequest, "tanggal selesai tidak boleh sebelum tanggal mulai")
+		return
+	}
+	if tglSelesai.Sub(tglMulai) > 366*24*time.Hour {
+		utils.Error(w, http.StatusBadRequest, "rentang tanggal maksimal 1 tahun")
 		return
 	}
 
@@ -88,22 +131,66 @@ func uploadAbsensiDokumen(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
 		return
 	}
+	keterangan := strings.TrimSpace(r.FormValue("keterangan"))
 
-	item := models.AbsensiDokumen{
-		IDPegawai:  *claims.IDPegawai,
-		Tanggal:    tanggal,
-		Jenis:      jenis,
-		Label:      label,
-		NamaFile:   fh.Filename,
-		File:       fileData,
-		Keterangan: strings.TrimSpace(r.FormValue("keterangan")),
+	var tanggalList []time.Time
+	for d := tglMulai; !d.After(tglSelesai); d = d.AddDate(0, 0, 1) {
+		tanggalList = append(tanggalList, d)
 	}
-	if err := db.Create(&item).Error; err != nil {
-		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan surat: "+err.Error())
+
+	jumlah := 0
+	for _, idPegawai := range idList {
+		for _, tgl := range tanggalList {
+			var existing models.AbsensiDokumen
+			found := db.Where("id_pegawai = ? AND tanggal = ?", idPegawai, tgl).First(&existing).Error == nil
+			existing.IDPegawai = idPegawai
+			existing.Tanggal = tgl
+			existing.Jenis = jenis
+			existing.Label = label
+			existing.NamaFile = fh.Filename
+			existing.File = fileData
+			existing.Keterangan = keterangan
+			if found {
+				db.Save(&existing)
+			} else {
+				existing.ID = 0
+				db.Create(&existing)
+			}
+			jumlah++
+		}
+	}
+
+	utils.Created(w, fmt.Sprintf("surat berhasil diinput untuk %d pegawai x %d tanggal (%d baris)", len(idList), len(tanggalList), jumlah), nil)
+}
+
+// listAbsensiDokumenAdmin dipakai administrator/admin untuk melihat/mengelola
+// semua surat yang sudah diinput pada satu bulan (opsional filter
+// id_pegawai) -- dipakai di halaman Rekap Absen supaya admin tahu surat apa
+// yang sudah ada sebelum menginput lagi, dan bisa menghapusnya bila salah.
+func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	now := absensiNow()
+	bulan := int(now.Month())
+	tahun := now.Year()
+	if v, err := strconv.Atoi(r.URL.Query().Get("bulan")); err == nil && v >= 1 && v <= 12 {
+		bulan = v
+	}
+	if v, err := strconv.Atoi(r.URL.Query().Get("tahun")); err == nil && v > 2000 {
+		tahun = v
+	}
+	loc := now.Location()
+	start := time.Date(tahun, time.Month(bulan), 1, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 1, -1)
+
+	query := db.Omit("file").Where("tanggal BETWEEN ? AND ?", start, end).Preload("Pegawai")
+	if idStr := strings.TrimSpace(r.URL.Query().Get("id_pegawai")); idStr != "" {
+		query = query.Where("id_pegawai = ?", idStr)
+	}
+	items := []models.AbsensiDokumen{}
+	if err := query.Order("tanggal desc").Find(&items).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data")
 		return
 	}
-	item.File = nil
-	utils.Created(w, "surat pengganti berhasil diupload untuk tanggal "+tanggalRaw, item)
+	utils.Success(w, "ok", items)
 }
 
 func listAbsensiDokumenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

@@ -326,15 +326,34 @@ type Absensi struct {
 
 func (Absensi) TableName() string { return "absensi" }
 
-// AbsensiJenisDokumen adalah jenis-jenis surat pendukung yang bisa diupload
-// pegawai untuk menutupi tanggal absen yang terlewat (hari kerja tanpa
-// baris Absensi sama sekali).
+// AbsensiJenisDokumen adalah jenis-jenis surat pendukung yang diinput
+// administrator/admin (lihat handlers/absensi_dokumen.go) untuk menutupi
+// tanggal absen yang terlewat (hari kerja tanpa baris Absensi sama sekali).
 const (
 	AbsensiDokumenSKS         = "sks"
 	AbsensiDokumenSuratTugas  = "surat_tugas"
 	AbsensiDokumenBeritaAcara = "berita_acara"
 	AbsensiDokumenSuratIzin   = "surat_izin"
 )
+
+// AbsensiDokumenKode memetakan jenis dokumen ke kode singkat yang tampil di
+// riwayat/rekap absen: Surat Tugas & Berita Acara sama-sama dibaca sebagai
+// "DD" (Dinas Dalam) karena keduanya adalah bukti dukung pegawai sedang
+// bertugas di luar kantor/dinas, hanya beda bentuk dokumennya; Surat Izin
+// dibaca "I" (Izin) dan SKS dibaca "S" (Sakit).
+var AbsensiDokumenKode = map[string]string{
+	AbsensiDokumenSKS:         "S",
+	AbsensiDokumenSuratTugas:  "DD",
+	AbsensiDokumenBeritaAcara: "DD",
+	AbsensiDokumenSuratIzin:   "I",
+}
+
+// AbsensiDokumenKodeLabel memetakan kode singkat ke label lengkapnya.
+var AbsensiDokumenKodeLabel = map[string]string{
+	"DD": "Dinas Dalam",
+	"I":  "Izin",
+	"S":  "Sakit",
+}
 
 // AbsensiDokumen menyimpan surat yang diupload pegawai untuk tanggal absen
 // yang terlewat (SKS/Surat Tugas/Berita Acara/Surat Izin) -- mengikuti pola
@@ -367,12 +386,32 @@ func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
 //     menit dari JamBatasPagi.
 //   - JamMulaiPulang: absen pulang baru dibuka (tombolnya aktif) mulai jam
 //     ini -- sebelum itu pegawai belum bisa absen pulang.
+//   - TempatTugasAllowed/JabatanAllowedIDs: filter siapa yang boleh memakai
+//     menu Absen, disimpan sebagai teks JSON ("[\"Kantor Pusat\"]" / "[3,5]")
+//     mengikuti pola DataLama/DataBaru di PerubahanDataPegawai -- diparsing
+//     lewat absensiAllowedTempatTugas/absensiAllowedJabatanIDs di
+//     handlers/absensi.go. Daftar KOSONG pada salah satu berarti filter itu
+//     tidak diberlakukan (semua tempat tugas/jabatan lolos filter itu); kalau
+//     KEDUA daftar kosong maka menu Absen terbuka untuk semua pegawai (default
+//     sebelum administrator mengatur apa pun) -- lihat absensiEligible.
+//   - KantorLat/KantorLng/RadiusMeter: satu titik koordinat kantor (berlaku
+//     untuk seluruh pegawai, bukan per tempat tugas) dipakai untuk membatasi
+//     absen hanya boleh dilakukan dalam radius tersebut dari kantor -- lihat
+//     distanceMeters di handlers/absensi.go. KantorLat/KantorLng NULL berarti
+//     geofence belum diatur (default sebelum administrator mengisi) sehingga
+//     absen tetap boleh dilakukan tanpa validasi jarak, mengikuti pola
+//     default-terbuka yang sama seperti filter tempat tugas/jabatan di atas.
 type PengaturanAbsensi struct {
-	ID             uint   `json:"id" gorm:"primaryKey"`
-	Aktif          bool   `json:"aktif" gorm:"column:aktif;default:true"`
-	JamMulaiPagi   string `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5;default:'06:00'"`
-	JamBatasPagi   string `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5;default:'07:30'"`
-	JamMulaiPulang string `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
+	ID                 uint     `json:"id" gorm:"primaryKey"`
+	Aktif              bool     `json:"aktif" gorm:"column:aktif;default:true"`
+	JamMulaiPagi       string   `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5;default:'06:00'"`
+	JamBatasPagi       string   `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5;default:'07:30'"`
+	JamMulaiPulang     string   `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
+	TempatTugasAllowed string   `json:"-" gorm:"column:tempat_tugas_allowed;type:text"`
+	JabatanAllowedIDs  string   `json:"-" gorm:"column:jabatan_allowed_ids;type:text"`
+	KantorLat          *float64 `json:"-" gorm:"column:kantor_lat"`
+	KantorLng          *float64 `json:"-" gorm:"column:kantor_lng"`
+	RadiusMeter        int      `json:"-" gorm:"column:radius_meter;default:20"`
 }
 
 func (PengaturanAbsensi) TableName() string { return "pengaturan_absensi" }

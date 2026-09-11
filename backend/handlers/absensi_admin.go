@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -20,10 +21,15 @@ import (
 // (lihat RegisterAbsensiRoutes di absensi.go), tidak atasan.
 
 type pengaturanAbsensiPayload struct {
-	Aktif          bool   `json:"aktif"`
-	JamMulaiPagi   string `json:"jam_mulai_pagi"`
-	JamBatasPagi   string `json:"jam_batas_pagi"`
-	JamMulaiPulang string `json:"jam_mulai_pulang"`
+	Aktif              bool     `json:"aktif"`
+	JamMulaiPagi       string   `json:"jam_mulai_pagi"`
+	JamBatasPagi       string   `json:"jam_batas_pagi"`
+	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
+	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
+	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
+	KantorLat          *float64 `json:"kantor_lat"`
+	KantorLng          *float64 `json:"kantor_lng"`
+	RadiusMeter        int      `json:"radius_meter"`
 }
 
 func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -48,6 +54,24 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		utils.Error(w, http.StatusBadRequest, "jam batas absen pagi harus lebih besar dari jam mulai absen pagi")
 		return
 	}
+	if (p.KantorLat == nil) != (p.KantorLng == nil) {
+		utils.Error(w, http.StatusBadRequest, "titik koordinat kantor harus diisi lat & lng sekaligus")
+		return
+	}
+	if p.KantorLat != nil && (*p.KantorLat < -90 || *p.KantorLat > 90 || *p.KantorLng < -180 || *p.KantorLng > 180) {
+		utils.Error(w, http.StatusBadRequest, "titik koordinat kantor tidak valid")
+		return
+	}
+	if p.RadiusMeter <= 0 {
+		p.RadiusMeter = 20
+	}
+
+	// simpan sebagai teks JSON (lihat komentar pada model.PengaturanAbsensi)
+	// -- nil/[] keduanya dinormalisasi jadi "[]" (bukan "null") supaya
+	// absensiAllowedTempatTugas/absensiAllowedJabatanIDs (yang memeriksa
+	// string kosong == "belum diatur") tetap konsisten.
+	tempatJSON, _ := json.Marshal(nonNilStrings(p.TempatTugasAllowed))
+	jabatanJSON, _ := json.Marshal(nonNilUints(p.JabatanAllowedIDs))
 
 	var item models.PengaturanAbsensi
 	if err := db.First(&item, 1).Error; err != nil {
@@ -57,17 +81,39 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	item.JamMulaiPagi = p.JamMulaiPagi
 	item.JamBatasPagi = p.JamBatasPagi
 	item.JamMulaiPulang = p.JamMulaiPulang
+	item.TempatTugasAllowed = string(tempatJSON)
+	item.JabatanAllowedIDs = string(jabatanJSON)
+	item.KantorLat = p.KantorLat
+	item.KantorLng = p.KantorLng
+	item.RadiusMeter = p.RadiusMeter
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan pengaturan: "+err.Error())
 		return
 	}
-	utils.Success(w, "pengaturan absen berhasil disimpan", item)
+	utils.Success(w, "pengaturan absen berhasil disimpan", toPengaturanAbsensiOut(item))
+}
+
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+func nonNilUints(s []uint) []uint {
+	if s == nil {
+		return []uint{}
+	}
+	return s
 }
 
 type rekapAbsensiItem struct {
-	Pegawai         models.Pegawai   `json:"pegawai"`
-	Absensi         []models.Absensi `json:"absensi"`
-	TanggalTerlewat []string         `json:"tanggal_terlewat"`
+	Pegawai         models.Pegawai         `json:"pegawai"`
+	Absensi         []models.Absensi       `json:"absensi"`
+	TanggalTerlewat []string               `json:"tanggal_terlewat"`
+	TanggalTercover []tanggalTercoverEntry `json:"tanggal_tercover"`
+	JumlahDD        int                    `json:"jumlah_dd"`
+	JumlahIzin      int                    `json:"jumlah_izin"`
+	JumlahSakit     int                    `json:"jumlah_sakit"`
 }
 
 // rekapPeriode membaca query bulan/tahun/id_pegawai dan mengembalikan
@@ -130,11 +176,13 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 		}
 	}
 	tercoverSet := map[uint]map[string]bool{}
+	dokumenByPegawai := map[uint][]models.AbsensiDokumen{}
 	for _, d := range dokumenRows {
 		if tercoverSet[d.IDPegawai] == nil {
 			tercoverSet[d.IDPegawai] = map[string]bool{}
 		}
 		tercoverSet[d.IDPegawai][d.Tanggal.Format("2006-01-02")] = true
+		dokumenByPegawai[d.IDPegawai] = append(dokumenByPegawai[d.IDPegawai], d)
 	}
 
 	items := make([]rekapAbsensiItem, 0, len(pegawaiList))
@@ -159,9 +207,55 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 				}
 			}
 		}
-		items = append(items, rekapAbsensiItem{Pegawai: p, Absensi: rows, TanggalTerlewat: terlewat})
+
+		tercover := []tanggalTercoverEntry{}
+		jumlahDD, jumlahIzin, jumlahSakit := 0, 0, 0
+		docs := dokumenByPegawai[p.ID]
+		sort.Slice(docs, func(i, j int) bool { return docs[i].Tanggal.After(docs[j].Tanggal) })
+		for _, d := range docs {
+			entry := tercoverEntryFromDokumen(d)
+			tercover = append(tercover, entry)
+			switch entry.Kode {
+			case "DD":
+				jumlahDD++
+			case "I":
+				jumlahIzin++
+			case "S":
+				jumlahSakit++
+			}
+		}
+
+		items = append(items, rekapAbsensiItem{
+			Pegawai:         p,
+			Absensi:         rows,
+			TanggalTerlewat: terlewat,
+			TanggalTercover: tercover,
+			JumlahDD:        jumlahDD,
+			JumlahIzin:      jumlahIzin,
+			JumlahSakit:     jumlahSakit,
+		})
 	}
-	return items
+
+	// rekap hanya menampilkan pegawai yang SUDAH PERNAH absen masuk pada
+	// periode ini -- pegawai yang belum pernah memakai menu Absen sama
+	// sekali (mis. belum lolos filter tempat tugas/jabatan, atau memang
+	// belum pernah absen) disembunyikan dari rekap & export supaya daftarnya
+	// tidak dipenuhi baris kosong (0 hadir, 0 terlambat).
+	n := 0
+	for _, it := range items {
+		hasHadir := false
+		for _, a := range it.Absensi {
+			if a.JamMasuk != nil {
+				hasHadir = true
+				break
+			}
+		}
+		if hasHadir {
+			items[n] = it
+			n++
+		}
+	}
+	return items[:n]
 }
 
 func rekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -202,6 +296,10 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		for _, t := range it.TanggalTerlewat {
 			terlewatSet[t] = true
 		}
+		tercoverByTanggal := map[string]tanggalTercoverEntry{}
+		for _, t := range it.TanggalTercover {
+			tercoverByTanggal[t.Tanggal] = t
+		}
 		sixDayWeek := sixDayWeekForTempatTgs(it.Pegawai.TempatTgs)
 		holidaySet := holidaySetInRange(db, start, limit)
 		for _, d := range workingDaysWithHolidaySet(start, limit, sixDayWeek, holidaySet) {
@@ -230,9 +328,13 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			case terlewatSet[key]:
 				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat = "-", "-", "-", "-"
 				out.Status = "Tidak Hadir"
+			case tercoverByTanggal[key].Kode != "":
+				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat = "-", "-", "-", "-"
+				t := tercoverByTanggal[key]
+				out.Status = fmt.Sprintf("%s (%s)", t.Label, t.Kode)
 			default:
 				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat = "-", "-", "-", "-"
-				out.Status = "Tidak Hadir (ada surat pengganti)"
+				out.Status = "Tidak Hadir"
 			}
 			rows = append(rows, out)
 		}

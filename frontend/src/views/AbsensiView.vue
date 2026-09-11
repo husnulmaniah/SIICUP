@@ -1,7 +1,6 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 import { toApiDate } from '../utils/date'
 import { useBlinkLiveness } from '../composables/useBlinkLiveness'
@@ -10,15 +9,12 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
-import Textarea from 'primevue/textarea'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 
 const toast = useToast()
-const confirm = useConfirm()
 
 // ============================================================
 // pengaturan (aktif/nonaktif & jendela waktu) + riwayat bulanan
@@ -27,9 +23,21 @@ const confirm = useConfirm()
 const pengaturan = ref(null)
 const loadingPengaturan = ref(true)
 const periodDate = ref(new Date())
-const riwayat = ref({ absensi: [], tanggal_terlewat: [] })
+const riwayat = ref({ absensi: [], tanggal_terlewat: [], tanggal_tercover: [] })
 const loadingRiwayat = ref(false)
 const dokumenList = ref([])
+
+// jenis dokumen (diinput admin) -> kode singkat yang tampil di riwayat,
+// mengikuti pemetaan yang sama dengan models.AbsensiDokumenKode di backend:
+// Surat Tugas & Berita Acara sama-sama dibaca "DD" (Dinas Dalam).
+const JENIS_KODE = { sks: 'S', surat_tugas: 'DD', berita_acara: 'DD', surat_izin: 'I' }
+const JENIS_KODE_LABEL = { S: 'Sakit', DD: 'Dinas Dalam', I: 'Izin' }
+function kodeDokumen(jenis) {
+  return JENIS_KODE[jenis] || ''
+}
+function labelKodeDokumen(jenis) {
+  return JENIS_KODE_LABEL[kodeDokumen(jenis)] || ''
+}
 
 function dateKey(iso) {
   return (iso || '').slice(0, 10)
@@ -139,6 +147,9 @@ const submitting = ref(false)
 const noBlinkWarning = ref(false)
 const coords = ref({ lat: null, lng: null })
 const geoStatus = ref('')
+const locationChecking = ref(false)
+const locationBlocked = ref(false)
+const locationBlockedMsg = ref('')
 
 let mediaStream = null
 let noBlinkTimer = null
@@ -148,22 +159,72 @@ function labelMode(mode) {
   return mode === 'masuk' ? 'Absen Masuk' : 'Absen Pulang'
 }
 
-function fetchLocation() {
-  if (!navigator.geolocation) {
-    geoStatus.value = 'perangkat/browser tidak mendukung deteksi lokasi'
-    return
-  }
+// haversineMeter menghitung jarak (meter) dua titik koordinat bumi --
+// dipakai untuk memvalidasi radius kantor di sisi browser sebelum kamera
+// dibuka (validasi yang sesungguhnya tetap dilakukan lagi di backend saat
+// submit, lihat absensiCekRadius di handlers/absensi.go).
+function haversineMeter(lat1, lng1, lat2, lng2) {
+  const R = 6371000
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function getLocationOnce() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(null)
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    )
+  })
+}
+
+// cekLokasiKantor mencari titik koordinat pegawai lalu memeriksanya terhadap
+// titik koordinat kantor (kalau sudah diatur administrator). Kamera hanya
+// dibuka kalau lolos -- kalau di luar radius atau lokasi tidak terdeteksi
+// (padahal geofence aktif), kamera TIDAK dibuka dan peringatan ditampilkan
+// (lihat locationBlocked di template).
+async function cekLokasiKantor() {
+  locationChecking.value = true
   geoStatus.value = 'mencari titik koordinat...'
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      coords.value = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-      geoStatus.value = `titik koordinat ditemukan (akurasi ±${Math.round(pos.coords.accuracy)}m)`
-    },
-    () => {
-      geoStatus.value = 'lokasi tidak diizinkan/tidak ditemukan -- absen tetap bisa dilanjutkan tanpa koordinat'
-    },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
-  )
+  const pos = await getLocationOnce()
+  locationChecking.value = false
+
+  const kantorLat = pengaturan.value?.kantor_lat
+  const kantorLng = pengaturan.value?.kantor_lng
+  const radius = pengaturan.value?.radius_meter || 20
+  const geofenceAktif = kantorLat != null && kantorLng != null
+
+  if (!pos) {
+    geoStatus.value = 'lokasi tidak diizinkan/tidak ditemukan'
+    if (geofenceAktif) {
+      locationBlocked.value = true
+      locationBlockedMsg.value =
+        'Lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi dan izinkan akses lokasi pada browser ini, lalu coba lagi.'
+      return false
+    }
+    return true
+  }
+
+  coords.value = { lat: pos.lat, lng: pos.lng }
+  geoStatus.value = `titik koordinat ditemukan (akurasi ±${Math.round(pos.accuracy)}m)`
+
+  if (!geofenceAktif) return true
+
+  const jarak = haversineMeter(pos.lat, pos.lng, kantorLat, kantorLng)
+  if (jarak > radius) {
+    locationBlocked.value = true
+    locationBlockedMsg.value = `Anda berada di luar radius kantor (jarak sekitar ${Math.round(jarak)} meter, maksimal ${radius} meter dari titik kantor). Absen tidak dapat dilakukan dari lokasi ini.`
+    return false
+  }
+  return true
 }
 
 async function startCameraStream() {
@@ -202,14 +263,34 @@ async function openCamera(mode) {
   capturedUrl.value = ''
   noBlinkWarning.value = false
   coords.value = { lat: null, lng: null }
+  locationBlocked.value = false
+  locationBlockedMsg.value = ''
   cameraDialog.value = true
 
-  fetchLocation()
+  const lolos = await cekLokasiKantor()
+  if (!lolos) return
+
   try {
     await blink.init()
   } catch {
     // blink.modelsError sudah terisi, ditampilkan lewat Message di template;
     // kamera tetap dibuka supaya pegawai masih bisa ambil foto manual.
+  }
+  await startCameraStream()
+}
+
+// retryLocation dipanggil dari tombol "Coba Lagi" saat lokasi di luar
+// radius/tidak terdeteksi -- mengulang pengecekan lokasi tanpa menutup
+// dialog kamera.
+async function retryLocation() {
+  locationBlocked.value = false
+  locationBlockedMsg.value = ''
+  const lolos = await cekLokasiKantor()
+  if (!lolos) return
+  try {
+    await blink.init()
+  } catch {
+    // lihat komentar di openCamera
   }
   await startCameraStream()
 }
@@ -273,6 +354,8 @@ function closeCameraDialog() {
   if (capturedUrl.value) URL.revokeObjectURL(capturedUrl.value)
   capturedUrl.value = ''
   capturedBlob.value = null
+  locationBlocked.value = false
+  locationBlockedMsg.value = ''
 }
 
 async function submitAbsen() {
@@ -323,75 +406,10 @@ function closeFotoDialog() {
 }
 
 // ============================================================
-// upload surat pengganti untuk tanggal terlewat
+// surat pendukung yang diinput admin (pegawai hanya bisa melihat/unduh --
+// input & hapus sekarang khusus administrator/admin lewat halaman Rekap
+// Absen, lihat RekapAbsensiView.vue)
 // ============================================================
-
-const uploadDialog = ref(false)
-const uploadTanggal = ref('')
-const uploadForm = reactive({ jenis: null, keterangan: '' })
-const uploadFile = ref(null)
-const uploadFileInput = ref(null)
-const uploading = ref(false)
-
-const jenisSuratOptions = [
-  { label: 'SKS (Surat Keterangan Sakit)', value: 'sks' },
-  { label: 'Surat Tugas', value: 'surat_tugas' },
-  { label: 'Berita Acara', value: 'berita_acara' },
-  { label: 'Surat Izin', value: 'surat_izin' },
-]
-
-function openUpload(tanggal) {
-  uploadTanggal.value = tanggal
-  uploadForm.jenis = null
-  uploadForm.keterangan = ''
-  uploadFile.value = null
-  uploadDialog.value = true
-}
-function pickUploadFile() {
-  uploadFileInput.value?.click()
-}
-function onUploadFileChosen(e) {
-  uploadFile.value = e.target.files[0] || null
-}
-
-async function submitUpload() {
-  if (!uploadForm.jenis || !uploadFile.value) return
-  uploading.value = true
-  try {
-    const fd = new FormData()
-    fd.append('tanggal', uploadTanggal.value)
-    fd.append('jenis', uploadForm.jenis)
-    fd.append('keterangan', uploadForm.keterangan || '')
-    fd.append('file', uploadFile.value)
-    const { data } = await http.post('/absensi/dokumen', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 4000 })
-    uploadDialog.value = false
-    await Promise.all([loadRiwayat(), loadDokumen()])
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
-  } finally {
-    uploading.value = false
-  }
-}
-
-function confirmHapusDokumen(item) {
-  confirm.require({
-    message: `Hapus surat pengganti untuk tanggal ${formatTanggal(dateKey(item.tanggal))}?`,
-    header: 'Konfirmasi Hapus',
-    icon: 'pi pi-exclamation-triangle',
-    acceptLabel: 'Ya, Hapus',
-    rejectLabel: 'Batal',
-    accept: async () => {
-      try {
-        await http.delete(`/absensi/dokumen/${item.id}`)
-        toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Surat pengganti dihapus', life: 3000 })
-        await Promise.all([loadRiwayat(), loadDokumen()])
-      } catch (e) {
-        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
-      }
-    },
-  })
-}
 
 async function downloadDokumen(item) {
   try {
@@ -422,6 +440,12 @@ async function downloadDokumen(item) {
     <template v-else-if="pengaturan && !pengaturan.aktif">
       <Message severity="warn" :closable="false">
         Menu Absen sedang dinonaktifkan oleh administrator. Hubungi administrator/admin jika ini tidak sesuai.
+      </Message>
+    </template>
+
+    <template v-else-if="pengaturan && pengaturan.eligible === false">
+      <Message severity="warn" :closable="false">
+        Menu ini bukan untuk Anda. Hubungi administrator/admin jika menurut Anda ini tidak sesuai.
       </Message>
     </template>
 
@@ -498,27 +522,36 @@ async function downloadDokumen(item) {
 
       <div v-if="riwayat.tanggal_terlewat?.length" class="section">
         <h3>Tanggal Terlewat</h3>
-        <p class="text-muted">Hari kerja berikut belum ada absennya. Upload surat pendukung (SKS/Surat Tugas/Berita Acara/Surat Izin) untuk melengkapi.</p>
+        <Message severity="warn" :closable="false">
+          Hari kerja berikut belum ada absennya dan belum ada surat pendukung (BA/Surat Tugas/Surat Izin/SKS) yang
+          diinput administrator. Hubungi administrator/admin bila Anda memang bertugas/izin/sakit pada tanggal
+          tersebut, supaya suratnya dapat diinput.
+        </Message>
         <div class="terlewat-list">
           <div v-for="tgl in riwayat.tanggal_terlewat" :key="tgl" class="terlewat-item">
             <span>{{ formatTanggal(tgl) }}</span>
-            <Button label="Upload Surat" icon="pi pi-upload" size="small" outlined @click="openUpload(tgl)" />
+            <Tag severity="warn" value="Tidak melakukan absensi" />
           </div>
         </div>
       </div>
 
       <div v-if="dokumenList.length" class="section">
-        <h3>Surat Pengganti yang Diupload</h3>
+        <h3>Surat Pendukung (Diinput Administrator)</h3>
+        <p class="text-muted">Surat berikut diinput oleh administrator/admin untuk melengkapi tanggal absen Anda.</p>
         <DataTable :value="dokumenList" size="small" stripedRows responsiveLayout="scroll">
           <Column header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
           </Column>
           <Column field="label" header="Jenis Surat" />
+          <Column header="Kode">
+            <template #body="{ data }">
+              <Tag :value="kodeDokumen(data.jenis)" :title="labelKodeDokumen(data.jenis)" />
+            </template>
+          </Column>
           <Column field="keterangan" header="Keterangan" />
           <Column header="Aksi">
             <template #body="{ data }">
               <Button icon="pi pi-download" size="small" text rounded title="Unduh" @click="downloadDokumen(data)" />
-              <Button icon="pi pi-trash" size="small" text rounded severity="danger" title="Hapus" @click="confirmHapusDokumen(data)" />
             </template>
           </Column>
         </DataTable>
@@ -527,30 +560,46 @@ async function downloadDokumen(item) {
 
     <!-- ================= dialog kamera + kedipan ================= -->
     <Dialog v-model:visible="cameraDialog" modal :header="labelMode(cameraMode)" :style="{ width: '440px' }" @hide="stopCamera">
-      <Message v-if="cameraError" severity="error" :closable="false">{{ cameraError }}</Message>
-      <Message v-else-if="blink.modelsError.value" severity="warn" :closable="false">
-        {{ blink.modelsError.value }} -- deteksi kedipan otomatis tidak tersedia, gunakan tombol "Ambil Foto" secara manual.
-      </Message>
-
-      <div class="camera-box">
-        <div v-if="!capturedUrl" class="video-wrap">
-          <video ref="videoEl" autoplay playsinline muted class="camera-video"></video>
-          <div class="camera-overlay">
-            <span v-if="!blink.faceDetected.value">Arahkan wajah ke kamera...</span>
-            <span v-else-if="!blink.blinkDetected.value">Wajah terdeteksi -- berkedip untuk mengambil foto otomatis</span>
-          </div>
-        </div>
-        <img v-else :src="capturedUrl" class="camera-video" alt="Foto absen" />
-        <canvas ref="canvasEl" style="display: none"></canvas>
+      <div v-if="locationChecking" class="loading-box">
+        <ProgressSpinner style="width: 40px; height: 40px" />
+        <p class="text-muted" style="margin-top: 0.5rem">Memeriksa titik koordinat Anda...</p>
       </div>
 
-      <Message v-if="noBlinkWarning && !capturedUrl" severity="warn" :closable="false">
-        Belum terdeteksi kedipan mata. Pastikan wajah terlihat jelas oleh kamera, atau ambil foto secara manual di bawah.
-      </Message>
-      <p class="text-muted geo-status">{{ geoStatus }}</p>
+      <Message v-else-if="locationBlocked" severity="warn" :closable="false">{{ locationBlockedMsg }}</Message>
+
+      <template v-else>
+        <Message v-if="cameraError" severity="error" :closable="false">{{ cameraError }}</Message>
+        <Message v-else-if="blink.modelsError.value" severity="warn" :closable="false">
+          {{ blink.modelsError.value }} -- deteksi kedipan otomatis tidak tersedia, gunakan tombol "Ambil Foto" secara manual.
+        </Message>
+
+        <div class="camera-box">
+          <div v-if="!capturedUrl" class="video-wrap">
+            <video ref="videoEl" autoplay playsinline muted class="camera-video"></video>
+            <div class="camera-overlay">
+              <span v-if="!blink.faceDetected.value">Arahkan wajah ke kamera...</span>
+              <span v-else-if="!blink.blinkDetected.value">Wajah terdeteksi -- berkedip untuk mengambil foto otomatis</span>
+            </div>
+          </div>
+          <img v-else :src="capturedUrl" class="camera-video" alt="Foto absen" />
+          <canvas ref="canvasEl" style="display: none"></canvas>
+        </div>
+
+        <Message v-if="noBlinkWarning && !capturedUrl" severity="warn" :closable="false">
+          Belum terdeteksi kedipan mata. Pastikan wajah terlihat jelas oleh kamera, atau ambil foto secara manual di bawah.
+        </Message>
+        <p class="text-muted geo-status">{{ geoStatus }}</p>
+      </template>
 
       <template #footer>
-        <template v-if="!capturedUrl">
+        <template v-if="locationChecking">
+          <Button label="Batal" severity="secondary" text @click="closeCameraDialog" />
+        </template>
+        <template v-else-if="locationBlocked">
+          <Button label="Coba Lagi" icon="pi pi-refresh" @click="retryLocation" />
+          <Button label="Batal" severity="secondary" text @click="closeCameraDialog" />
+        </template>
+        <template v-else-if="!capturedUrl">
           <Button label="Ambil Foto Manual" icon="pi pi-camera" severity="secondary" outlined :disabled="!!cameraError" @click="ambilFotoManual" />
           <Button label="Batal" severity="secondary" text @click="closeCameraDialog" />
         </template>
@@ -564,31 +613,6 @@ async function downloadDokumen(item) {
     <!-- ================= dialog lihat foto ================= -->
     <Dialog v-model:visible="fotoDialog" modal :header="fotoDialogTitle" :style="{ width: '420px' }" @hide="closeFotoDialog">
       <img v-if="fotoDialogUrl" :src="fotoDialogUrl" style="width: 100%; border-radius: 8px" alt="Foto absen" />
-    </Dialog>
-
-    <!-- ================= dialog upload surat pengganti ================= -->
-    <Dialog v-model:visible="uploadDialog" modal header="Upload Surat Pengganti" :style="{ width: '420px' }">
-      <div class="field">
-        <label>Tanggal</label>
-        <div>{{ formatTanggal(uploadTanggal) }}</div>
-      </div>
-      <div class="field">
-        <label>Jenis Surat</label>
-        <Select v-model="uploadForm.jenis" :options="jenisSuratOptions" optionLabel="label" optionValue="value" placeholder="Pilih jenis surat" style="width: 100%" />
-      </div>
-      <div class="field">
-        <label>Keterangan (opsional)</label>
-        <Textarea v-model="uploadForm.keterangan" rows="2" style="width: 100%" />
-      </div>
-      <div class="field">
-        <label>Berkas (PDF/JPG/PNG)</label>
-        <input ref="uploadFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onUploadFileChosen" />
-        <Button :label="uploadFile ? uploadFile.name : 'Pilih Berkas'" icon="pi pi-file" severity="secondary" outlined @click="pickUploadFile" />
-      </div>
-      <template #footer>
-        <Button label="Batal" severity="secondary" text @click="uploadDialog = false" />
-        <Button label="Upload" icon="pi pi-upload" :disabled="!uploadForm.jenis || !uploadFile" :loading="uploading" @click="submitUpload" />
-      </template>
     </Dialog>
   </div>
 </template>
