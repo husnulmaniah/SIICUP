@@ -140,14 +140,73 @@ const selectedPegawai = ref(null)
 const rekap = ref([])
 const loadingRekap = ref(false)
 
-async function loadPegawaiOptions() {
+// ------------------------------------------------------------
+// daftar pegawai untuk filter rekap & pilihan pegawai pada input surat
+// kolektif.
+//
+// Instansi bisa punya ribuan pegawai sementara endpoint /pegawai dibatasi
+// maksimal 500 baris per permintaan, jadi daftar TIDAK bisa dimuat sekaligus
+// lalu disaring di browser -- pegawai yang urutan namanya di atas batas itu
+// tidak akan pernah muncul saat dicari. Karena itu pencarian dilakukan di
+// SERVER: setiap kali admin mengetik di kotak cari, daftar opsi diambil ulang
+// pakai parameter q (cocok dengan nama ATAU NIP, lihat listPegawai di
+// handlers/pegawai.go).
+// ------------------------------------------------------------
+
+const PEGAWAI_PAGE_SIZE = 100
+const loadingPegawai = ref(false)
+// pegawaiTotal = jumlah SELURUH pegawai (hanya diperbarui saat memuat tanpa
+// kata kunci), pegawaiHasil = jumlah yang cocok dengan pencarian terakhir.
+const pegawaiTotal = ref(0)
+const pegawaiHasil = ref(0)
+const pegawaiKeyword = ref('')
+// opsi pegawai yang sedang dipilih disimpan terpisah supaya labelnya tetap
+// ada saat daftar opsi diganti hasil pencarian baru (kalau hilang, chip
+// pilihan berubah jadi kosong).
+const pegawaiTerpilihCache = ref([])
+
+function toPegawaiOption(p) {
+  return { label: `${p.nama} (${p.nip})`, value: p.id }
+}
+
+function gabungDenganTerpilih(list) {
+  const adaDiHasil = new Set(list.map((o) => o.value))
+  return [...pegawaiTerpilihCache.value.filter((o) => !adaDiHasil.has(o.value)), ...list]
+}
+
+async function loadPegawaiOptions(keyword = '') {
+  loadingPegawai.value = true
   try {
-    const { data } = await http.get('/pegawai', { params: { pageSize: 500 } })
-    const list = data.data || []
-    pegawaiOptions.value = list.map((p) => ({ label: `${p.nama} (${p.nip})`, value: p.id }))
+    const params = { pageSize: PEGAWAI_PAGE_SIZE }
+    const q = (keyword || '').trim()
+    pegawaiKeyword.value = q
+    if (q) params.q = q
+    const { data } = await http.get('/pegawai', { params })
+    const list = Array.isArray(data.data) ? data.data : []
+    pegawaiHasil.value = data.meta?.total ?? list.length
+    if (!q) pegawaiTotal.value = pegawaiHasil.value
+    pegawaiOptions.value = gabungDenganTerpilih(list.map(toPegawaiOption))
   } catch {
-    pegawaiOptions.value = []
+    pegawaiOptions.value = gabungDenganTerpilih([])
+  } finally {
+    loadingPegawai.value = false
   }
+}
+
+// pencarian ditunda sebentar supaya tidak menembak server tiap ketikan
+let pegawaiFilterTimer = null
+function onPegawaiFilter(event) {
+  const keyword = event?.value || ''
+  clearTimeout(pegawaiFilterTimer)
+  pegawaiFilterTimer = setTimeout(() => loadPegawaiOptions(keyword), 300)
+}
+
+// ingatOpsiTerpilih dipanggil setiap pilihan pegawai berubah (lihat watch di
+// bagian input surat kolektif, setelah kolektifForm dideklarasikan).
+function ingatOpsiTerpilih(idList) {
+  const terpilih = idList.filter((v) => v != null)
+  const dikenal = new Map([...pegawaiTerpilihCache.value, ...pegawaiOptions.value].map((o) => [o.value, o]))
+  pegawaiTerpilihCache.value = [...new Set(terpilih)].map((id) => dikenal.get(id)).filter(Boolean)
 }
 
 async function loadRekap() {
@@ -315,6 +374,14 @@ const kolektifFile = ref(null)
 const kolektifFileInput = ref(null)
 const submittingKolektif = ref(false)
 
+// pegawai yang sedang dipilih (di filter rekap maupun di form kolektif)
+// diingat labelnya supaya tetap tampil walau daftar opsi berganti karena
+// pencarian baru -- lihat komentar pada loadPegawaiOptions.
+watch(
+  () => [selectedPegawai.value, ...kolektifForm.id_pegawai],
+  (ids) => ingatOpsiTerpilih(ids),
+)
+
 function pickKolektifFile() {
   kolektifFileInput.value?.click()
 }
@@ -342,7 +409,8 @@ async function submitKolektif() {
     kolektifForm.jenis = null
     kolektifForm.keterangan = ''
     kolektifFile.value = null
-    await Promise.all([loadRekap(), loadDokumenAdmin()])
+    // kembalikan daftar pegawai ke keadaan awal (tanpa kata kunci pencarian)
+    await Promise.all([loadRekap(), loadDokumenAdmin(), loadPegawaiOptions()])
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
@@ -499,7 +567,20 @@ function kodeDokumen(jenis) {
     <div class="card">
       <div class="rekap-toolbar">
         <DatePicker v-model="periodDate" view="month" dateFormat="MM yy" showIcon style="width: 180px" />
-        <Select v-model="selectedPegawai" :options="pegawaiOptions" optionLabel="label" optionValue="value" filter showClear placeholder="Semua pegawai" style="min-width: 220px" />
+        <Select
+          v-model="selectedPegawai"
+          :options="pegawaiOptions"
+          optionLabel="label"
+          optionValue="value"
+          filter
+          showClear
+          :loading="loadingPegawai"
+          filterPlaceholder="Ketik nama / NIP"
+          emptyFilterMessage="Pegawai tidak ditemukan"
+          placeholder="Semua pegawai"
+          style="min-width: 260px"
+          @filter="onPegawaiFilter"
+        />
         <Button label="Export Excel" icon="pi pi-file-excel" severity="success" outlined @click="exportExcel" />
       </div>
 
@@ -645,7 +726,7 @@ function kodeDokumen(jenis) {
         pada riwayat/rekap pegawai bersangkutan.
       </p>
       <div class="kolektif-form">
-        <div>
+        <div class="kolektif-span">
           <label class="field-label">Pegawai</label>
           <MultiSelect
             v-model="kolektifForm.id_pegawai"
@@ -654,46 +735,69 @@ function kodeDokumen(jenis) {
             optionValue="value"
             filter
             display="chip"
+            :loading="loadingPegawai"
+            :maxSelectedLabels="20"
+            filterPlaceholder="Ketik nama atau NIP pegawai"
+            emptyFilterMessage="Pegawai tidak ditemukan -- coba nama atau NIP yang lain"
             placeholder="Pilih satu atau beberapa pegawai"
             style="width: 100%"
+            @filter="onPegawaiFilter"
           />
+          <small v-if="pegawaiKeyword" class="text-muted">
+            {{ pegawaiHasil }} pegawai cocok dengan pencarian "{{ pegawaiKeyword }}"<span v-if="pegawaiHasil > PEGAWAI_PAGE_SIZE">
+              -- ditampilkan {{ PEGAWAI_PAGE_SIZE }} teratas, persempit pencarian bila pegawai yang dicari belum
+              terlihat</span
+            >.
+          </small>
+          <small v-else class="text-muted">
+            Menampilkan {{ Math.min(PEGAWAI_PAGE_SIZE, pegawaiTotal) }} dari {{ pegawaiTotal }} pegawai -- ketik nama
+            atau NIP pada kotak cari untuk menemukan pegawai lainnya.
+          </small>
         </div>
-        <div class="kolektif-grid">
-          <div>
-            <label class="field-label">Tanggal Mulai</label>
-            <DatePicker v-model="kolektifForm.tanggal_mulai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
-          </div>
-          <div>
-            <label class="field-label">Tanggal Selesai</label>
-            <DatePicker v-model="kolektifForm.tanggal_selesai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
-          </div>
-          <div>
-            <label class="field-label">Jenis Surat</label>
-            <Select
-              v-model="kolektifForm.jenis"
-              :options="[
-                { label: 'Surat Tugas (DD)', value: 'surat_tugas' },
-                { label: 'Berita Acara (DD)', value: 'berita_acara' },
-                { label: 'Surat Izin (I)', value: 'surat_izin' },
-                { label: 'SKS -- Surat Keterangan Sakit (S)', value: 'sks' },
-              ]"
-              optionLabel="label"
-              optionValue="value"
-              placeholder="Pilih jenis surat"
-              style="width: 100%"
-            />
-          </div>
+
+        <div>
+          <label class="field-label">Tanggal Mulai</label>
+          <DatePicker v-model="kolektifForm.tanggal_mulai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
         </div>
         <div>
-          <label class="field-label">Keterangan (opsional)</label>
-          <Textarea v-model="kolektifForm.keterangan" rows="2" style="width: 100%" />
+          <label class="field-label">Tanggal Selesai</label>
+          <DatePicker v-model="kolektifForm.tanggal_selesai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
+        </div>
+        <div>
+          <label class="field-label">Jenis Surat</label>
+          <Select
+            v-model="kolektifForm.jenis"
+            :options="[
+              { label: 'Surat Tugas (DD)', value: 'surat_tugas' },
+              { label: 'Berita Acara (DD)', value: 'berita_acara' },
+              { label: 'Surat Izin (I)', value: 'surat_izin' },
+              { label: 'SKS -- Surat Keterangan Sakit (S)', value: 'sks' },
+            ]"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Pilih jenis surat"
+            style="width: 100%"
+          />
         </div>
         <div>
           <label class="field-label">Berkas (PDF/JPG/PNG)</label>
           <input ref="kolektifFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onKolektifFileChosen" />
-          <Button :label="kolektifFile ? kolektifFile.name : 'Pilih Berkas'" icon="pi pi-file" severity="secondary" outlined @click="pickKolektifFile" />
+          <Button
+            class="berkas-btn"
+            :label="kolektifFile ? kolektifFile.name : 'Pilih Berkas'"
+            icon="pi pi-file"
+            severity="secondary"
+            outlined
+            @click="pickKolektifFile"
+          />
         </div>
-        <div>
+
+        <div class="kolektif-span">
+          <label class="field-label">Keterangan (opsional)</label>
+          <Textarea v-model="kolektifForm.keterangan" rows="2" style="width: 100%" />
+        </div>
+
+        <div class="kolektif-span">
           <Button label="Input Surat" icon="pi pi-upload" :loading="submittingKolektif" @click="submitKolektif" />
         </div>
       </div>
@@ -761,16 +865,33 @@ function kodeDokumen(jenis) {
   gap: 0.35rem;
   flex-wrap: wrap;
 }
+/* Form input surat kolektif: satu kolom di HP, lalu melebar mengikuti layar
+   desktop (2 kolom mulai 900px, 4 kolom di layar lebar) supaya sejajar
+   dengan kartu pengaturan dan tidak menyisakan ruang kosong di kanan. */
 .kolektif-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  max-width: 40rem;
-}
-.kolektif-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: 1fr;
   gap: 1rem;
+  max-width: 100%;
+  align-items: start;
+}
+.kolektif-span {
+  grid-column: 1 / -1;
+}
+@media (min-width: 900px) {
+  .kolektif-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1400px) {
+  .kolektif-form {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.berkas-btn.p-button {
+  width: 100%;
+  justify-content: flex-start;
+  overflow: hidden;
 }
 
 /* ---------- kartu pengaturan: dua kolom di desktop ---------- */
