@@ -271,17 +271,29 @@ func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai, namaSur
 	if item.TglApproval != nil {
 		tglDisetujui = formatDateID(*item.TglApproval)
 	}
+	// Urutan field SENGAJA menaruh "Ditandatangani ... - Disetujui ..." tepat
+	// setelah nama surat (bukan di akhir seperti sebelumnya), dan jabatan
+	// penandatangan (field paling panjang, bisa >80 karakter) dipindah ke
+	// PALING AKHIR. Google memotong judul/ringkasan hasil pencarian pada
+	// query yang panjang (termasuk pada halaman "tidak cocok dengan dokumen
+	// apa pun" untuk query yang memang tidak merujuk ke halaman nyata) --
+	// dengan urutan lama, siapa yang menandatangani & tanggal disetujui
+	// (paling penting untuk verifikasi) selalu ada di ujung dan ikut
+	// terpotong. Menaruhnya di depan (setelah jabatan yang panjang dipindah
+	// ke belakang) membuatnya jauh lebih mungkin tetap terlihat. Teks
+	// lengkap query tetap selalu bisa dilihat pegawai di kotak pencarian
+	// Google setelah halaman terbuka, terpotong atau tidak.
 	query := fmt.Sprintf(
-		"%s - NIP %s - %s - %s - Lama Cuti %d Hari (%s) - Ditandatangani %s (%s) - Disetujui %s",
+		"%s - Ditandatangani %s - Disetujui %s - NIP %s - %s - %s - Lama Cuti %d Hari (%s) - Jabatan %s",
 		namaSurat,
+		namaOrDash(item.TtdNama),
+		tglDisetujui,
 		namaOrDash(pegawai.NIP),
 		pegawai.Nama,
 		jenisNama,
 		item.JumlahHari,
 		formatTanggalRentang(item.TglMulai, item.TglSelesai),
-		namaOrDash(item.TtdNama),
 		namaOrDash(item.TtdJabatan),
-		tglDisetujui,
 	)
 	googleURL := "https://www.google.com/search?q=" + neturl.QueryEscape(query)
 	return qrcode.Encode(googleURL, qrcode.Medium, 240)
@@ -475,7 +487,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 
 	// Jarak ke judul & ke tabel dipadatkan (dari 249/+24 semula) supaya ada
 	// ruang ekstra di tabel Baris VII untuk QR tanda tangan otomatis yang
-	// diperbesar (170x170) tanpa membuat formulir meluber ke halaman ke-2.
+	// diperbesar tanpa membuat formulir meluber ke halaman ke-2.
 	y = 225
 	p.SetFont(true, 13)
 	p.TextCentered(pageW/2, y, "FORMULIR PERMINTAAN DAN PEMBERIAN CUTI")
@@ -622,12 +634,12 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	rowTop = y
 	alasanFontSize := 12.0
 	alasanLineHeight := 15.0
-	// Dibatasi maks. 3 baris (baris terakhir dipotong "..." kalau lebih
+	// Dibatasi maks. 2 baris (baris terakhir dipotong "..." kalau lebih
 	// panjang, lihat wrapCapped) -- alasan cuti bebas diisi pegawai dan bisa
 	// sangat panjang; tanpa batas ini baris III bisa tumbuh tak terbatas dan
-	// mendorong Baris VII (yang kini perlu ruang ekstra untuk QR 170x170)
-	// meluber ke halaman ke-2.
-	const alasanMaxLines = 3
+	// mendorong Baris VII (yang kini bertumpuk 1 kolom: jabatan - QR - nama -
+	// NIP, jadi butuh ruang vertikal ekstra) meluber ke halaman ke-2.
+	const alasanMaxLines = 2
 	alasanLines := wrapCapped(namaOrDash(item.AlasanCuti), contentW-2*pad, alasanFontSize, alasanMaxLines)
 	rowH = 45.0 + float64(len(alasanLines))*alasanLineHeight
 	if rowH < 60 {
@@ -751,7 +763,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 
 	// Row VI: Alamat Selama Menjalankan Cuti + tanda tangan pegawai. Jarak
 	// dipadatkan (dari 140/68/117/121/136 semula) untuk memberi ruang ekstra
-	// ke Baris VII (QR tanda tangan otomatis 170x170) tanpa meluber ke
+	// ke Baris VII (blok tanda tangan otomatis) tanpa meluber ke
 	// halaman ke-2 -- alamat juga dibatasi maks. 4 baris (jaring pengaman
 	// yang sama seperti Alasan Cuti di Baris III).
 	rowTop = y
@@ -784,14 +796,15 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 
 	// Row VII: Pertimbangan Atasan Langsung -- 4 opsi dibingkai pada satu
 	// baris penuh di bawah judul (seperti formulir cetak asli), diikuti
-	// stempel tanda tangan otomatis (QR + jabatan/nama/NIP Kepala Dinas) di
-	// bawahnya. QR (170x170, diperbesar dari 150x150 lalu 80x80 supaya mudah
-	// dipindai HP)
-	// digambar SEJAJAR di kiri dengan blok jabatan/nama/NIP di kanan --
-	// bukan ditumpuk vertikal seperti sebelumnya -- supaya tinggi baris ini
-	// ditentukan oleh sisi QR (yang jauh lebih tinggi dari 3-4 baris teks),
-	// bukan oleh SUM(jabatan+QR+nama+NIP). Ini yang membuat QR besar tetap
-	// muat tanpa mendorong formulir meluber ke halaman ke-2.
+	// stempel tanda tangan otomatis di bawahnya. Blok tanda tangan BERTUMPUK
+	// 1 kolom rata tengah -- jabatan di atas, QR persis di tengah (di antara
+	// jabatan & nama), lalu nama dan NIP di bawah QR -- meniru gaya pada
+	// Surat Rekomendasi & contoh surat cetak asli (BKPSDM), atas permintaan
+	// eksplisit supaya QR "di tengah-tengah" alih-alih sejajar di kiri dengan
+	// teks di kanan. Karena layout bertumpuk butuh ruang vertikal jauh lebih
+	// besar dibanding versi sejajar sebelumnya, QR diperkecil dari 170x170
+	// ke 120x120 (baris III alasan cuti juga dipangkas ke maks. 2 baris,
+	// lihat komentar di atas) supaya formulir tetap muat 1 halaman Legal.
 	rowTop = y
 	p.SetFont(true, 12)
 	p.Text(contentX+pad, rowTop+18, "Pertimbangan Atasan Langsung")
@@ -822,43 +835,40 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	p.Line(contentX, gridTopVII, rightX, gridTopVII)
 	p.Line(contentX, gridTopVII+optHeaderH, rightX, gridTopVII+optHeaderH)
 
-	// QR diperbesar lagi dari 150->170 (ruang ekstra didapat dari pemadatan
-	// Baris I & IV di atas). Kolom teks jabatan/nama/NIP di sebelah kanan
-	// SENGAJA dibatasi (maxTextWVII) alih-alih dibiarkan melebar mengisi
-	// sisa lebar baris -- tanpa batas ini teksnya jadi terlalu lebar &
-	// menyisakan banyak spasi kosong di kanan, membuat QR di sisi kiri
-	// terlihat sempit/kurang mendapat "tempat" dibanding proporsi baris.
-	const qrSideVII = 170.0
-	qrX := contentX + pad
-	qrTopVII := gridTopVII + optHeaderH + 8.0
-	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, "Formulir Permintaan dan Pemberian Cuti", qrX, qrTopVII, qrSideVII)
-
-	textXVII := qrX + qrSideVII + 20.0
-	const maxTextWVII = 260.0
-	textWVII := rightX - textXVII - pad
-	if textWVII > maxTextWVII {
-		textWVII = maxTextWVII
+	centerVII := contentX + contentW/2
+	const capWidthVII = 420.0
+	jabatanWVII := contentW - 2*pad
+	if jabatanWVII > capWidthVII {
+		jabatanWVII = capWidthVII
 	}
-	textCenterVII := textXVII + textWVII/2
-	jabatanLinesVII, jabatanSizeVII := wrapJabatan(namaOrDash(signerJabatan), textWVII, 2, []float64{11, 10, 9.5, 9, 8.5, 8, 7.5})
+	jabatanLinesVII, jabatanSizeVII := wrapJabatan(namaOrDash(signerJabatan), jabatanWVII, 2, []float64{11, 10, 9.5, 9, 8.5, 8, 7.5})
 	jabatanLineHVII := jabatanSizeVII + 3
 	p.SetFont(false, jabatanSizeVII)
-	jabatanTopVII := qrTopVII + 24.0
+	jabatanTopVII := gridTopVII + optHeaderH + 12.0
 	for i, jl := range jabatanLinesVII {
-		p.TextCentered(textCenterVII, jabatanTopVII+float64(i)*jabatanLineHVII, jl)
+		p.TextCentered(centerVII, jabatanTopVII+float64(i)*jabatanLineHVII, jl)
 	}
-	nameTopVII := jabatanTopVII + float64(len(jabatanLinesVII)-1)*jabatanLineHVII + jabatanLineHVII + 10.0
-	kepalaDinasNama := truncateToWidth(namaOrDash(signerNama), textWVII*boldWidthSafety, 12)
-	p.SetFont(true, 12)
-	p.TextCentered(textCenterVII, nameTopVII, kepalaDinasNama)
-	w2 := utils.TextWidth(kepalaDinasNama, 12)
-	p.Line(textCenterVII-w2/2, nameTopVII+4, textCenterVII+w2/2, nameTopVII+4)
-	p.SetFont(false, 11)
-	p.TextCentered(textCenterVII, nameTopVII+20, "NIP: "+namaOrDash(signerNip)+".")
+	// jabatanBottomVII = baseline baris jabatan terakhir.
+	jabatanBottomVII := jabatanTopVII + float64(len(jabatanLinesVII)-1)*jabatanLineHVII
 
-	// rowH ditentukan oleh QR (elemen tertinggi di baris ini) + padding
-	// bawah -- lihat komentar di atas.
-	rowH = (qrTopVII - rowTop) + qrSideVII + 10.0
+	const qrSideVII = 120.0
+	qrTopVII := jabatanBottomVII + 8.0
+	qrX := centerVII - qrSideVII/2
+	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, "Formulir Permintaan dan Pemberian Cuti", qrX, qrTopVII, qrSideVII)
+
+	nameTopVII := qrTopVII + qrSideVII + 14.0
+	kepalaDinasNama := truncateToWidth(namaOrDash(signerNama), capWidthVII*boldWidthSafety, 12)
+	p.SetFont(true, 12)
+	p.TextCentered(centerVII, nameTopVII, kepalaDinasNama)
+	w2 := utils.TextWidth(kepalaDinasNama, 12)
+	p.Line(centerVII-w2/2, nameTopVII+4, centerVII+w2/2, nameTopVII+4)
+	p.SetFont(false, 11)
+	nipBaselineVII := nameTopVII + 18.0
+	p.TextCentered(centerVII, nipBaselineVII, "NIP: "+namaOrDash(signerNip)+".")
+
+	// rowH menampung seluruh blok bertumpuk (header opsi + jabatan + QR +
+	// nama + NIP) + padding bawah.
+	rowH = (nipBaselineVII - rowTop) + 8.0
 	y = rowBottom(rowTop, rowH, "VII")
 
 	// bingkai luar tabel
