@@ -102,6 +102,43 @@ a {
   overflow-x: auto;
 }
 
+/* ============================================================
+   Penyesuaian tampilan HP (dipakai bersama navigasi bawah di
+   AppLayout.vue). Tujuannya: tidak ada yang terpotong/melebar keluar
+   layar, dialog selalu muat, dan tabel bisa digeser ke samping.
+   ============================================================ */
+
+/* Tabel data selalu bisa digeser horizontal di layar sempit, bukan
+   memaksa seluruh halaman melebar. */
+.p-datatable-table-container {
+  overflow-x: auto;
+}
+
+@media (max-width: 640px) {
+  /* Semua dialog (banyak yang lebarnya dipatok piksel di masing-masing
+     halaman) dibatasi selebar layar HP supaya tombolnya tidak terpotong. */
+  .p-dialog {
+    width: 94vw !important;
+    max-width: 94vw !important;
+    margin: 0;
+  }
+
+  /* Tombol di footer dialog ditumpuk supaya mudah ditekan */
+  .p-dialog-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+  }
+
+  .page-title {
+    font-size: 1.15rem;
+  }
+
+  .card {
+    padding: .85rem;
+  }
+}
+
 ::-webkit-scrollbar {
   height: 8px;
   width: 8px;

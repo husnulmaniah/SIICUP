@@ -46,7 +46,14 @@ function todayKey() {
   return toApiDate(new Date())
 }
 
-const todayRow = computed(() => riwayat.value.absensi.find((a) => dateKey(a.tanggal) === todayKey()) || null)
+// statusHariIni SELALU berisi baris absen hari ini (diambil dari bulan
+// berjalan), terpisah dari `riwayat` yang mengikuti bulan yang sedang
+// dilihat pegawai lewat pemilih bulan. Dipisah supaya tombol "Absen Masuk"/
+// "Absen Pulang" tetap nonaktif begitu pegawai sudah absen, walaupun ia
+// sedang melihat riwayat bulan lain.
+const statusHariIni = ref(null)
+
+const todayRow = computed(() => statusHariIni.value)
 const sudahMasuk = computed(() => !!todayRow.value?.jam_masuk)
 const sudahPulang = computed(() => !!todayRow.value?.jam_pulang)
 
@@ -90,10 +97,28 @@ async function loadRiwayat() {
     const tahun = periodDate.value.getFullYear()
     const { data } = await http.get('/absensi/saya', { params: { bulan, tahun } })
     riwayat.value = data.data
+    loadThumbnails(riwayat.value.absensi)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat riwayat absen', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
     loadingRiwayat.value = false
+  }
+}
+
+// loadStatusHariIni mengambil baris absen HARI INI saja (lewat riwayat bulan
+// berjalan) -- dipanggil saat halaman dibuka dan setiap kali absen berhasil,
+// supaya tombol absen langsung nonaktif tanpa menunggu pegawai refresh.
+async function loadStatusHariIni() {
+  try {
+    const now = new Date()
+    const { data } = await http.get('/absensi/saya', {
+      params: { bulan: now.getMonth() + 1, tahun: now.getFullYear() },
+    })
+    const rows = data.data?.absensi || []
+    statusHariIni.value = rows.find((a) => dateKey(a.tanggal) === todayKey()) || null
+  } catch {
+    // tidak kritikal -- tombol absen tetap bisa dipakai, backend juga
+    // menolak absen ganda (lihat absenMasuk/absenPulang di backend).
   }
 }
 
@@ -106,15 +131,62 @@ async function loadDokumen() {
   }
 }
 
-function dokumenFor(tanggal) {
-  return dokumenList.value.find((d) => dateKey(d.tanggal) === tanggal)
+// ============================================================
+// thumbnail foto absen (ditampilkan langsung di tabel riwayat)
+// ============================================================
+
+// Foto disimpan di database dan hanya bisa diambil dengan token, jadi tidak
+// bisa dipasang langsung ke <img src>. Foto diambil sebagai blob lalu
+// disimpan object URL-nya di sini, dengan kunci "<id absen>-masuk/pulang".
+// Backend mengecilkan foto lewat parameter ?w=96 supaya satu tabel berisi
+// puluhan foto tetap ringan (lihat resizeJPEG di handlers/absensi.go).
+const thumbUrls = ref({})
+
+function revokeThumbnails() {
+  Object.values(thumbUrls.value).forEach((url) => URL.revokeObjectURL(url))
+  thumbUrls.value = {}
+}
+
+async function fetchThumb(id, jenis) {
+  const key = `${id}-${jenis}`
+  if (thumbUrls.value[key]) return
+  try {
+    const res = await http.get(`/absensi/foto/${id}/${jenis}`, { params: { w: 96 }, responseType: 'blob' })
+    thumbUrls.value = { ...thumbUrls.value, [key]: URL.createObjectURL(res.data) }
+  } catch {
+    // foto tidak ada/gagal dimuat -- kolom foto cukup menampilkan "-"
+  }
+}
+
+// loadThumbnails mengambil thumbnail baris demi baris (maksimal 4 permintaan
+// berjalan bersamaan) supaya tidak membanjiri koneksi HP saat satu bulan
+// penuh berisi foto.
+async function loadThumbnails(rows) {
+  revokeThumbnails()
+  const jobs = []
+  for (const row of rows || []) {
+    if (row.jam_masuk) jobs.push([row.id, 'masuk'])
+    if (row.jam_pulang) jobs.push([row.id, 'pulang'])
+  }
+  let idx = 0
+  const worker = async () => {
+    while (idx < jobs.length) {
+      const [id, jenis] = jobs[idx++]
+      await fetchThumb(id, jenis)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker))
+}
+
+function thumbUrl(row, jenis) {
+  return thumbUrls.value[`${row.id}-${jenis}`] || ''
 }
 
 watch(periodDate, () => loadRiwayat())
 
 onMounted(async () => {
   await loadPengaturan()
-  await Promise.all([loadRiwayat(), loadDokumen()])
+  await Promise.all([loadRiwayat(), loadDokumen(), loadStatusHariIni()])
 })
 
 function formatTanggal(key) {
@@ -257,6 +329,17 @@ async function startCameraStream() {
 }
 
 async function openCamera(mode) {
+  // pengaman tambahan selain tombol yang sudah di-disable: kalau absen hari
+  // ini sudah tercatat, kamera tidak usah dibuka sama sekali.
+  if (mode === 'masuk' && sudahMasuk.value) {
+    toast.add({ severity: 'info', summary: 'Sudah absen', detail: 'Anda sudah absen masuk hari ini', life: 3000 })
+    return
+  }
+  if (mode === 'pulang' && sudahPulang.value) {
+    toast.add({ severity: 'info', summary: 'Sudah absen', detail: 'Anda sudah absen pulang hari ini', life: 3000 })
+    return
+  }
+
   cameraMode.value = mode
   capturedBlob.value = null
   if (capturedUrl.value) URL.revokeObjectURL(capturedUrl.value)
@@ -370,8 +453,12 @@ async function submitAbsen() {
     const url = cameraMode.value === 'masuk' ? '/absensi/masuk' : '/absensi/pulang'
     const { data } = await http.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+    // pakai baris absen dari response supaya tombol langsung nonaktif
+    // walaupun pemuatan ulang riwayat masih berjalan.
+    if (data.data) statusHariIni.value = data.data
     closeCameraDialog()
     loadRiwayat()
+    loadStatusHariIni()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
@@ -379,7 +466,10 @@ async function submitAbsen() {
   }
 }
 
-onBeforeUnmount(() => stopCamera())
+onBeforeUnmount(() => {
+  stopCamera()
+  revokeThumbnails()
+})
 
 // ============================================================
 // lihat foto hasil absen
@@ -465,7 +555,12 @@ async function downloadDokumen(item) {
             <Tag v-if="sudahMasuk" severity="success" value="Sudah absen masuk" />
             <span v-else-if="!canMasuk" class="text-muted">belum dibuka / tidak aktif</span>
           </div>
-          <Button label="Absen Masuk" icon="pi pi-camera" :disabled="!canMasuk" @click="openCamera('masuk')" />
+          <Button
+            :label="sudahMasuk ? 'Sudah Absen Masuk' : 'Absen Masuk'"
+            :icon="sudahMasuk ? 'pi pi-check' : 'pi pi-camera'"
+            :disabled="!canMasuk"
+            @click="openCamera('masuk')"
+          />
           <div v-if="todayRow?.jam_masuk" class="absen-card-detail">
             Jam masuk: {{ formatJam(todayRow.jam_masuk) }}
             <span v-if="todayRow.terlambat_menit > 0" class="text-danger"> (terlambat {{ todayRow.terlambat_menit }} menit)</span>
@@ -478,7 +573,13 @@ async function downloadDokumen(item) {
             <Tag v-if="sudahPulang" severity="success" value="Sudah absen pulang" />
             <span v-else-if="!canPulang" class="text-muted">belum dibuka / tidak aktif</span>
           </div>
-          <Button label="Absen Pulang" icon="pi pi-camera" severity="danger" :disabled="!canPulang" @click="openCamera('pulang')" />
+          <Button
+            :label="sudahPulang ? 'Sudah Absen Pulang' : 'Absen Pulang'"
+            :icon="sudahPulang ? 'pi pi-check' : 'pi pi-camera'"
+            severity="danger"
+            :disabled="!canPulang"
+            @click="openCamera('pulang')"
+          />
           <div v-if="todayRow?.jam_pulang" class="absen-card-detail">Jam pulang: {{ formatJam(todayRow.jam_pulang) }}</div>
         </div>
       </div>
@@ -511,6 +612,34 @@ async function downloadDokumen(item) {
               <a v-if="data.jam_pulang" href="#" @click.prevent="lihatFoto(data, 'pulang')">{{ formatJam(data.jam_pulang) }}</a>
               <span v-else>-</span>
               <i v-if="data.jam_pulang && !data.kedipan_pulang_ok" class="pi pi-exclamation-triangle" style="color: #d97706; margin-left: 4px" title="Kedipan mata tidak terdeteksi pada foto ini" />
+            </template>
+          </Column>
+          <Column header="Foto Masuk">
+            <template #body="{ data }">
+              <img
+                v-if="thumbUrl(data, 'masuk')"
+                :src="thumbUrl(data, 'masuk')"
+                class="foto-thumb"
+                alt="Foto absen masuk"
+                title="Klik untuk memperbesar"
+                @click="lihatFoto(data, 'masuk')"
+              />
+              <span v-else-if="data.jam_masuk" class="text-muted">memuat...</span>
+              <span v-else>-</span>
+            </template>
+          </Column>
+          <Column header="Foto Pulang">
+            <template #body="{ data }">
+              <img
+                v-if="thumbUrl(data, 'pulang')"
+                :src="thumbUrl(data, 'pulang')"
+                class="foto-thumb"
+                alt="Foto absen pulang"
+                title="Klik untuk memperbesar"
+                @click="lihatFoto(data, 'pulang')"
+              />
+              <span v-else-if="data.jam_pulang" class="text-muted">memuat...</span>
+              <span v-else>-</span>
             </template>
           </Column>
           <Column header="Titik Koordinat">
@@ -559,7 +688,14 @@ async function downloadDokumen(item) {
     </template>
 
     <!-- ================= dialog kamera + kedipan ================= -->
-    <Dialog v-model:visible="cameraDialog" modal :header="labelMode(cameraMode)" :style="{ width: '440px' }" @hide="stopCamera">
+    <Dialog
+      v-model:visible="cameraDialog"
+      modal
+      :header="labelMode(cameraMode)"
+      :style="{ width: '440px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="stopCamera"
+    >
       <div v-if="locationChecking" class="loading-box">
         <ProgressSpinner style="width: 40px; height: 40px" />
         <p class="text-muted" style="margin-top: 0.5rem">Memeriksa titik koordinat Anda...</p>
@@ -611,18 +747,45 @@ async function downloadDokumen(item) {
     </Dialog>
 
     <!-- ================= dialog lihat foto ================= -->
-    <Dialog v-model:visible="fotoDialog" modal :header="fotoDialogTitle" :style="{ width: '420px' }" @hide="closeFotoDialog">
+    <Dialog
+      v-model:visible="fotoDialog"
+      modal
+      :header="fotoDialogTitle"
+      :style="{ width: '420px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeFotoDialog"
+    >
       <img v-if="fotoDialogUrl" :src="fotoDialogUrl" style="width: 100%; border-radius: 8px" alt="Foto absen" />
     </Dialog>
   </div>
 </template>
 
 <style scoped>
+/* padding disamakan dengan .page-wrap (style.css) supaya isi halaman tidak
+   menempel ke tepi layar -- terasa terutama di HP. */
 .absensi-page {
-  max-width: 960px;
+  max-width: 1280px;
+  padding: 1rem;
+}
+@media (min-width: 768px) {
+  .absensi-page {
+    padding: 1.5rem 2rem;
+  }
 }
 .page-header h2 {
   margin: 0 0 0.15rem;
+}
+.foto-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+  display: block;
+}
+.foto-thumb:hover {
+  border-color: #6366f1;
 }
 .text-muted {
   color: #6b7280;
@@ -703,12 +866,14 @@ async function downloadDokumen(item) {
 }
 .video-wrap {
   position: relative;
-  width: 320px;
-  height: 320px;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1 / 1;
 }
 .camera-video {
-  width: 320px;
-  height: 320px;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1 / 1;
   object-fit: cover;
   border-radius: 12px;
   background: #111827;
@@ -740,5 +905,28 @@ async function downloadDokumen(item) {
   font-weight: 600;
   margin-bottom: 0.3rem;
   color: #374151;
+}
+
+/* ---------- tampilan HP ---------- */
+@media (max-width: 640px) {
+  .absen-card {
+    min-width: 100%;
+  }
+  /* tombol absen dibuat selebar kartu supaya gampang ditekan dengan jempol */
+  .absen-card :deep(.p-button) {
+    width: 100%;
+    justify-content: center;
+  }
+  .section-header {
+    align-items: stretch;
+  }
+  .section-header :deep(.p-datepicker) {
+    width: 100% !important;
+  }
+  .terlewat-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
 }
 </style>

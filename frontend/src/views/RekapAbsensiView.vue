@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
@@ -208,6 +208,7 @@ const detailItem = ref(null)
 function openDetail(item) {
   detailItem.value = item
   detailDialog.value = true
+  loadThumbnails(item.absensi)
 }
 function dateKey(iso) {
   return (iso || '').slice(0, 10)
@@ -228,8 +229,54 @@ function formatKoordinat(row, jenis) {
 }
 
 // ============================================================
-// lihat foto absen masuk/pulang (admin/administrator)
+// foto absen masuk/pulang (admin/administrator) -- thumbnail langsung di
+// tabel detail, klik untuk memperbesar
 // ============================================================
+
+// Foto hanya bisa diambil dengan token (bukan URL publik), jadi ditarik
+// sebagai blob lalu disimpan object URL-nya dengan kunci "<id>-masuk/pulang".
+// Backend mengecilkan foto lewat ?w=96 supaya satu bulan penuh foto tetap
+// ringan dimuat (lihat resizeJPEG di handlers/absensi.go).
+const thumbUrls = ref({})
+
+function revokeThumbnails() {
+  Object.values(thumbUrls.value).forEach((url) => URL.revokeObjectURL(url))
+  thumbUrls.value = {}
+}
+
+async function fetchThumb(id, jenis) {
+  const key = `${id}-${jenis}`
+  if (thumbUrls.value[key]) return
+  try {
+    const res = await http.get(`/absensi/foto/${id}/${jenis}`, { params: { w: 96 }, responseType: 'blob' })
+    thumbUrls.value = { ...thumbUrls.value, [key]: URL.createObjectURL(res.data) }
+  } catch {
+    // foto tidak ada/gagal dimuat -- kolom foto cukup menampilkan "-"
+  }
+}
+
+async function loadThumbnails(rows) {
+  revokeThumbnails()
+  const jobs = []
+  for (const row of rows || []) {
+    if (row.jam_masuk) jobs.push([row.id, 'masuk'])
+    if (row.jam_pulang) jobs.push([row.id, 'pulang'])
+  }
+  let idx = 0
+  const worker = async () => {
+    while (idx < jobs.length) {
+      const [id, jenis] = jobs[idx++]
+      await fetchThumb(id, jenis)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker))
+}
+
+function thumbUrl(row, jenis) {
+  return thumbUrls.value[`${row.id}-${jenis}`] || ''
+}
+
+onBeforeUnmount(() => revokeThumbnails())
 
 const fotoDialog = ref(false)
 const fotoDialogUrl = ref('')
@@ -350,81 +397,97 @@ function kodeDokumen(jenis) {
     <div class="page-title">Rekap Absen</div>
     <p class="page-subtitle">Rekap kehadiran seluruh pegawai, pengaturan jendela waktu absen, dan aktif/nonaktifkan menu Absen.</p>
 
-    <div class="card" style="max-width: 40rem; margin-bottom: 1.5rem">
+    <div class="card" style="margin-bottom: 1.5rem">
       <div v-if="loadingPengaturan" style="display: flex; justify-content: center; padding: 1.5rem">
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
       </div>
-      <div v-else style="display: flex; flex-direction: column; gap: 1rem">
-        <div style="display: flex; align-items: center; gap: 0.75rem">
+      <div v-else class="pengaturan-body">
+        <div class="pengaturan-head">
           <ToggleSwitch v-model="pengaturan.aktif" />
           <span>Menu Absen {{ pengaturan.aktif ? 'aktif' : 'nonaktif' }} untuk pegawai</span>
         </div>
         <Message v-if="!pengaturan.aktif" severity="warn" :closable="false">
           Pegawai tidak akan bisa absen selama menu ini nonaktif.
         </Message>
-        <div class="jam-grid">
-          <div>
-            <label class="field-label">Jam Mulai Absen Pagi</label>
-            <InputText v-model="pengaturan.jam_mulai_pagi" placeholder="06:00" style="width: 100%" />
-          </div>
-          <div>
-            <label class="field-label">Jam Batas Absen Pagi (setelah ini terlambat)</label>
-            <InputText v-model="pengaturan.jam_batas_pagi" placeholder="07:30" style="width: 100%" />
-          </div>
-          <div>
-            <label class="field-label">Jam Mulai Absen Pulang</label>
-            <InputText v-model="pengaturan.jam_mulai_pulang" placeholder="15:00" style="width: 100%" />
-          </div>
-        </div>
-        <div>
-          <label class="field-label">Tempat Tugas yang Boleh Absen</label>
-          <MultiSelect
-            v-model="pengaturan.tempat_tugas_allowed"
-            :options="tempatTugasOptions"
-            optionLabel="label"
-            optionValue="value"
-            filter
-            display="chip"
-            placeholder="Semua tempat tugas (belum dibatasi)"
-            style="width: 100%"
-          />
-          <small class="text-muted">Kosongkan untuk mengizinkan semua tempat tugas.</small>
-        </div>
-        <div>
-          <label class="field-label">Jabatan yang Boleh Absen</label>
-          <MultiSelect
-            v-model="pengaturan.jabatan_allowed_ids"
-            :options="jabatanOptions"
-            optionLabel="label"
-            optionValue="value"
-            filter
-            display="chip"
-            placeholder="Semua jabatan (belum dibatasi)"
-            style="width: 100%"
-          />
-          <small class="text-muted">Kosongkan untuk mengizinkan semua jabatan.</small>
-        </div>
-        <Message severity="info" :closable="false">
-          Pegawai yang tempat tugas &amp; jabatannya tidak cocok dengan filter di atas akan melihat pesan "menu ini
-          bukan untuk Anda" saat membuka menu Absen. Kosongkan kedua filter untuk membuka menu Absen bagi semua pegawai.
-        </Message>
 
-        <div>
-          <label class="field-label">Titik Koordinat Kantor &amp; Radius Absen</label>
-          <div class="kantor-grid">
-            <InputNumber v-model="pengaturan.kantor_lat" placeholder="Lintang (lat)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
-            <InputNumber v-model="pengaturan.kantor_lng" placeholder="Bujur (lng)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
-            <InputNumber v-model="pengaturan.radius_meter" placeholder="Radius (meter)" suffix=" m" :min="1" style="width: 100%" />
+        <!-- dua kolom di layar lebar (desktop), menumpuk otomatis di HP -->
+        <div class="pengaturan-cols">
+          <div class="pengaturan-col">
+            <div class="pengaturan-group">
+              <div class="group-title">Jendela Waktu Absen</div>
+              <div class="jam-grid">
+                <div>
+                  <label class="field-label">Jam Mulai Absen Pagi</label>
+                  <InputText v-model="pengaturan.jam_mulai_pagi" placeholder="06:00" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Batas Absen Pagi (setelah ini terlambat)</label>
+                  <InputText v-model="pengaturan.jam_batas_pagi" placeholder="07:30" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Mulai Absen Pulang</label>
+                  <InputText v-model="pengaturan.jam_mulai_pulang" placeholder="15:00" style="width: 100%" />
+                </div>
+              </div>
+            </div>
+
+            <div class="pengaturan-group">
+              <div class="group-title">Titik Koordinat Kantor &amp; Radius Absen</div>
+              <div class="kantor-grid">
+                <InputNumber v-model="pengaturan.kantor_lat" placeholder="Lintang (lat)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
+                <InputNumber v-model="pengaturan.kantor_lng" placeholder="Bujur (lng)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
+                <InputNumber v-model="pengaturan.radius_meter" placeholder="Radius (meter)" suffix=" m" :min="1" style="width: 100%" />
+              </div>
+              <div class="kantor-actions">
+                <Button label="Ambil Lokasi Saat Ini" icon="pi pi-map-marker" size="small" outlined :loading="locatingKantor" @click="ambilLokasiKantor" />
+                <Button v-if="pengaturan.kantor_lat != null" label="Hapus Titik Kantor" icon="pi pi-times" size="small" text severity="danger" @click="hapusLokasiKantor" />
+              </div>
+              <small class="text-muted">
+                Kalau diisi, kamera absen hanya akan terbuka jika pegawai berada dalam radius ini dari titik kantor.
+                Kosongkan (Hapus Titik Kantor) untuk menonaktifkan pembatasan lokasi. Gunakan "Ambil Lokasi Saat Ini"
+                saat Anda berada di titik kantor yang ingin dijadikan patokan.
+              </small>
+            </div>
           </div>
-          <div class="kantor-actions">
-            <Button label="Ambil Lokasi Saat Ini" icon="pi pi-map-marker" size="small" outlined :loading="locatingKantor" @click="ambilLokasiKantor" />
-            <Button v-if="pengaturan.kantor_lat != null" label="Hapus Titik Kantor" icon="pi pi-times" size="small" text severity="danger" @click="hapusLokasiKantor" />
+
+          <div class="pengaturan-col">
+            <div class="pengaturan-group">
+              <div class="group-title">Siapa yang Boleh Absen</div>
+              <div>
+                <label class="field-label">Tempat Tugas yang Boleh Absen</label>
+                <MultiSelect
+                  v-model="pengaturan.tempat_tugas_allowed"
+                  :options="tempatTugasOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  filter
+                  display="chip"
+                  placeholder="Semua tempat tugas (belum dibatasi)"
+                  style="width: 100%"
+                />
+                <small class="text-muted">Kosongkan untuk mengizinkan semua tempat tugas.</small>
+              </div>
+              <div>
+                <label class="field-label">Jabatan yang Boleh Absen</label>
+                <MultiSelect
+                  v-model="pengaturan.jabatan_allowed_ids"
+                  :options="jabatanOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  filter
+                  display="chip"
+                  placeholder="Semua jabatan (belum dibatasi)"
+                  style="width: 100%"
+                />
+                <small class="text-muted">Kosongkan untuk mengizinkan semua jabatan.</small>
+              </div>
+              <Message severity="info" :closable="false">
+                Pegawai yang tempat tugas &amp; jabatannya tidak cocok dengan filter di atas akan melihat pesan "menu
+                ini bukan untuk Anda" saat membuka menu Absen. Kosongkan kedua filter untuk membuka menu Absen bagi
+                semua pegawai.
+              </Message>
+            </div>
           </div>
-          <small class="text-muted">
-            Kalau diisi, kamera absen hanya akan terbuka jika pegawai berada dalam radius ini dari titik kantor.
-            Kosongkan (Hapus Titik Kantor) untuk menonaktifkan pembatasan lokasi. Gunakan "Ambil Lokasi Saat Ini" saat
-            Anda berada di titik kantor yang ingin dijadikan patokan.
-          </small>
         </div>
 
         <div>
@@ -481,7 +544,13 @@ function kodeDokumen(jenis) {
       </DataTable>
     </div>
 
-    <Dialog v-model:visible="detailDialog" modal :header="`Detail Absen -- ${detailItem?.pegawai?.nama || ''}`" :style="{ width: '640px' }">
+    <Dialog
+      v-model:visible="detailDialog"
+      modal
+      :header="`Detail Absen -- ${detailItem?.pegawai?.nama || ''}`"
+      :style="{ width: '900px' }"
+      :breakpoints="{ '1100px': '92vw', '640px': '94vw' }"
+    >
       <template v-if="detailItem">
         <h4>Riwayat Absen</h4>
         <DataTable :value="detailItem.absensi" size="small" stripedRows responsiveLayout="scroll">
@@ -500,6 +569,34 @@ function kodeDokumen(jenis) {
           <Column header="Jam Pulang">
             <template #body="{ data }">
               <a v-if="data.jam_pulang" href="#" @click.prevent="lihatFoto(data, 'pulang')">{{ formatJam(data.jam_pulang) }}</a>
+              <span v-else>-</span>
+            </template>
+          </Column>
+          <Column header="Foto Masuk">
+            <template #body="{ data }">
+              <img
+                v-if="thumbUrl(data, 'masuk')"
+                :src="thumbUrl(data, 'masuk')"
+                class="foto-thumb"
+                alt="Foto absen masuk"
+                title="Klik untuk memperbesar"
+                @click="lihatFoto(data, 'masuk')"
+              />
+              <span v-else-if="data.jam_masuk" class="text-muted">memuat...</span>
+              <span v-else>-</span>
+            </template>
+          </Column>
+          <Column header="Foto Pulang">
+            <template #body="{ data }">
+              <img
+                v-if="thumbUrl(data, 'pulang')"
+                :src="thumbUrl(data, 'pulang')"
+                class="foto-thumb"
+                alt="Foto absen pulang"
+                title="Klik untuk memperbesar"
+                @click="lihatFoto(data, 'pulang')"
+              />
+              <span v-else-if="data.jam_pulang" class="text-muted">memuat...</span>
               <span v-else>-</span>
             </template>
           </Column>
@@ -528,7 +625,14 @@ function kodeDokumen(jenis) {
     </Dialog>
 
     <!-- ================= dialog lihat foto ================= -->
-    <Dialog v-model:visible="fotoDialog" modal :header="fotoDialogTitle" :style="{ width: '420px' }" @hide="closeFotoDialog">
+    <Dialog
+      v-model:visible="fotoDialog"
+      modal
+      :header="fotoDialogTitle"
+      :style="{ width: '420px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeFotoDialog"
+    >
       <img v-if="fotoDialogUrl" :src="fotoDialogUrl" style="width: 100%; border-radius: 8px" alt="Foto absen" />
     </Dialog>
 
@@ -667,5 +771,78 @@ function kodeDokumen(jenis) {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
+}
+
+/* ---------- kartu pengaturan: dua kolom di desktop ---------- */
+.pengaturan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.pengaturan-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.pengaturan-cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+@media (min-width: 1100px) {
+  .pengaturan-cols {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.pengaturan-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+.pengaturan-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  border: 1px solid var(--p-surface-200, #e2e8f0);
+  border-radius: 10px;
+  padding: 1rem;
+}
+.group-title {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: #334155;
+}
+
+/* ---------- thumbnail foto absen ---------- */
+.foto-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+  display: block;
+}
+.foto-thumb:hover {
+  border-color: #6366f1;
+}
+
+/* ---------- tampilan HP ---------- */
+@media (max-width: 640px) {
+  .rekap-toolbar > * {
+    width: 100%;
+  }
+  .rekap-toolbar :deep(.p-datepicker),
+  .rekap-toolbar :deep(.p-select) {
+    width: 100% !important;
+  }
+  .kolektif-form {
+    max-width: 100%;
+  }
+  .kantor-actions :deep(.p-button) {
+    width: 100%;
+    justify-content: center;
+  }
 }
 </style>

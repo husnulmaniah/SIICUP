@@ -10,7 +10,6 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
-const sidebarOpen = ref(false)
 const userMenu = ref(null)
 
 const roleLabel = computed(() => {
@@ -90,26 +89,55 @@ const userMenuItems = [
   {
     label: 'Keluar',
     icon: 'pi pi-sign-out',
-    command: () => {
-      auth.logout()
-      router.push({ name: 'login' })
-    },
+    command: () => keluar(),
   },
 ]
+
+function keluar() {
+  auth.logout()
+  router.push({ name: 'login' })
+}
 
 function isActive(to) {
   return route.path === to
 }
 
 function navigate(to) {
-  sidebarOpen.value = false
+  moreSheet.value = false
   router.push(to)
 }
+
+// ============================================================
+// navigasi bawah untuk tampilan HP (mirip aplikasi Android)
+// ============================================================
+// Di layar kecil sidebar TIDAK dipakai sama sekali -- diganti bar ikon di
+// bawah layar berisi maksimal 4 menu utama ditambah tombol "Lainnya" yang
+// membuka lembar berisi seluruh menu (dikelompokkan sama seperti sidebar).
+
+const moreSheet = ref(false)
+
+// daftar rata semua menu sesuai role, urutan sama dengan sidebar
+const flatNavItems = computed(() => navSections.value.flatMap((s) => s.items))
+
+const MAX_BOTTOM_ITEMS = 4
+
+const bottomNavItems = computed(() => {
+  const items = flatNavItems.value
+  // kalau menunya pas (<= 5), semuanya ditampilkan tanpa tombol "Lainnya"
+  return items.length <= MAX_BOTTOM_ITEMS + 1 ? items : items.slice(0, MAX_BOTTOM_ITEMS)
+})
+
+const punyaMenuLainnya = computed(() => flatNavItems.value.length > MAX_BOTTOM_ITEMS + 1)
+
+// menu aktif yang tidak muat di bar bawah ditandai lewat tombol "Lainnya"
+const menuLainnyaAktif = computed(
+  () => punyaMenuLainnya.value && !bottomNavItems.value.some((item) => isActive(item.to)),
+)
 </script>
 
 <template>
   <div class="app-shell">
-    <aside class="sidebar" :class="{ open: sidebarOpen }">
+    <aside class="sidebar">
       <div class="sidebar-brand">
         <i class="pi pi-calendar-plus" style="font-size: 1.4rem"></i>
         <span>SI Cuti Pegawai</span>
@@ -131,13 +159,12 @@ function navigate(to) {
       </nav>
     </aside>
 
-    <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false"></div>
-
     <div class="main-area">
       <header class="topbar">
-        <button class="hamburger" @click="sidebarOpen = !sidebarOpen" aria-label="Menu">
-          <i class="pi pi-bars"></i>
-        </button>
+        <div class="topbar-brand">
+          <i class="pi pi-calendar-plus"></i>
+          <span>SI Cuti Pegawai</span>
+        </div>
         <div class="topbar-title">{{ roleLabel }}</div>
         <div class="topbar-user" @click="userMenu.toggle($event)">
           <Avatar :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #6366f1; color: #fff" />
@@ -150,6 +177,55 @@ function navigate(to) {
       <main class="content-area">
         <router-view />
       </main>
+    </div>
+
+    <!-- ================= navigasi bawah (khusus HP) ================= -->
+    <nav class="bottom-nav">
+      <a
+        v-for="item in bottomNavItems"
+        :key="item.to"
+        class="bottom-nav-item"
+        :class="{ active: isActive(item.to) }"
+        @click="navigate(item.to)"
+      >
+        <i :class="item.icon"></i>
+        <span>{{ item.label }}</span>
+      </a>
+      <a
+        v-if="punyaMenuLainnya"
+        class="bottom-nav-item"
+        :class="{ active: menuLainnyaAktif }"
+        @click="moreSheet = true"
+      >
+        <i class="pi pi-th-large"></i>
+        <span>Lainnya</span>
+      </a>
+    </nav>
+
+    <!-- lembar "Lainnya": seluruh menu, muncul dari bawah layar -->
+    <div v-if="moreSheet" class="sheet-backdrop" @click="moreSheet = false"></div>
+    <div class="more-sheet" :class="{ open: moreSheet }">
+      <div class="more-sheet-handle" @click="moreSheet = false"></div>
+      <div class="more-sheet-title">Menu</div>
+      <div class="more-sheet-body">
+        <template v-for="(section, si) in navSections" :key="si">
+          <div v-if="section.header" class="more-section-header">{{ section.header }}</div>
+          <a
+            v-for="item in section.items"
+            :key="item.to"
+            class="more-item"
+            :class="{ active: isActive(item.to) }"
+            @click="navigate(item.to)"
+          >
+            <i :class="item.icon"></i>
+            <span>{{ item.label }}</span>
+          </a>
+        </template>
+        <a class="more-item keluar" @click="keluar()">
+          <i class="pi pi-sign-out"></i>
+          <span>Keluar</span>
+        </a>
+      </div>
     </div>
   </div>
 </template>
@@ -223,14 +299,6 @@ function navigate(to) {
   color: #fff;
 }
 
-.sidebar-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 35;
-  display: none;
-}
-
 .main-area {
   flex: 1;
   margin-left: 260px;
@@ -252,13 +320,18 @@ function navigate(to) {
   z-index: 20;
 }
 
-.hamburger {
+/* brand di topbar hanya muncul di HP (di desktop sudah ada di sidebar) */
+.topbar-brand {
   display: none;
-  background: none;
-  border: none;
-  font-size: 1.2rem;
-  cursor: pointer;
-  color: #374151;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: #111827;
+  font-size: 0.98rem;
+}
+
+.topbar-brand i {
+  color: #6366f1;
 }
 
 .topbar-title {
@@ -290,24 +363,176 @@ function navigate(to) {
   flex: 1;
 }
 
+/* ============================================================
+   Navigasi bawah ala aplikasi HP (Android) -- disembunyikan di desktop,
+   menggantikan sidebar sepenuhnya di layar kecil.
+   ============================================================ */
+.bottom-nav {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  background: #fff;
+  border-top: 1px solid #e5e7eb;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.06);
+  /* aman dari home indicator iPhone / gesture bar Android */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.bottom-nav-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  padding: 0.5rem 0.2rem 0.45rem;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bottom-nav-item i {
+  font-size: 1.15rem;
+}
+
+.bottom-nav-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bottom-nav-item.active {
+  color: #6366f1;
+  font-weight: 600;
+}
+
+/* lembar "Lainnya" yang muncul dari bawah layar */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 46;
+}
+
+.more-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 47;
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  transform: translateY(100%);
+  transition: transform 0.22s ease;
+  max-height: 78vh;
+  display: none;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.more-sheet.open {
+  transform: translateY(0);
+}
+
+.more-sheet-handle {
+  width: 42px;
+  height: 4px;
+  border-radius: 999px;
+  background: #d1d5db;
+  margin: 0.6rem auto 0.2rem;
+  cursor: pointer;
+}
+
+.more-sheet-title {
+  font-weight: 700;
+  padding: 0.35rem 1rem 0.5rem;
+  color: #111827;
+}
+
+.more-sheet-body {
+  overflow-y: auto;
+  padding: 0 0.6rem 0.9rem;
+}
+
+.more-section-header {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9ca3af;
+  padding: 0.85rem 0.6rem 0.3rem;
+  font-weight: 700;
+}
+
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.7rem;
+  border-radius: 10px;
+  color: #374151;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.more-item i {
+  width: 1.3rem;
+  color: #6b7280;
+}
+
+.more-item.active {
+  background: #eef2ff;
+  color: #4f46e5;
+  font-weight: 600;
+}
+
+.more-item.active i {
+  color: #4f46e5;
+}
+
+.more-item.keluar {
+  margin-top: 0.6rem;
+  border-top: 1px solid #f1f5f9;
+  color: #dc2626;
+}
+
+.more-item.keluar i {
+  color: #dc2626;
+}
+
 @media (max-width: 900px) {
+  /* Di HP panel/sidebar TIDAK ditampilkan sama sekali -- navigasi
+     sepenuhnya lewat bar ikon di bawah layar. */
   .sidebar {
-    transform: translateX(-100%);
-  }
-  .sidebar.open {
-    transform: translateX(0);
-  }
-  .sidebar-backdrop {
-    display: block;
+    display: none !important;
   }
   .main-area {
     margin-left: 0;
   }
-  .hamburger {
-    display: inline-block;
+  .topbar-brand {
+    display: flex;
   }
+  .topbar-title,
   .user-name {
     display: none;
+  }
+  .bottom-nav {
+    display: flex;
+  }
+  .more-sheet {
+    display: flex;
+  }
+  /* ruang supaya konten paling bawah tidak tertutup bar navigasi */
+  .content-area {
+    padding-bottom: 4.75rem;
   }
 }
 </style>

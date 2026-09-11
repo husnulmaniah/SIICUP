@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"math"
 	"net/http"
@@ -691,6 +695,63 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	})
 }
 
+// resizeJPEG mengecilkan gambar JPEG ke lebar targetW (tinggi mengikuti
+// rasio aslinya) dengan merata-ratakan blok piksel sumber. Sengaja hanya
+// memakai stdlib (image/jpeg) tanpa dependensi tambahan -- dipakai untuk
+// thumbnail foto absen di tabel riwayat/detail yang menampilkan banyak foto
+// sekaligus. Kalau gambar sudah lebih kecil dari targetW, data aslinya
+// dikembalikan apa adanya.
+func resizeJPEG(data []byte, targetW int) ([]byte, error) {
+	src, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	b := src.Bounds()
+	if b.Dx() <= targetW {
+		return data, nil
+	}
+	targetH := b.Dy() * targetW / b.Dx()
+	if targetH < 1 {
+		targetH = 1
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
+	for y := 0; y < targetH; y++ {
+		y0 := b.Min.Y + y*b.Dy()/targetH
+		y1 := b.Min.Y + (y+1)*b.Dy()/targetH
+		if y1 <= y0 {
+			y1 = y0 + 1
+		}
+		for x := 0; x < targetW; x++ {
+			x0 := b.Min.X + x*b.Dx()/targetW
+			x1 := b.Min.X + (x+1)*b.Dx()/targetW
+			if x1 <= x0 {
+				x1 = x0 + 1
+			}
+			var sumR, sumG, sumB, n uint64
+			for sy := y0; sy < y1; sy++ {
+				for sx := x0; sx < x1; sx++ {
+					cr, cg, cb, _ := src.At(sx, sy).RGBA()
+					sumR += uint64(cr >> 8)
+					sumG += uint64(cg >> 8)
+					sumB += uint64(cb >> 8)
+					n++
+				}
+			}
+			if n == 0 {
+				n = 1
+			}
+			dst.Set(x, y, color.RGBA{R: uint8(sumR / n), G: uint8(sumG / n), B: uint8(sumB / n), A: 255})
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 75}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func fotoAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
@@ -722,6 +783,21 @@ func fotoAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusNotFound, "foto tidak ditemukan")
 		return
 	}
+
+	// ?w=96 mengecilkan foto jadi thumbnail -- dipakai tabel riwayat/detail
+	// absen yang menampilkan banyak foto sekaligus supaya tidak menarik
+	// puluhan foto ukuran penuh (apalagi di HP). Tanpa parameter ini foto
+	// dikirim apa adanya (dipakai dialog "lihat foto" ukuran besar).
+	if wq := r.URL.Query().Get("w"); wq != "" {
+		if targetW, err := strconv.Atoi(wq); err == nil && targetW >= 16 && targetW <= 1000 {
+			if kecil, err := resizeJPEG(foto, targetW); err == nil {
+				foto = kecil
+			}
+		}
+	}
+	// foto absen tidak pernah berubah setelah tersimpan, jadi aman di-cache
+	// browser (private -- hanya pemilik/admin yang boleh melihatnya).
+	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"absen_%s_%s.jpg\"", id, jenis))
 	w.Write(foto)
