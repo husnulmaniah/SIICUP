@@ -256,24 +256,24 @@ func resolveSignerInfo(db *gorm.DB, pengaturan models.PengaturanSurat) (nama, ni
 // failure here (extremely unlikely -- the payload is short plain text) is
 // meant to be treated by the caller as "skip the stamp", not a hard error:
 // it's a supplementary trust marker, not the form's substance.
+//
+// The payload is kept deliberately short (no jabatan title, which is already
+// printed as plain text right next to the stamp, and no verbose sentences)
+// -- a QR printed at only ~40pt (roughly 14mm) needs to stay at a low QR
+// "version" (few modules) to still be reliably scannable by an ordinary
+// phone camera. A long jabatan (e.g. "Plt. Kepala Dinas Pendidikan dan
+// Kebudayaan Daerah Kabupaten Morowali Utara") pushed the old, verbose
+// payload into a QR version with modules too fine to survive printing at
+// that size, making the stamp effectively unscannable -- defeating its whole
+// purpose.
 func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai) ([]byte, error) {
-	jenisNama := "-"
-	if item.JenisCuti != nil {
-		jenisNama = item.JenisCuti.Jenis
-	}
 	lines := []string{
-		"SIICUP - Verifikasi Dokumen Cuti",
-		fmt.Sprintf("Pengajuan #%d", item.ID),
-		"Pegawai Cuti: " + pegawai.Nama + " (NIP " + namaOrDash(pegawai.NIP) + ")",
-		"Jenis Cuti: " + jenisNama,
-		"Tanggal Cuti: " + formatTanggalRentang(item.TglMulai, item.TglSelesai),
-		"Ditandatangani: " + namaOrDash(item.TtdNama) + " (" + namaOrDash(item.TtdJabatan) + "), NIP " + namaOrDash(item.TtdNip) + ".",
+		fmt.Sprintf("SIICUP-CUTI #%d", item.ID),
+		"Pegawai: " + pegawai.Nama + "/" + namaOrDash(pegawai.NIP),
+		"TTD: " + namaOrDash(item.TtdNama) + "/" + namaOrDash(item.TtdNip),
 	}
 	if item.DisetujuiOlehUsername != "" {
-		lines = append(lines, fmt.Sprintf("Disetujui di SIICUP oleh: %s (%s)", item.DisetujuiOlehUsername, namaOrDash(item.DisetujuiOlehRole)))
-	}
-	if item.TglApproval != nil {
-		lines = append(lines, "Tanggal Persetujuan: "+formatDateID(*item.TglApproval))
+		lines = append(lines, "ACC: "+item.DisetujuiOlehUsername)
 	}
 	return qrcode.Encode(strings.Join(lines, "\n"), qrcode.Medium, 240)
 }
@@ -399,10 +399,12 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, si
 	// Barcode/QR tanda tangan otomatis -- diposisikan di tengah lebar nama
 	// penandatangan (bukan rata kiri kolom), di ruang kosong yang dulunya
 	// disediakan untuk tanda tangan basah (lihat drawSignatureQR/
-	// buildSignatureQR).
-	const qrSide = 40.0
+	// buildSignatureQR). Ukuran 80x80 (dari semula 40x40) supaya cukup besar
+	// untuk dipindai kamera HP dengan mudah, mendekati ukuran QR tanda tangan
+	// pada formulir resmi lain (mis. Surat Izin Cuti BKPSDM).
+	const qrSide = 80.0
 	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, nameCenterX-qrSide/2, y+2, qrSide)
-	y += qrSide + 16
+	y += qrSide + 14
 
 	p.SetFont(true, 12)
 	p.Text(sigX, y, signerNamaDisp)
@@ -532,7 +534,8 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	// untuk kelompok kiri 1-3 dan kanan 4-6, dengan garis horizontal di
 	// antara tiap baris) supaya semirip mungkin dengan formulir cetak asli.
 	rowTop = y
-	rowH = 96.0
+	const itemHRowII = 15.0
+	rowH = 26.0 + itemHRowII*3.0
 	p.SetFont(true, 12)
 	p.Text(contentX+pad, rowTop+18, "Jenis Cuti yang di ambil")
 	p.SetFont(false, 11)
@@ -563,7 +566,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	rightCheckX := rightX - trailColW - checkColW
 
 	gridTop := rowTop + 26.0
-	itemH := (rowH - 26.0) / 3.0
+	itemH := itemHRowII
 	for i := 0; i < 3; i++ {
 		cellTop := gridTop + itemH*float64(i)
 		ly := cellTop + itemH*0.75
@@ -627,7 +630,14 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	// dan daftar legenda 1-6 di kanan (kolom kosong | nomor | label, dengan
 	// garis antar baris), meniru formulir cetak asli.
 	rowTop = y
-	rowH = 140.0
+	// Tinggi tiap baris di dalam grid (tabel kuota kiri 5 baris & legenda
+	// kanan 6 baris) distandarkan 15pt (sama seperti lineH di tempat lain),
+	// bukan proporsional membagi rowH tetap -- supaya baris tidak lebih
+	// lebar dari yang dibutuhkan dan seluruh formulir tetap muat dalam 1
+	// lembar kertas Legal. rowH mengikuti sisi grid yang lebih tinggi
+	// (legenda kanan, 6 baris).
+	const itemHRowV = 15.0
+	rowH = 26.0 + itemHRowV*6.0
 	p.SetFont(true, 12)
 	p.Text(contentX+pad, rowTop+18, "Catatan Cuti")
 	quotaW := contentW * 0.5
@@ -684,7 +694,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	legendNumX := quotaEnd + blankColW2
 	legendLabelX := legendNumX + 16.0
 	legendTrailW := 6.0
-	itemH2 := (rowH - 26.0) / 6.0
+	itemH2 := itemHRowV
 	legend := []string{"Cuti Tahunan", "Cuti Sakit", "Cuti Karena Alasan Penting", "Cuti Besar", "Cuti Melahirkan", "Cuti di Luar Tanggungan Negara"}
 	for i, l := range legend {
 		cellTop := gridTop3 + itemH2*float64(i)
@@ -748,7 +758,15 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	sigMaxWVII := (rightX - rightHalfX) - 16
 	jabatanLinesVII, jabatanSizeVII := wrapJabatan(namaOrDash(signerJabatan), sigMaxWVII, 2, []float64{11, 10, 9.5, 9, 8.5, 8, 7.5})
 	jabatanLineHVII := jabatanSizeVII + 3
-	rowH = 130.0
+	// QR diperbesar ke 80x80 (dari 40x40) -- ukuran sekecil 40pt (~14mm)
+	// terlalu padat modulnya untuk contoh QR "SIICUP-CUTI ..." dipindai
+	// kamera HP biasa; 80pt (~28mm) mendekati ukuran QR tanda tangan pada
+	// formulir resmi lain (mis. Surat Izin Cuti BKPSDM) yang mudah dipindai.
+	const qrSideVII = 80.0
+	// rowH dihitung dari kebutuhan riil kolom tanda tangan (jabatan + QR +
+	// nama + NIP), bukan angka tetap -- supaya QR yang diperbesar tidak
+	// pernah bertumpukan/terpotong.
+	rowH = 41.0 + jabatanLineHVII + 7 + qrSideVII + 14 + 20 + 16
 	if len(jabatanLinesVII) > 1 {
 		rowH += jabatanLineHVII * float64(len(jabatanLinesVII)-1)
 	}
@@ -788,10 +806,9 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	for i, jl := range jabatanLinesVII {
 		p.TextCentered(sigColCenter, jabatanTopVII+float64(i)*jabatanLineHVII, jl)
 	}
-	const qrSideVII = 40.0
 	qrTopVII := jabatanTopVII + float64(len(jabatanLinesVII)-1)*jabatanLineHVII + 7
 	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, sigColCenter-qrSideVII/2, qrTopVII, qrSideVII)
-	nameTopVII := qrTopVII + qrSideVII + 18
+	nameTopVII := qrTopVII + qrSideVII + 14
 	kepalaDinasNama := truncateToWidth(namaOrDash(signerNama), sigMaxWVII*boldWidthSafety, 12)
 	p.SetFont(true, 12)
 	p.TextCentered(sigColCenter, nameTopVII, kepalaDinasNama)
