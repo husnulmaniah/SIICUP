@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"math"
 	"net/http"
@@ -50,6 +51,19 @@ func absensiNow() time.Time {
 func absensiToday() time.Time {
 	now := absensiNow()
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+}
+
+// formatJamAbsensi memformat jam absen (jam masuk/pulang) ke "HH:MM" dalam
+// zona WITA. Konversi zonanya WAJIB: driver database mengembalikan kolom
+// timestamptz apa adanya (UTC), jadi memformat langsung tanpa .In() membuat
+// jam pada export Excel/PDF meleset 8 jam dari jam absen sebenarnya. Di sisi
+// frontend hal ini tidak terasa karena browser sudah mengubah sendiri string
+// ISO-nya ke waktu lokal.
+func formatJamAbsensi(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.In(absensiLocation()).Format("15:04")
 }
 
 // parseJamToMinutes mengubah "HH:MM" jadi jumlah menit sejak tengah malam.
@@ -261,6 +275,7 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/absensi/opsi-tempat-tugas", manage(func(w http.ResponseWriter, r *http.Request) { opsiTempatTugasAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap", manage(func(w http.ResponseWriter, r *http.Request) { rekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/export", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensi(w, r, db) }))
+	mux.Handle("GET /api/absensi/rekap/pdf", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensiPegawaiPDF(w, r, db) }))
 }
 
 func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -706,9 +721,42 @@ func resizeJPEG(data []byte, targetW int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := src.Bounds()
-	if b.Dx() <= targetW {
+	if src.Bounds().Dx() <= targetW {
 		return data, nil
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, resizeImageBox(src, targetW), &jpeg.Options{Quality: 75}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// fotoThumbPNG mengubah foto absen (JPEG di database) jadi PNG kecil --
+// dipakai saat menyusun PDF rekap absen per pegawai, karena penulis PDF
+// bawaan aplikasi (utils/pdfwriter.go) hanya menerima gambar PNG.
+func fotoThumbPNG(data []byte, targetW int) ([]byte, error) {
+	src, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, resizeImageBox(src, targetW)); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// resizeImageBox mengecilkan gambar ke lebar targetW dengan merata-ratakan
+// blok piksel sumber (tinggi mengikuti rasio aslinya). Gambar yang sudah
+// lebih kecil dari targetW dikembalikan apa adanya (disalin ke RGBA).
+func resizeImageBox(src image.Image, targetW int) *image.RGBA {
+	b := src.Bounds()
+	if b.Dx() < targetW {
+		targetW = b.Dx()
+	}
+	if targetW < 1 {
+		targetW = 1
 	}
 	targetH := b.Dy() * targetW / b.Dx()
 	if targetH < 1 {
@@ -744,12 +792,7 @@ func resizeJPEG(data []byte, targetW int) ([]byte, error) {
 			dst.Set(x, y, color.RGBA{R: uint8(sumR / n), G: uint8(sumG / n), B: uint8(sumB / n), A: 255})
 		}
 	}
-
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 75}); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return dst
 }
 
 func fotoAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

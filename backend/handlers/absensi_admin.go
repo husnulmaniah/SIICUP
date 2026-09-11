@@ -308,14 +308,14 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			out := row{Nama: it.Pegawai.Nama, NIP: it.Pegawai.NIP, Tanggal: d.Format("02-01-2006")}
 			switch {
 			case ada && a.JamMasuk != nil:
-				out.JamMasuk = a.JamMasuk.Format("15:04")
+				out.JamMasuk = formatJamAbsensi(a.JamMasuk)
 				if a.TerlambatMenit > 0 {
 					out.Terlambat = strconv.Itoa(a.TerlambatMenit) + " menit"
 				} else {
 					out.Terlambat = "-"
 				}
 				if a.JamPulang != nil {
-					out.JamPulang = a.JamPulang.Format("15:04")
+					out.JamPulang = formatJamAbsensi(a.JamPulang)
 				} else {
 					out.JamPulang = "-"
 				}

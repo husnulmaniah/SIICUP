@@ -271,6 +271,54 @@ function openDetail(item) {
   detailDialog.value = true
   loadThumbnails(item.absensi)
 }
+
+// ------------------------------------------------------------
+// unduh rekap absen SATU pegawai sebagai PDF (lihat
+// exportRekapAbsensiPegawaiPDF di handlers/absensi_pdf.go)
+// ------------------------------------------------------------
+
+const unduhPdfId = ref(null)
+
+// pesan error dari backend ikut terbaca walaupun respons diminta sebagai blob
+async function pesanErrorBlob(e) {
+  const data = e.response?.data
+  if (data instanceof Blob) {
+    try {
+      return JSON.parse(await data.text()).message
+    } catch {
+      /* bukan JSON -- pakai pesan bawaan di bawah */
+    }
+  }
+  return e.response?.data?.message || e.message
+}
+
+async function unduhPdfPegawai(item) {
+  const pegawai = item?.pegawai
+  if (!pegawai?.id) return
+  unduhPdfId.value = pegawai.id
+  try {
+    const params = {
+      id_pegawai: pegawai.id,
+      bulan: periodDate.value.getMonth() + 1,
+      tahun: periodDate.value.getFullYear(),
+    }
+    const res = await http.get('/absensi/rekap/pdf', { params, responseType: 'blob' })
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+    const link = document.createElement('a')
+    link.href = url
+    const bulanStr = String(params.bulan).padStart(2, '0')
+    const namaFile = (pegawai.nama || 'pegawai').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+    link.download = `rekap_absen_${namaFile}_${params.tahun}-${bulanStr}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh PDF', detail: await pesanErrorBlob(e), life: 5000 })
+  } finally {
+    unduhPdfId.value = null
+  }
+}
 function dateKey(iso) {
   return (iso || '').slice(0, 10)
 }
@@ -654,6 +702,16 @@ function kodeDokumen(jenis) {
         <Column header="Aksi">
           <template #body="{ data }">
             <Button icon="pi pi-eye" size="small" text rounded title="Lihat Detail" @click="openDetail(data)" />
+            <Button
+              icon="pi pi-file-pdf"
+              size="small"
+              text
+              rounded
+              severity="danger"
+              title="Unduh PDF rekap pegawai ini"
+              :loading="unduhPdfId === data.pegawai?.id"
+              @click="unduhPdfPegawai(data)"
+            />
           </template>
         </Column>
         <template #empty>Tidak ada data pegawai.</template>
@@ -668,6 +726,22 @@ function kodeDokumen(jenis) {
       :breakpoints="{ '1100px': '92vw', '640px': '94vw' }"
     >
       <template v-if="detailItem">
+        <div class="detail-toolbar">
+          <span class="text-muted">
+            Periode {{ periodDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) }} --
+            NIP {{ detailItem.pegawai?.nip }}
+          </span>
+          <Button
+            label="Unduh PDF"
+            icon="pi pi-file-pdf"
+            size="small"
+            severity="danger"
+            outlined
+            :loading="unduhPdfId === detailItem.pegawai?.id"
+            @click="unduhPdfPegawai(detailItem)"
+          />
+        </div>
+
         <h4>Riwayat Absen</h4>
         <DataTable :value="detailItem.absensi" size="small" stripedRows responsiveLayout="scroll">
           <Column header="Tanggal">
@@ -990,6 +1064,18 @@ function kodeDokumen(jenis) {
   font-weight: 700;
   font-size: 0.92rem;
   color: #334155;
+}
+
+/* ---------- baris atas dialog detail (periode + tombol unduh PDF) ---------- */
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--p-surface-200, #e2e8f0);
 }
 
 /* ---------- thumbnail foto absen ---------- */
