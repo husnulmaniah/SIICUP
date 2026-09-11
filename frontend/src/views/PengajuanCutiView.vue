@@ -776,38 +776,63 @@ onMounted(() => {
                       @click="openDetail(data)"
                     />
                   </template>
-                  <!-- pegawai: hanya lihat berkas yang SUDAH di-ttd Kepala Dinas & sudah diupload admin.
-                       Sediakan tombol Lihat (preview inline) DAN Unduh (download langsung) --
-                       preview inline lewat iframe kadang tidak didukung di browser HP (mis. Chrome
-                       Android hanya menampilkan placeholder "Buka" tanpa render PDF-nya), jadi tombol
-                       download jadi jalan pintas yang selalu berhasil di semua perangkat. -->
+                  <!-- pegawai: Surat Rekomendasi & Formulir Cuti (keduanya sudah otomatis
+                       memuat stempel QR tanda tangan digital) langsung muncul begitu status
+                       "disetujui" -- TIDAK lagi menunggu admin mengupload berkas apa pun.
+                       Sediakan Lihat & Cetak untuk masing-masing formulir, plus satu tombol
+                       "Download Sekaligus" (Surat Rekomendasi halaman 1, Formulir Cuti
+                       halaman 2 dalam 1 berkas PDF). -->
                   <template v-else>
+                    <Button
+                      icon="pi pi-file-pdf"
+                      size="small"
+                      severity="info"
+                      rounded
+                      text
+                      title="Lihat & Cetak Surat Rekomendasi"
+                      @click="previewForm(data.id, 'rekomendasi', 'Surat Rekomendasi Izin Cuti', data.nomor_surat)"
+                    />
+                    <Button
+                      icon="pi pi-file-pdf"
+                      size="small"
+                      severity="help"
+                      rounded
+                      text
+                      title="Lihat & Cetak Formulir Cuti"
+                      @click="previewForm(data.id, 'cuti', 'Formulir Cuti')"
+                    />
+                    <Button
+                      icon="pi pi-download"
+                      size="small"
+                      severity="success"
+                      rounded
+                      text
+                      title="Download Sekaligus (Surat Rekomendasi + Formulir Cuti)"
+                      @click="downloadFile(`/pengajuan-cuti/${data.id}/form/gabungan`, `cuti_${data.pegawai?.nip || data.id}.pdf`)"
+                    />
+                    <!-- legacy: kalau admin PERNAH mengupload berkas hasil scan TTD basah
+                         (dari sebelum stempel QR otomatis ada), tetap tampilkan sebagai opsi
+                         tambahan supaya tidak hilang -- tapi bukan lagi satu-satunya cara. -->
                     <template v-if="ttdDocOf(data)">
                       <Button
                         icon="pi pi-eye"
                         size="small"
-                        severity="success"
+                        severity="secondary"
                         rounded
                         text
-                        title="Lihat Berkas Pengajuan Cuti (sudah TTD Kepala Dinas)"
+                        title="Lihat Berkas TTD Manual (Diupload Admin)"
                         @click="previewDoc(data.id, ttdDocOf(data))"
                       />
                       <Button
                         icon="pi pi-download"
                         size="small"
-                        severity="success"
+                        severity="secondary"
                         rounded
                         text
-                        title="Unduh Berkas Pengajuan Cuti (sudah TTD Kepala Dinas)"
+                        title="Unduh Berkas TTD Manual (Diupload Admin)"
                         @click="downloadDoc(data.id, ttdDocOf(data))"
                       />
                     </template>
-                    <Tag
-                      v-else
-                      value="Proses TTD Kepala Dinas"
-                      severity="warn"
-                      title="Pengajuan sudah disetujui, berkas sedang diproses tanda tangan Kepala Dinas"
-                    />
                   </template>
                 </template>
                 <Button

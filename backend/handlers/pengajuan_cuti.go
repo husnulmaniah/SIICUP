@@ -283,6 +283,10 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// loadApprovedPengajuanForForm di formulir.go.
 	mux.Handle("GET /api/pengajuan-cuti/{id}/form/rekomendasi", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-cuti/{id}/form/cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormCuti(w, r, db) }))
+	// gabungan (Surat Rekomendasi + Formulir Cuti dalam SATU PDF 2 halaman)
+	// untuk tombol "Download Sekaligus" di akun pegawai -- lihat
+	// downloadFormGabungan & buildGabungan di formulir.go.
+	mux.Handle("GET /api/pengajuan-cuti/{id}/form/gabungan", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormGabungan(w, r, db) }))
 	// upload/hapus hasil scan formulir yang sudah ditandatangani basah oleh
 	// Kepala Dinas -- hanya admin/administrator. Cukup SATU berkas per
 	// pengajuan (Surat Rekomendasi + Formulir Cuti yang sudah ditandatangani

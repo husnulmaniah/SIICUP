@@ -271,29 +271,23 @@ func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai, namaSur
 	if item.TglApproval != nil {
 		tglDisetujui = formatDateID(*item.TglApproval)
 	}
-	// Urutan field SENGAJA menaruh "Ditandatangani ... - Disetujui ..." tepat
-	// setelah nama surat (bukan di akhir seperti sebelumnya), dan jabatan
-	// penandatangan (field paling panjang, bisa >80 karakter) dipindah ke
-	// PALING AKHIR. Google memotong judul/ringkasan hasil pencarian pada
-	// query yang panjang (termasuk pada halaman "tidak cocok dengan dokumen
-	// apa pun" untuk query yang memang tidak merujuk ke halaman nyata) --
-	// dengan urutan lama, siapa yang menandatangani & tanggal disetujui
-	// (paling penting untuk verifikasi) selalu ada di ujung dan ikut
-	// terpotong. Menaruhnya di depan (setelah jabatan yang panjang dipindah
-	// ke belakang) membuatnya jauh lebih mungkin tetap terlihat. Teks
-	// lengkap query tetap selalu bisa dilihat pegawai di kotak pencarian
-	// Google setelah halaman terbuka, terpotong atau tidak.
+	// Format kalimat SENGAJA disederhanakan jadi satu kalimat mengalir --
+	// bukan lagi daftar field dipisah tanda "-" -- sesuai permintaan
+	// eksplisit: "<nama surat> <jenis cuti> atas nama <nama pegawai> -
+	// <NIP pegawai> - yang ditandatangani oleh <nama penandatangan> - <NIP
+	// penandatangan> - pada tanggal <tanggal disetujui>". Jabatan
+	// penandatangan & rincian lama cuti TIDAK lagi disertakan di sini (di
+	// luar permintaan) supaya kalimatnya tetap pendek & tidak terpotong
+	// Google saat ditampilkan di ringkasan hasil pencarian.
 	query := fmt.Sprintf(
-		"%s - Ditandatangani %s - Disetujui %s - NIP %s - %s - %s - Lama Cuti %d Hari (%s) - Jabatan %s",
+		"%s %s atas nama %s - %s - yang ditandatangani oleh %s - %s - pada tanggal %s",
 		namaSurat,
-		namaOrDash(item.TtdNama),
-		tglDisetujui,
-		namaOrDash(pegawai.NIP),
-		pegawai.Nama,
 		jenisNama,
-		item.JumlahHari,
-		formatTanggalRentang(item.TglMulai, item.TglSelesai),
-		namaOrDash(item.TtdJabatan),
+		pegawai.Nama,
+		namaOrDash(pegawai.NIP),
+		namaOrDash(item.TtdNama),
+		namaOrDash(item.TtdNip),
+		tglDisetujui,
 	)
 	googleURL := "https://www.google.com/search?q=" + neturl.QueryEscape(query)
 	return qrcode.Encode(googleURL, qrcode.Medium, 240)
@@ -319,8 +313,22 @@ func drawSignatureQR(doc *utils.PDFDoc, p *utils.PDFPage, name string, item mode
 // penandatangan (see resolveSignerInfo / the TtdNama et al. fields).
 func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, signerNama, signerNip, signerJabatan string) ([]byte, error) {
 	doc := utils.NewPDFDoc()
-	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
+	if err := buildSuratRekomendasiPage(doc, item, pegawai, signerNama, signerNip, signerJabatan); err != nil {
 		return nil, err
+	}
+	return doc.Output()
+}
+
+// buildSuratRekomendasiPage draws the Surat Rekomendasi page onto an
+// EXISTING doc (registering the "logo" & signature-QR images on it) instead
+// of always creating its own single-page PDFDoc -- this is what lets
+// buildGabungan (lihat di bawah) put this page and buildFormulirCutiPage's
+// page together into ONE multi-page PDF (rekomendasi di halaman 1, formulir
+// cuti di halaman 2) for the "download sekaligus" endpoint. buildSuratRekomendasi
+// above is now just a thin wrapper for the existing single-form endpoint.
+func buildSuratRekomendasiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai models.Pegawai, signerNama, signerNip, signerJabatan string) error {
+	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
+		return err
 	}
 	p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
 	doc.AddPage(p)
@@ -435,15 +443,46 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, si
 	p.SetFont(false, 12)
 	p.Text(sigX, y, "NIP: "+namaOrDash(signerNip)+".")
 
-	return doc.Output()
+	return nil
 }
 
 // buildFormulirCuti generates the official "Formulir Permintaan dan
 // Pemberian Cuti" (leave request/grant form).
 func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signerNama, signerNip, signerJabatan string, jatah map[int]models.JatahCuti) ([]byte, error) {
 	doc := utils.NewPDFDoc()
-	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
+	if err := buildFormulirCutiPage(doc, item, pegawai, signerNama, signerNip, signerJabatan, jatah); err != nil {
 		return nil, err
+	}
+	return doc.Output()
+}
+
+// buildGabungan menggabungkan Surat Rekomendasi & Formulir Cuti (masing-
+// masing sudah otomatis memuat stempel QR tanda tangan) jadi SATU berkas PDF
+// multi-halaman -- Surat Rekomendasi di halaman 1, Formulir Cuti di halaman
+// 2 -- untuk tombol "Download Sekaligus" di akun pegawai. utils.PDFDoc sudah
+// mendukung banyak halaman dengan ukuran kertas berbeda-beda per halaman
+// (A4 untuk rekomendasi, Legal untuk formulir cuti) dalam SATU dokumen, jadi
+// ini bukan menggabungkan dua berkas PDF terpisah secara biner (yang butuh
+// pustaka PDF pihak ketiga) melainkan menggambar kedua halaman itu ke dalam
+// doc yang sama sebelum di-Output() sekali saja.
+func buildGabungan(item models.PengajuanCuti, pegawai models.Pegawai, signerNama, signerNip, signerJabatan string, jatah map[int]models.JatahCuti) ([]byte, error) {
+	doc := utils.NewPDFDoc()
+	if err := buildSuratRekomendasiPage(doc, item, pegawai, signerNama, signerNip, signerJabatan); err != nil {
+		return nil, err
+	}
+	if err := buildFormulirCutiPage(doc, item, pegawai, signerNama, signerNip, signerJabatan, jatah); err != nil {
+		return nil, err
+	}
+	return doc.Output()
+}
+
+// buildFormulirCutiPage is buildFormulirCuti's counterpart to
+// buildSuratRekomendasiPage above -- draws onto an existing doc instead of
+// always creating its own, so buildGabungan can combine both forms into one
+// multi-page PDF.
+func buildFormulirCutiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai models.Pegawai, signerNama, signerNip, signerJabatan string, jatah map[int]models.JatahCuti) error {
+	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
+		return err
 	}
 	// Formulir dicetak di atas kertas Legal (8.5" x 14") agar seluruh tabel
 	// (I-VII) selalu muat dalam 1 lembar, sesuai kebiasaan cetak formulir ini
@@ -876,7 +915,7 @@ func buildFormulirCuti(item models.PengajuanCuti, pegawai models.Pegawai, signer
 	p.Line(rightX, tableTop, rightX, y)
 	p.Line(tableX, tableTop, rightX, tableTop)
 
-	return doc.Output()
+	return nil
 }
 
 // ---- HTTP handlers ----
@@ -978,6 +1017,29 @@ func downloadFormCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	writePDFResponse(w, r, pdfBytes, fmt.Sprintf("formulir_cuti_%s.pdf", pegawai.NIP))
+}
+
+// downloadFormGabungan serves BOTH forms as one 2-halaman PDF (Surat
+// Rekomendasi di halaman 1, Formulir Cuti di halaman 2) untuk tombol
+// "Download Sekaligus" -- supaya pegawai tidak perlu mengunduh dua berkas
+// terpisah. Sama seperti downloadFormRekomendasi/downloadFormCuti, hanya
+// bisa diakses setelah pengajuan disetujui (lihat loadApprovedPengajuanForForm)
+// dan otomatis tersedia tanpa admin perlu upload apa pun -- keduanya sudah
+// memuat stempel QR tanda tangan otomatis.
+func downloadFormGabungan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	item, pegawai, ok := loadApprovedPengajuanForForm(w, r, db)
+	if !ok {
+		return
+	}
+	signerNama, signerNip, signerJabatan := resolveItemSignerTrio(db, item)
+	year := item.TglMulai.Year()
+	jatah := loadJatahHistory(db, pegawai.ID, []int{year, year - 1, year - 2})
+	pdfBytes, err := buildGabungan(item, pegawai, signerNama, signerNip, signerJabatan, jatah)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal membuat formulir: "+err.Error())
+		return
+	}
+	writePDFResponse(w, r, pdfBytes, fmt.Sprintf("cuti_%s.pdf", pegawai.NIP))
 }
 
 // uploadFormSigned lets admin/administrator upload the scan of a form that
