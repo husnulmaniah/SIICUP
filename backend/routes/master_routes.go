@@ -164,9 +164,17 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}, "administrator")
 
 	// ---- tgl_merah ----
+	// AfterChange: setiap kali daftar tanggal merah berubah (ditambah, diedit,
+	// dihapus, atau diimport), langsung hitung ulang jumlah hari & jatah cuti
+	// terpakai untuk semua pengajuan cuti yang masih menunggu/disetujui --
+	// supaya efeknya langsung terlihat begitu tanggal merah disimpan, tanpa
+	// harus membuka/mengedit pengajuan cuti yang bersangkutan.
 	handlers.RegisterCrud(mux, db, "/api/tgl-merah", handlers.CrudConfig[models.TglMerah]{
 		FileBaseName: "tgl_merah",
 		OrderBy:      "tgl asc",
+		AfterChange: func(db *gorm.DB) {
+			handlers.ResyncActivePengajuanDays(db)
+		},
 		Columns: []utils.ExcelColumn{
 			{Header: "Tanggal (DD-MM-YYYY)", Required: true, Example: "01-01-2026",
 				Get: func(i interface{}) string { t := i.(models.TglMerah).Tgl; return t.Format("02-01-2006") },

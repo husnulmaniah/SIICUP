@@ -211,6 +211,26 @@ func syncJumlahHariWithHolidays(db *gorm.DB, item *models.PengajuanCuti) {
 	db.Model(item).Update("jumlah_hari", newJumlahHari)
 }
 
+// ResyncActivePengajuanDays re-checks every "masih berjalan" (menunggu/
+// disetujui) pengajuan cuti against the current tgl_merah data and corrects
+// JumlahHari (and, for disetujui cuti tahunan, jatah cuti terpakai) right
+// away. It's wired up (see master_routes.go) to run immediately after a
+// tanggal merah is created, edited, or deleted, so the effect is visible the
+// moment that change is saved -- not only the next time someone happens to
+// open/refresh a given pengajuan cuti (that lazy per-row correction still
+// happens too, in listPengajuan/getPengajuan/approve/delete/return below;
+// this is the eager, "push" counterpart so the numbers are already right
+// even before anyone looks at the pengajuan cuti page again).
+func ResyncActivePengajuanDays(db *gorm.DB) {
+	var items []models.PengajuanCuti
+	preloadPengajuan(db).
+		Where("status IN ?", []string{models.StatusPending, models.StatusDisetuju}).
+		Find(&items)
+	for i := range items {
+		syncJumlahHariWithHolidays(db, &items[i])
+	}
+}
+
 func adjustQuotaUsage(db *gorm.DB, pegawaiID uint, tahun int, defaultJumlah int, delta int) error {
 	var jatah models.JatahCuti
 	err := db.Where("id_pegawai = ? AND tahun = ?", pegawaiID, tahun).First(&jatah).Error

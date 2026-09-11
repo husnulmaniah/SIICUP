@@ -24,6 +24,13 @@ type CrudConfig[T any] struct {
 	OrderBy      string              // default: "id asc"
 	FileBaseName string              // e.g. "jabatan" -> template_jabatan.xlsx / data_jabatan.xlsx
 	BeforeSave   func(item *T) error // optional hook run before create/update save
+	// AfterChange runs right after a create, update, delete, or import (once,
+	// after the whole batch) successfully commits. It doesn't need to know
+	// which row changed -- it's for side effects that depend on "this table's
+	// data changed" in general, e.g. tgl_merah (hari libur) create/edit/delete
+	// triggering a recalculation of every still-active pengajuan cuti's
+	// jumlah_hari (see master_routes.go / resyncActivePengajuanDays).
+	AfterChange func(db *gorm.DB)
 }
 
 // RegisterCrud wires up GET (list+search+pagination), GET/{id}, POST, PUT/{id},
@@ -165,6 +172,9 @@ func createCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan data: "+err.Error())
 		return
 	}
+	if cfg.AfterChange != nil {
+		cfg.AfterChange(db)
+	}
 	utils.Created(w, "data berhasil ditambahkan", item)
 }
 
@@ -186,6 +196,9 @@ func updateCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 		return
 	}
 	db.First(&existing, "id = ?", id)
+	if cfg.AfterChange != nil {
+		cfg.AfterChange(db)
+	}
 	utils.Success(w, "data berhasil diperbarui", existing)
 }
 
@@ -199,6 +212,9 @@ func deleteCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 	if err := db.Delete(&item).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menghapus data (kemungkinan masih dipakai data lain): "+err.Error())
 		return
+	}
+	if cfg.AfterChange != nil {
+		cfg.AfterChange(db)
 	}
 	utils.Success(w, "data berhasil dihapus", nil)
 }
@@ -282,6 +298,10 @@ func importCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 			continue
 		}
 		successCount++
+	}
+
+	if successCount > 0 && cfg.AfterChange != nil {
+		cfg.AfterChange(db)
 	}
 
 	utils.JSON(w, http.StatusOK, utils.APIResponse{
