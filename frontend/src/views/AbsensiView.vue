@@ -240,7 +240,7 @@ const capturedUrl = ref('')
 const capturedBlob = ref(null)
 const submitting = ref(false)
 const noBlinkWarning = ref(false)
-const coords = ref({ lat: null, lng: null })
+const coords = ref({ lat: null, lng: null, accuracy: null })
 const geoStatus = ref('')
 const locationChecking = ref(false)
 const locationBlocked = ref(false)
@@ -308,15 +308,23 @@ async function cekLokasiKantor() {
     return true
   }
 
-  coords.value = { lat: pos.lat, lng: pos.lng }
+  coords.value = { lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy ?? null }
   geoStatus.value = `titik koordinat ditemukan (akurasi ±${Math.round(pos.accuracy)}m)`
 
   if (!geofenceAktif) return true
 
   const jarak = haversineMeter(pos.lat, pos.lng, kantorLat, kantorLng)
-  if (jarak > radius) {
+  // GPS ponsel (apalagi di dalam gedung) sering meleset 50-150m walaupun
+  // pegawai tidak bergerak. Supaya tidak berulang kali ditolak hanya karena
+  // noise GPS, jarak dibandingkan setelah dikurangi toleransi akurasi
+  // (dibatasi maks. 100m) -- pengecekan akhir & mengikat tetap dilakukan
+  // ulang di server (absensiCekRadius di backend) dengan aturan yang sama.
+  const toleransi = pos.accuracy > 0 ? Math.min(pos.accuracy, 100) : 0
+  const jarakEfektif = Math.max(jarak - toleransi, 0)
+  if (jarakEfektif > radius) {
     locationBlocked.value = true
-    locationBlockedMsg.value = `Anda berada di luar radius kantor (jarak sekitar ${Math.round(jarak)} meter, maksimal ${radius} meter dari titik kantor). Absen tidak dapat dilakukan dari lokasi ini.`
+    const infoAkurasi = pos.accuracy > 0 ? ` (akurasi GPS perangkat Anda saat ini sekitar ${Math.round(pos.accuracy)} meter)` : ''
+    locationBlockedMsg.value = `Anda berada di luar radius kantor (jarak sekitar ${Math.round(jarak)} meter, maksimal ${radius} meter dari titik kantor)${infoAkurasi}. Absen tidak dapat dilakukan dari lokasi ini.`
     return false
   }
   return true
@@ -368,7 +376,7 @@ async function openCamera(mode) {
   if (capturedUrl.value) URL.revokeObjectURL(capturedUrl.value)
   capturedUrl.value = ''
   noBlinkWarning.value = false
-  coords.value = { lat: null, lng: null }
+  coords.value = { lat: null, lng: null, accuracy: null }
   locationBlocked.value = false
   locationBlockedMsg.value = ''
   cameraDialog.value = true
@@ -472,6 +480,7 @@ async function submitAbsen() {
     fd.append('foto', capturedBlob.value, 'absen.jpg')
     if (coords.value.lat != null) fd.append('lat', String(coords.value.lat))
     if (coords.value.lng != null) fd.append('lng', String(coords.value.lng))
+    if (coords.value.accuracy != null) fd.append('accuracy', String(coords.value.accuracy))
     fd.append('kedipan_ok', blink.blinkDetected.value ? 'true' : 'false')
     const url = cameraMode.value === 'masuk' ? '/absensi/masuk' : '/absensi/pulang'
     const { data } = await http.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } })

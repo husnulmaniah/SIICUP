@@ -134,6 +134,12 @@ func distanceMeters(lat1, lng1, lat2, lng2 float64) float64 {
 	return bumiRadiusMeter * c
 }
 
+// toleransiAkurasiMaksimal membatasi seberapa besar toleransi jarak yang
+// diberikan karena ketidakpastian GPS (lihat absensiCekRadius) -- tanpa
+// batas ini, pegawai dengan lokasi berbasis menara seluler (akurasi bisa
+// ribuan meter) bisa lolos geofence dari lokasi manapun.
+const toleransiAkurasiMaksimal = 100.0
+
 // absensiCekRadius memvalidasi titik koordinat (lat,lng) hasil GPS pegawai
 // terhadap titik koordinat kantor yang diatur administrator. Kalau
 // KantorLat/KantorLng belum diatur (nil), geofence dianggap belum aktif dan
@@ -141,7 +147,16 @@ func distanceMeters(lat1, lng1, lat2, lng2 float64) float64 {
 // seperti filter tempat tugas/jabatan). Kalau geofence aktif tapi lat/lng
 // pegawai tidak terdeteksi (GPS ditolak/gagal), absen ditolak karena jarak
 // tidak bisa dipastikan.
-func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng *float64) (ok bool, pesan string) {
+//
+// akurasi adalah nilai accuracy (meter) dari Geolocation API browser --
+// radius kemungkinan posisi ASLI pegawai di sekitar titik (lat,lng) yang
+// dilaporkan. GPS ponsel, terutama di dalam gedung, sering meleset 50-150m
+// meski pegawai tidak bergerak sama sekali. Supaya pegawai yang benar-benar
+// berada di kantor tidak ditolak berulang kali hanya karena noise GPS,
+// jarak yang dibandingkan dengan radius kantor dikurangi toleransi sebesar
+// akurasi tersebut (dibatasi maksimal toleransiAkurasiMaksimal meter supaya
+// geofence tetap berarti untuk lokasi yang jelas-jelas jauh dari kantor).
+func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng, akurasi *float64) (ok bool, pesan string) {
 	if setting.KantorLat == nil || setting.KantorLng == nil {
 		return true, ""
 	}
@@ -153,8 +168,19 @@ func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng *float64) (ok b
 		return false, "lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi pada perangkat/browser Anda dan izinkan akses lokasi, lalu coba lagi."
 	}
 	jarak := distanceMeters(*setting.KantorLat, *setting.KantorLng, *lat, *lng)
-	if jarak > float64(radius) {
-		return false, fmt.Sprintf("Anda berada di luar radius kantor (jarak sekitar %.0f meter, maksimal %d meter dari titik kantor). Absen tidak dapat dilakukan dari lokasi ini.", jarak, radius)
+
+	toleransi := 0.0
+	if akurasi != nil && *akurasi > 0 {
+		toleransi = math.Min(*akurasi, toleransiAkurasiMaksimal)
+	}
+	jarakEfektif := math.Max(jarak-toleransi, 0)
+
+	if jarakEfektif > float64(radius) {
+		infoAkurasi := ""
+		if akurasi != nil && *akurasi > 0 {
+			infoAkurasi = fmt.Sprintf(" (akurasi GPS perangkat Anda saat ini sekitar %.0f meter)", *akurasi)
+		}
+		return false, fmt.Sprintf("Anda berada di luar radius kantor (jarak sekitar %.0f meter, maksimal %d meter dari titik kantor)%s. Absen tidak dapat dilakukan dari lokasi ini.", jarak, radius, infoAkurasi)
 	}
 	return true, ""
 }
@@ -444,8 +470,9 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	kedipanOk := r.FormValue("kedipan_ok") != "false"
 	lat := parseFloatForm(r, "lat")
 	lng := parseFloatForm(r, "lng")
+	akurasi := parseFloatForm(r, "accuracy")
 
-	if ok, pesan := absensiCekRadius(setting, lat, lng); !ok {
+	if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
 		utils.Error(w, http.StatusForbidden, pesan)
 		return
 	}
@@ -567,8 +594,9 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	kedipanOk := r.FormValue("kedipan_ok") != "false"
 	lat := parseFloatForm(r, "lat")
 	lng := parseFloatForm(r, "lng")
+	akurasi := parseFloatForm(r, "accuracy")
 
-	if ok, pesan := absensiCekRadius(setting, lat, lng); !ok {
+	if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
 		utils.Error(w, http.StatusForbidden, pesan)
 		return
 	}

@@ -187,7 +187,11 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 		return
 	}
 
-	namaFile := fmt.Sprintf("rekap_absen_%s_%s.pdf", slugNamaFile(pegawai.Nama), start.Format("2006-01"))
+	nip := strings.TrimSpace(pegawai.NIP)
+	if nip == "" {
+		nip = "-"
+	}
+	namaFile := fmt.Sprintf("%s-%s.pdf", nip, slugNamaFile(pegawai.Nama))
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", namaFile))
 	w.Write(pdfBytes)

@@ -306,9 +306,9 @@ async function unduhPdfPegawai(item) {
     const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
     const link = document.createElement('a')
     link.href = url
-    const bulanStr = String(params.bulan).padStart(2, '0')
-    const namaFile = (pegawai.nama || 'pegawai').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
-    link.download = `rekap_absen_${namaFile}_${params.tahun}-${bulanStr}.pdf`
+    const namaBersih = (pegawai.nama || 'pegawai').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+    const nipBersih = (pegawai.nip || '-').toString().trim() || '-'
+    link.download = `${nipBersih}-${namaBersih}.pdf`
     document.body.appendChild(link)
     link.click()
     link.remove()
