@@ -67,13 +67,26 @@ function minutesNow() {
   return now.getHours() * 60 + now.getMinutes()
 }
 
+// masukTertutup: sudah lewat jam tutup absen masuk (lihat JamTutupPagi di
+// backend) dan pegawai belum absen masuk sama sekali hari ini -- begitu
+// tertutup, absen masuk TIDAK bisa lagi (bukan cuma dianggap terlambat),
+// dan otomatis absen pulang juga ikut tidak tersedia (mensyaratkan absen
+// masuk).
+const masukTertutup = computed(() => {
+  if (sudahMasuk.value) return false
+  const tutup = parseJam(pengaturan.value?.jam_tutup_pagi)
+  return tutup != null && minutesNow() > tutup
+})
 const canMasuk = computed(() => {
-  if (!pengaturan.value?.aktif || sudahMasuk.value) return false
+  if (!pengaturan.value?.aktif || sudahMasuk.value || masukTertutup.value) return false
   const mulai = parseJam(pengaturan.value?.jam_mulai_pagi)
   return mulai == null || minutesNow() >= mulai
 })
 const canPulang = computed(() => {
-  if (!pengaturan.value?.aktif || sudahPulang.value) return false
+  // absen pulang cuma tersedia kalau sudah absen masuk hari ini -- tidak
+  // boleh lagi merekam kepulangan tanpa jam masuk sama sekali (lihat
+  // pengecekan yang sama di backend, absenPulang di absensi.go).
+  if (!pengaturan.value?.aktif || sudahPulang.value || !sudahMasuk.value) return false
   const mulai = parseJam(pengaturan.value?.jam_mulai_pulang)
   return mulai == null || minutesNow() >= mulai
 })
@@ -366,8 +379,21 @@ async function openCamera(mode) {
     toast.add({ severity: 'info', summary: 'Sudah absen', detail: 'Anda sudah absen masuk hari ini', life: 3000 })
     return
   }
+  if (mode === 'masuk' && masukTertutup.value) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Absen masuk ditutup',
+      detail: `Batas waktu absen masuk sudah lewat (ditutup otomatis mulai jam ${pengaturan.value?.jam_tutup_pagi}), absen masuk untuk hari ini tidak lagi tersedia`,
+      life: 5000,
+    })
+    return
+  }
   if (mode === 'pulang' && sudahPulang.value) {
     toast.add({ severity: 'info', summary: 'Sudah absen', detail: 'Anda sudah absen pulang hari ini', life: 3000 })
+    return
+  }
+  if (mode === 'pulang' && !sudahMasuk.value) {
+    toast.add({ severity: 'warn', summary: 'Belum absen masuk', detail: 'Absen pulang baru tersedia setelah anda absen masuk hari ini', life: 4000 })
     return
   }
 
@@ -575,7 +601,8 @@ async function downloadDokumen(item) {
       <div class="jam-info">
         <Message severity="info" :closable="false">
           Absen masuk dibuka mulai jam <b>{{ pengaturan?.jam_mulai_pagi }}</b> (dianggap terlambat setelah jam
-          <b>{{ pengaturan?.jam_batas_pagi }}</b>). Absen pulang dibuka mulai jam <b>{{ pengaturan?.jam_mulai_pulang }}</b>.
+          <b>{{ pengaturan?.jam_batas_pagi }}</b>, dan otomatis DITUTUP setelah jam <b>{{ pengaturan?.jam_tutup_pagi }}</b> kalau belum absen masuk sama sekali).
+          Absen pulang dibuka mulai jam <b>{{ pengaturan?.jam_mulai_pulang }}</b> (setelah absen masuk berhasil dicatat).
         </Message>
       </div>
 
@@ -585,11 +612,12 @@ async function downloadDokumen(item) {
           <div class="absen-card-label">Absen Masuk</div>
           <div class="absen-card-status">
             <Tag v-if="sudahMasuk" severity="success" value="Sudah absen masuk" />
+            <Tag v-else-if="masukTertutup" severity="danger" value="Absen masuk ditutup" />
             <span v-else-if="!canMasuk" class="text-muted">belum dibuka / tidak aktif</span>
           </div>
           <Button
-            :label="sudahMasuk ? 'Sudah Absen Masuk' : 'Absen Masuk'"
-            :icon="sudahMasuk ? 'pi pi-check' : 'pi pi-camera'"
+            :label="sudahMasuk ? 'Sudah Absen Masuk' : masukTertutup ? 'Absen Masuk Ditutup' : 'Absen Masuk'"
+            :icon="sudahMasuk ? 'pi pi-check' : masukTertutup ? 'pi pi-lock' : 'pi pi-camera'"
             :disabled="!canMasuk"
             @click="openCamera('masuk')"
           />
@@ -603,6 +631,7 @@ async function downloadDokumen(item) {
           <div class="absen-card-label">Absen Pulang</div>
           <div class="absen-card-status">
             <Tag v-if="sudahPulang" severity="success" value="Sudah absen pulang" />
+            <span v-else-if="!sudahMasuk" class="text-muted">menunggu absen masuk</span>
             <span v-else-if="!canPulang" class="text-muted">belum dibuka / tidak aktif</span>
           </div>
           <Button

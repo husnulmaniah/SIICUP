@@ -198,6 +198,7 @@ func EnsurePengaturanAbsensi(db *gorm.DB) {
 		Aktif:          true,
 		JamMulaiPagi:   "06:00",
 		JamBatasPagi:   "07:30",
+		JamTutupPagi:   "09:00",
 		JamMulaiPulang: "15:00",
 	}).Error; err != nil {
 		log.Printf("gagal membuat pengaturan absensi default: %v", err)

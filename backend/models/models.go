@@ -380,10 +380,15 @@ func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
 //
 //   - Aktif: administrator bisa menonaktifkan seluruh menu Absen (mis. kalau
 //     sudah tidak dipakai) tanpa menghapus data riwayat yang sudah ada.
-//   - JamMulaiPagi..JamBatasPagi: jendela waktu absen masuk dianggap TIDAK
-//     terlambat. Absen masuk sebelum JamMulaiPagi ditolak (belum waktunya),
-//     setelah JamBatasPagi tetap diterima tapi dihitung terlambat sejumlah
-//     menit dari JamBatasPagi.
+//   - JamMulaiPagi..JamBatasPagi..JamTutupPagi: tiga jam absen masuk.
+//     Sebelum JamMulaiPagi absen masuk ditolak (belum waktunya). Antara
+//     JamMulaiPagi s.d JamBatasPagi dianggap TEPAT WAKTU. Antara JamBatasPagi
+//     s.d JamTutupPagi masih diterima tapi dihitung TERLAMBAT sejumlah menit
+//     dari JamBatasPagi. Setelah JamTutupPagi absen masuk otomatis DITUTUP --
+//     ditolak sama sekali, tidak ada lagi absen masuk untuk hari itu (lihat
+//     absenMasuk di handlers/absensi.go). Ini juga berarti absen pulang tidak
+//     akan tersedia untuk hari itu (lihat absenPulang -- absen pulang
+//     mensyaratkan sudah ada absen masuk).
 //   - JamMulaiPulang: absen pulang baru dibuka (tombolnya aktif) mulai jam
 //     ini -- sebelum itu pegawai belum bisa absen pulang.
 //   - TempatTugasAllowed/JabatanAllowedIDs: filter siapa yang boleh memakai
@@ -406,6 +411,7 @@ type PengaturanAbsensi struct {
 	Aktif              bool     `json:"aktif" gorm:"column:aktif;default:true"`
 	JamMulaiPagi       string   `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5;default:'06:00'"`
 	JamBatasPagi       string   `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5;default:'07:30'"`
+	JamTutupPagi       string   `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5;default:'09:00'"`
 	JamMulaiPulang     string   `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
 	TempatTugasAllowed string   `json:"-" gorm:"column:tempat_tugas_allowed;type:text"`
 	JabatanAllowedIDs  string   `json:"-" gorm:"column:jabatan_allowed_ids;type:text"`

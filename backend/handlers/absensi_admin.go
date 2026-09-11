@@ -24,6 +24,7 @@ type pengaturanAbsensiPayload struct {
 	Aktif              bool     `json:"aktif"`
 	JamMulaiPagi       string   `json:"jam_mulai_pagi"`
 	JamBatasPagi       string   `json:"jam_batas_pagi"`
+	JamTutupPagi       string   `json:"jam_tutup_pagi"`
 	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
 	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
 	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
@@ -41,6 +42,7 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	for label, v := range map[string]string{
 		"jam mulai absen pagi":   p.JamMulaiPagi,
 		"jam batas absen pagi":   p.JamBatasPagi,
+		"jam tutup absen pagi":   p.JamTutupPagi,
 		"jam mulai absen pulang": p.JamMulaiPulang,
 	} {
 		if _, ok := parseJamToMinutes(v); !ok {
@@ -50,8 +52,13 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	}
 	mulaiMin, _ := parseJamToMinutes(p.JamMulaiPagi)
 	batasMin, _ := parseJamToMinutes(p.JamBatasPagi)
+	tutupMin, _ := parseJamToMinutes(p.JamTutupPagi)
 	if batasMin <= mulaiMin {
 		utils.Error(w, http.StatusBadRequest, "jam batas absen pagi harus lebih besar dari jam mulai absen pagi")
+		return
+	}
+	if tutupMin <= batasMin {
+		utils.Error(w, http.StatusBadRequest, "jam tutup absen pagi (batas absen masuk otomatis ditutup) harus lebih besar dari jam batas absen pagi")
 		return
 	}
 	if (p.KantorLat == nil) != (p.KantorLng == nil) {
@@ -80,6 +87,7 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	item.Aktif = p.Aktif
 	item.JamMulaiPagi = p.JamMulaiPagi
 	item.JamBatasPagi = p.JamBatasPagi
+	item.JamTutupPagi = p.JamTutupPagi
 	item.JamMulaiPulang = p.JamMulaiPulang
 	item.TempatTugasAllowed = string(tempatJSON)
 	item.JabatanAllowedIDs = string(jabatanJSON)
@@ -213,6 +221,14 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 		docs := dokumenByPegawai[p.ID]
 		sort.Slice(docs, func(i, j int) bool { return docs[i].Tanggal.After(docs[j].Tanggal) })
 		for _, d := range docs {
+			// kalau tanggal itu sudah ada absen masuk sungguhan, surat yang
+			// (secara keliru, sebelum inputAbsensiDokumenKolektif menyaring
+			// ini) pernah diinput untuk tanggal yang sama diabaikan di sini --
+			// supaya tidak dobel dengan baris Hadir pada riwayat absen &
+			// tidak ikut dihitung di jumlah DD/Izin/Sakit.
+			if hadirSet[p.ID][d.Tanggal.Format("2006-01-02")] {
+				continue
+			}
 			entry := tercoverEntryFromDokumen(d)
 			tercover = append(tercover, entry)
 			switch entry.Kode {

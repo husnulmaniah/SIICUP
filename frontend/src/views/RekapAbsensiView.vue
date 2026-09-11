@@ -36,6 +36,7 @@ const pengaturan = reactive({
   aktif: true,
   jam_mulai_pagi: '',
   jam_batas_pagi: '',
+  jam_tutup_pagi: '',
   jam_mulai_pulang: '',
   tempat_tugas_allowed: [],
   jabatan_allowed_ids: [],
@@ -110,7 +111,11 @@ function jamValid(v) {
   return jamPattern.test(v || '')
 }
 const pengaturanValid = computed(
-  () => jamValid(pengaturan.jam_mulai_pagi) && jamValid(pengaturan.jam_batas_pagi) && jamValid(pengaturan.jam_mulai_pulang),
+  () =>
+    jamValid(pengaturan.jam_mulai_pagi) &&
+    jamValid(pengaturan.jam_batas_pagi) &&
+    jamValid(pengaturan.jam_tutup_pagi) &&
+    jamValid(pengaturan.jam_mulai_pulang),
 )
 
 async function savePengaturan() {
@@ -611,10 +616,17 @@ function kodeDokumen(jenis) {
                   <InputText v-model="pengaturan.jam_batas_pagi" placeholder="07:30" style="width: 100%" />
                 </div>
                 <div>
+                  <label class="field-label">Jam Tutup Absen Masuk (setelah ini otomatis ditutup)</label>
+                  <InputText v-model="pengaturan.jam_tutup_pagi" placeholder="09:00" style="width: 100%" />
+                </div>
+                <div>
                   <label class="field-label">Jam Mulai Absen Pulang</label>
                   <InputText v-model="pengaturan.jam_mulai_pulang" placeholder="15:00" style="width: 100%" />
                 </div>
               </div>
+              <Message severity="info" :closable="false" style="margin-top: 0.5rem">
+                Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu.
+              </Message>
             </div>
 
             <div class="pengaturan-group">

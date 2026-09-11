@@ -254,6 +254,7 @@ type pengaturanAbsensiOut struct {
 	Aktif              bool     `json:"aktif"`
 	JamMulaiPagi       string   `json:"jam_mulai_pagi"`
 	JamBatasPagi       string   `json:"jam_batas_pagi"`
+	JamTutupPagi       string   `json:"jam_tutup_pagi"`
 	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
 	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
 	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
@@ -281,6 +282,7 @@ func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut 
 		Aktif:              item.Aktif,
 		JamMulaiPagi:       item.JamMulaiPagi,
 		JamBatasPagi:       item.JamBatasPagi,
+		JamTutupPagi:       item.JamTutupPagi,
 		JamMulaiPulang:     item.JamMulaiPulang,
 		TempatTugasAllowed: tempat,
 		JabatanAllowedIDs:  jabatan,
@@ -446,6 +448,17 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	// batas waktu keras: lewat JamTutupPagi, absen masuk otomatis DITUTUP
+	// untuk hari itu (berbeda dari JamBatasPagi yang hanya menandai
+	// terlambat tapi absen masuk tetap diterima -- lihat komentar pada
+	// models.PengaturanAbsensi). Karena absen pulang mensyaratkan sudah ada
+	// absen masuk (lihat absenPulang), menutup absen masuk otomatis juga
+	// menutup absen pulang untuk hari itu.
+	if tutupMin, ok := parseJamToMinutes(setting.JamTutupPagi); ok && nowMin > tutupMin {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("batas waktu absen masuk sudah lewat (ditutup otomatis mulai jam %s), absen masuk untuk hari ini tidak lagi tersedia", setting.JamTutupPagi))
+		return
+	}
+
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 10MB)")
 		return
@@ -524,9 +537,10 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 }
 
 // absenPulang mencatat absen pulang, mengikuti pola yang sama dengan
-// absenMasuk. Baris absen hari ini harus sudah ada dari absen masuk --
-// kalau belum ada sama sekali baris dibuat langsung dengan JamMasuk kosong,
-// supaya pegawai yang lupa/gagal absen masuk tetap bisa merekam kepulangannya.
+// absenMasuk. Absen pulang HANYA tersedia kalau pegawai sudah absen masuk
+// pada hari yang sama (lihat pengecekan found/JamMasuk di bawah) -- kalau
+// belum absen masuk sama sekali, absen pulang ditolak supaya tidak ada
+// baris absen yang cuma berisi jam pulang tanpa jam masuk sama sekali.
 func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	if claims.IDPegawai == nil {
@@ -569,6 +583,10 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "anda sudah absen pulang hari ini")
 		return
 	}
+	if !found || existing.JamMasuk == nil {
+		utils.Error(w, http.StatusBadRequest, "anda belum absen masuk hari ini -- absen pulang hanya tersedia setelah absen masuk berhasil dicatat")
+		return
+	}
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 10MB)")
@@ -603,30 +621,16 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 	jamPulang := now
 
-	if found {
-		existing.JamPulang = &jamPulang
-		existing.FotoPulang = fotoBytes
-		existing.LatPulang = lat
-		existing.LngPulang = lng
-		existing.KedipanPulangOk = kedipanOk
-		if err := db.Save(&existing).Error; err != nil {
-			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan absen pulang: "+err.Error())
-			return
-		}
-	} else {
-		existing = models.Absensi{
-			IDPegawai:       *claims.IDPegawai,
-			Tanggal:         today,
-			JamPulang:       &jamPulang,
-			FotoPulang:      fotoBytes,
-			LatPulang:       lat,
-			LngPulang:       lng,
-			KedipanPulangOk: kedipanOk,
-		}
-		if err := db.Create(&existing).Error; err != nil {
-			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan absen pulang: "+err.Error())
-			return
-		}
+	// existing dijamin sudah ada (found == true) berkat pengecekan di atas --
+	// absen pulang tidak lagi bisa membuat baris absen baru tanpa jam masuk.
+	existing.JamPulang = &jamPulang
+	existing.FotoPulang = fotoBytes
+	existing.LatPulang = lat
+	existing.LngPulang = lng
+	existing.KedipanPulangOk = kedipanOk
+	if err := db.Save(&existing).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan absen pulang: "+err.Error())
+		return
 	}
 
 	msg := "absen pulang berhasil dicatat"
@@ -736,7 +740,17 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	tercoverSet := map[string]bool{}
 	tercover := []tanggalTercoverEntry{}
 	for _, d := range dokumen {
-		tercoverSet[d.Tanggal.Format("2006-01-02")] = true
+		key := d.Tanggal.Format("2006-01-02")
+		// kalau tanggal itu sudah punya absen masuk sungguhan, jangan
+		// ditampilkan lagi di daftar "Bersurat" -- Hadir lebih diutamakan
+		// (lihat juga inputAbsensiDokumenKolektif yang sejak sekarang tidak
+		// lagi mengizinkan surat diinput untuk tanggal yang sudah ada absen
+		// masuknya, tapi baris lama yang sudah kepencet dobel sebelum
+		// perbaikan ini tetap harus disaring di sini).
+		if hadirSet[key] {
+			continue
+		}
+		tercoverSet[key] = true
 		tercover = append(tercover, tercoverEntryFromDokumen(d))
 	}
 

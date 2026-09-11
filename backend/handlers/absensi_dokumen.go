@@ -153,12 +153,35 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	}
 	holidaySet := holidaySetInRange(db, tglMulai, tglSelesai)
 
+	// tanggal yang SUDAH punya absen masuk sungguhan (lewat kamera/menu
+	// Absen) tidak boleh ditimpa surat pendukung -- kalau pegawai memang
+	// hadir dan absen sendiri pada tanggal itu, absensinya harus tetap yang
+	// tampil di riwayat/rekap, bukan surat DD/Izin/Sakit. Diambil sekaligus
+	// (bukan per tanggal) supaya tidak query berulang di dalam loop.
+	var absensiRows []models.Absensi
+	db.Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", idList, tglMulai, tglSelesai).Find(&absensiRows)
+	hadirSet := map[string]bool{} // key: "<id_pegawai>|<yyyy-mm-dd>"
+	for _, a := range absensiRows {
+		if a.JamMasuk != nil {
+			hadirSet[fmt.Sprintf("%d|%s", a.IDPegawai, a.Tanggal.Format("2006-01-02"))] = true
+		}
+	}
+
 	jumlah := 0
 	dilewati := 0
+	dilewatiHadir := 0
+	contohDilewatiHadir := []string{}
 	for _, p := range pegawaiTerpilih {
 		hariKerja := workingDaysWithHolidaySet(tglMulai, tglSelesai, sixDayWeekForTempatTgs(p.TempatTgs), holidaySet)
 		dilewati += totalHari - len(hariKerja)
 		for _, tgl := range hariKerja {
+			if hadirSet[fmt.Sprintf("%d|%s", p.ID, tgl.Format("2006-01-02"))] {
+				dilewatiHadir++
+				if len(contohDilewatiHadir) < 8 {
+					contohDilewatiHadir = append(contohDilewatiHadir, fmt.Sprintf("%s (%s)", p.Nama, tgl.Format("02-01-2006")))
+				}
+				continue
+			}
 			var existing models.AbsensiDokumen
 			found := db.Where("id_pegawai = ? AND tanggal = ?", p.ID, tgl).First(&existing).Error == nil
 			existing.IDPegawai = p.ID
@@ -178,9 +201,28 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 		}
 	}
 
+	peringatanHadir := ""
+	if dilewatiHadir > 0 {
+		peringatanHadir = fmt.Sprintf(" -- PERINGATAN: %d tanggal dilewati karena pegawai bersangkutan sudah tercatat absen masuk pada tanggal tersebut (%s%s)",
+			dilewatiHadir, strings.Join(contohDilewatiHadir, ", "), func() string {
+				if dilewatiHadir > len(contohDilewatiHadir) {
+					return fmt.Sprintf(", +%d lainnya", dilewatiHadir-len(contohDilewatiHadir))
+				}
+				return ""
+			}())
+	}
+
 	if jumlah == 0 {
+		if dilewatiHadir > 0 && dilewati == 0 {
+			// satu-satunya alasan tidak ada baris tersimpan adalah karena
+			// semua tanggal hari kerja pada rentang ini sudah punya absen
+			// masuk sungguhan (bukan karena bukan hari kerja).
+			utils.Error(w, http.StatusBadRequest,
+				"surat tidak diinput -- semua tanggal pada rentang ini sudah tercatat absen masuk (hadir) untuk pegawai yang dipilih, jadi tidak boleh ditimpa surat pendukung."+peringatanHadir)
+			return
+		}
 		utils.Error(w, http.StatusBadRequest,
-			"tidak ada tanggal yang bisa diinput -- semua tanggal pada rentang itu bukan hari kerja bagi pegawai yang dipilih (Sabtu/Minggu untuk pegawai kantor dinas, Minggu untuk pegawai sekolah, atau tanggal merah)")
+			"tidak ada tanggal yang bisa diinput -- semua tanggal pada rentang itu bukan hari kerja bagi pegawai yang dipilih (Sabtu/Minggu untuk pegawai kantor dinas, Minggu untuk pegawai sekolah, atau tanggal merah), atau sudah tercatat absen masuk."+peringatanHadir)
 		return
 	}
 
@@ -188,6 +230,7 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	if dilewati > 0 {
 		pesan += fmt.Sprintf(" -- %d tanggal dilewati karena bukan hari kerja pegawai bersangkutan (Sabtu/Minggu/tanggal merah)", dilewati)
 	}
+	pesan += peringatanHadir
 	utils.Created(w, pesan, nil)
 }
 
