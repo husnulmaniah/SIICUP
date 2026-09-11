@@ -146,6 +146,41 @@ func drawLetterhead(p *utils.PDFPage, marginX, rightX float64) float64 {
 	return 102
 }
 
+// suratNomorKode returns the "800.1.11.X" kode klasifikasi used in the nomor
+// surat of the Surat Rekomendasi Izin Cuti, based on jenis cuti -- each jenis
+// cuti has its own kode:
+//
+//	Cuti Tahunan (termasuk Cuti Tahunan Umroh)  -> 800.1.11.4
+//	Cuti Sakit                                  -> 800.1.11.2
+//	Cuti Melahirkan                             -> 800.1.11.3
+//	Cuti Alasan Penting                         -> 800.1.11.5
+//	Cuti Besar                                  -> 800.1.11.6
+//	Cuti Luar Tanggungan Negara                 -> 800.1.11.7
+//
+// Matching is done by keyword (case-insensitive), the same way
+// dokumenRequirementsForJenis (pengajuan_cuti.go) matches jenis cuti names --
+// more specific keywords are checked before the generic "tahunan" fallback so
+// e.g. "Cuti Tahunan Umroh" still resolves to 800.1.11.4. Jenis cuti not
+// listed above (or not yet created in master data) fall back to 800.1.11.4,
+// the original default before per-jenis kode existed.
+func suratNomorKode(jenisNama string) string {
+	j := strings.ToLower(jenisNama)
+	switch {
+	case strings.Contains(j, "sakit"):
+		return "800.1.11.2"
+	case strings.Contains(j, "melahirkan"):
+		return "800.1.11.3"
+	case strings.Contains(j, "alasan penting"):
+		return "800.1.11.5"
+	case strings.Contains(j, "besar"):
+		return "800.1.11.6"
+	case strings.Contains(j, "luar tanggungan"):
+		return "800.1.11.7"
+	default:
+		return "800.1.11.4" // tahunan (termasuk tahunan umroh) & fallback
+	}
+}
+
 // buildSuratRekomendasi generates the "Surat Rekomendasi Izin Cuti" -- the
 // cover letter the Dinas sends to the Bupati/BKPSDM forwarding an approved
 // leave request.
@@ -175,16 +210,23 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, pe
 	// penuh mengisi halaman A4 selayaknya surat resmi cetak.
 	const lineH = 15.0
 	y := 120.0
-	// Bagian nomor urut (di antara "800.1.11.4/" dan "/Disdikbud") diisi
+
+	jenisNama := ""
+	if item.JenisCuti != nil {
+		jenisNama = item.JenisCuti.Jenis
+	}
+
+	// Bagian nomor urut (di antara kode klasifikasi dan "/Disdikbud") diisi
 	// manual oleh administrator/admin lewat updateNomorSurat di
 	// pengajuan_cuti.go (item.NomorSurat) -- kalau belum diisi, tetap
 	// dikosongkan seperti sebelum field ini ada supaya layout suratnya tidak
-	// berubah.
+	// berubah. Kode klasifikasi ("800.1.11.X") sendiri mengikuti jenis
+	// cuti-nya -- lihat suratNomorKode.
 	noBagian := strings.TrimSpace(item.NomorSurat)
 	if noBagian == "" {
 		noBagian = "    "
 	}
-	nomor := fmt.Sprintf("800.1.11.4/%s/Disdikbud /%s/ %d", noBagian, romanMonth(tglApproval.Month()), tglApproval.Year())
+	nomor := fmt.Sprintf("%s/%s/Disdikbud /%s/ %d", suratNomorKode(jenisNama), noBagian, romanMonth(tglApproval.Month()), tglApproval.Year())
 	p.SetFont(false, 12)
 	p.Text(marginX, y, "Nomor")
 	p.Text(marginX+68, y, ": "+nomor)
@@ -209,10 +251,6 @@ func buildSuratRekomendasi(item models.PengajuanCuti, pegawai models.Pegawai, pe
 	p.Text(marginX+30, y, "Tempat")
 	y += lineH * 2
 
-	jenisNama := ""
-	if item.JenisCuti != nil {
-		jenisNama = item.JenisCuti.Jenis
-	}
 	tglRange := formatTanggalRentang(item.TglMulai, item.TglSelesai)
 	para1 := fmt.Sprintf(
 		"Menindak lanjuti surat permohonan %s atas nama %s; Tanggal %s dengan ini kami tidak keberatan dan menyetujui permohonan tersebut kami teruskan kepada Bapak untuk ditindaklanjuti (Permohonan Terlampir).",
