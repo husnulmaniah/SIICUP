@@ -402,7 +402,11 @@ func buildSuratRekomendasiPage(doc *utils.PDFDoc, item models.PengajuanCuti, peg
 	para2 := "Demikian Surat Permohonan Cuti ini kami teruskan kepada Bapak, atas pertimbangan Bapak kami ucapkan terima kasih."
 	y = p.MultilineText(marginX, y, rightX-marginX, lineH, para2) + lineH*2
 
-	sigX := pageW - 230
+	// Digeser lebih ke kiri (dari pageW-230) supaya kolom tanda tangan lebih
+	// lebar -- nama penandatangan yang cukup panjang (mis. "BERNOULLI
+	// TANARI, S.Pd.,M.Pd") sebelumnya terpotong karena kolomnya terlalu
+	// sempit padahal ruang kosong di sisi kiri masih banyak.
+	sigX := pageW - 270
 	sigColW := rightX - sigX
 
 	// Nama penandatangan dipotong (truncateToWidth) bila tidak biasa
@@ -424,15 +428,22 @@ func buildSuratRekomendasiPage(doc *utils.PDFDoc, item models.PengajuanCuti, peg
 		y += jabatanLineH
 	}
 	p.SetFont(false, 12)
-	// Barcode/QR tanda tangan otomatis -- diposisikan di tengah KOLOM tanda
-	// tangan (bukan di tengah lebar nama, yang bisa membuat posisinya
-	// melompat-lompat kalau nama pendek/panjang), di ruang kosong yang
-	// dulunya disediakan untuk tanda tangan basah (lihat drawSignatureQR/
-	// buildSignatureQR). Ukuran 150x150 (dari semula 40 lalu 80) supaya
-	// benar-benar mudah dipindai kamera HP, sepadan dengan ukuran QR tanda
-	// tangan pada formulir resmi lain (mis. Surat Izin Cuti BKPSDM).
+	// Barcode/QR tanda tangan otomatis -- SENGAJA diposisikan di tengah lebar
+	// NAMA (bukan di tengah kolom tanda tangan) sesuai permintaan eksplisit,
+	// di ruang kosong yang dulunya disediakan untuk tanda tangan basah
+	// (lihat drawSignatureQR/buildSignatureQR). qrCenterX di-clamp supaya QR
+	// tidak pernah keluar dari kolom tanda tangan kalau nama kebetulan sangat
+	// pendek/panjang. Ukuran 150x150 (dari semula 40 lalu 80) supaya benar-
+	// benar mudah dipindai kamera HP, sepadan dengan ukuran QR tanda tangan
+	// pada formulir resmi lain (mis. Surat Izin Cuti BKPSDM).
 	const qrSide = 150.0
-	qrCenterX := sigX + sigColW/2
+	qrCenterX := sigX + nameW/2
+	if qrCenterX-qrSide/2 < sigX {
+		qrCenterX = sigX + qrSide/2
+	}
+	if qrCenterX+qrSide/2 > rightX {
+		qrCenterX = rightX - qrSide/2
+	}
 	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, "Surat Rekomendasi Izin Cuti", qrCenterX-qrSide/2, y+4, qrSide)
 	y += qrSide + 18
 
