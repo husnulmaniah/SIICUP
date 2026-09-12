@@ -746,15 +746,32 @@ func buildFormulirCutiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai
 	colKetX := colSisaX + remaining*0.22
 	p.SetFont(false, 10.5)
 
-	// Tabel kuota kiri: baris "1 Cuti Tahunan" (judul, meniru penomoran
-	// jenis cuti #1), lalu baris header Tahun/Sisa/Keterangan, lalu 3 baris
-	// data (N-1/N-2/N) -- persis urutan & struktur pada formulir cetak asli.
+	// legenda jenis cuti 1-6 -- dipakai baik untuk judul tabel kuota kiri
+	// (harus mengikuti jenis cuti yang SEBENARNYA dipilih pegawai, bukan
+	// selalu "1 Cuti Tahunan") maupun daftar bernomor di kanan (selalu
+	// menampilkan keenam jenis, lihat bawah).
+	legend := []string{"Cuti Tahunan", "Cuti Sakit", "Cuti Karena Alasan Penting", "Cuti Besar", "Cuti Melahirkan", "Cuti di Luar Tanggungan Negara"}
+
+	// Tabel kuota kiri: baris judul mengikuti nomor & label jenis cuti yang
+	// dipilih pegawai (sama seperti tanda centang pada Baris II) -- SEBELUM
+	// perbaikan ini judul selalu tertulis "1 Cuti Tahunan" walaupun jenis
+	// cuti yang diambil bukan Cuti Tahunan (mis. Cuti Melahirkan harusnya
+	// "5 Cuti Melahirkan"). Fallback ke "1 Cuti Tahunan" hanya kalau jenis
+	// cutinya tidak dikenali/kosong (selected == 0, lihat jenisCutiCheckboxIndex).
+	catatanNum := selected
+	if catatanNum < 1 || catatanNum > len(legend) {
+		catatanNum = 1
+	}
+	catatanLabel := legend[catatanNum-1]
+
+	// lalu baris header Tahun/Sisa/Keterangan, lalu 3 baris data (N-1/N-2/N)
+	// -- persis urutan & struktur pada formulir cetak asli.
 	gridTop3 := rowTop + 26.0
 	rowHLeft := (rowH - 26.0) / 5.0
 	titleTop := gridTop3
 	titleLy := titleTop + rowHLeft*0.68
-	p.Text(numColX+2, titleLy, "1")
-	p.Text(colTahunX+3, titleLy, "Cuti Tahunan")
+	p.Text(numColX+2, titleLy, fmt.Sprintf("%d", catatanNum))
+	p.Text(colTahunX+3, titleLy, catatanLabel)
 
 	headerTop := gridTop3 + rowHLeft
 	headerLy := headerTop + rowHLeft*0.68
@@ -772,7 +789,7 @@ func buildFormulirCutiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai
 		p.Text(colTahunX+3, ly, yr.label)
 		if jc, ok := jatah[yr.year]; ok {
 			p.Text(colSisaX+3, ly, fmt.Sprintf("%d", jc.Sisa()))
-			p.Text(colKetX+3, ly, "Cuti Tahunan")
+			p.Text(colKetX+3, ly, catatanLabel)
 		} else {
 			p.Text(colSisaX+3, ly, "-")
 		}
@@ -788,7 +805,6 @@ func buildFormulirCutiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai
 	legendLabelX := legendNumX + 16.0
 	legendTrailW := 6.0
 	itemH2 := itemHRowV
-	legend := []string{"Cuti Tahunan", "Cuti Sakit", "Cuti Karena Alasan Penting", "Cuti Besar", "Cuti Melahirkan", "Cuti di Luar Tanggungan Negara"}
 	for i, l := range legend {
 		cellTop := gridTop3 + itemH2*float64(i)
 		ly := cellTop + itemH2*0.68
