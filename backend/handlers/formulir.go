@@ -399,7 +399,7 @@ func buildSuratRekomendasiPage(doc *utils.PDFDoc, item models.PengajuanCuti, peg
 	)
 	y = p.MultilineText(marginX, y, rightX-marginX, lineH, para1) + lineH
 
-	para2 := "Demikian Surat Permohonan Cuti ini kami teruskan kepada Bapak, atas pertimbangan Bapak kami ucapkan terima kasih."
+	para2 := "Demikian Surat Permohonan Cuti ini kami teruskan, atas Perkenaanya kami ucapkan terima kasih."
 	y = p.MultilineText(marginX, y, rightX-marginX, lineH, para2) + lineH*2
 
 	// Digeser lebih ke kiri (dari pageW-230) supaya kolom tanda tangan lebih
