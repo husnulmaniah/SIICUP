@@ -82,11 +82,20 @@ const canMasuk = computed(() => {
   const mulai = parseJam(pengaturan.value?.jam_mulai_pagi)
   return mulai == null || minutesNow() >= mulai
 })
+// pulangTertutup: sudah lewat jam tutup absen pulang (lihat JamTutupPulang
+// di backend) dan pegawai belum absen pulang -- begitu tertutup, absen
+// pulang TIDAK bisa lagi walaupun pegawai sudah absen masuk dan belum
+// sempat absen pulang hari itu.
+const pulangTertutup = computed(() => {
+  if (sudahPulang.value) return false
+  const tutup = parseJam(pengaturan.value?.jam_tutup_pulang)
+  return tutup != null && minutesNow() > tutup
+})
 const canPulang = computed(() => {
   // absen pulang cuma tersedia kalau sudah absen masuk hari ini -- tidak
   // boleh lagi merekam kepulangan tanpa jam masuk sama sekali (lihat
   // pengecekan yang sama di backend, absenPulang di absensi.go).
-  if (!pengaturan.value?.aktif || sudahPulang.value || !sudahMasuk.value) return false
+  if (!pengaturan.value?.aktif || sudahPulang.value || !sudahMasuk.value || pulangTertutup.value) return false
   const mulai = parseJam(pengaturan.value?.jam_mulai_pulang)
   return mulai == null || minutesNow() >= mulai
 })
@@ -396,6 +405,15 @@ async function openCamera(mode) {
     toast.add({ severity: 'warn', summary: 'Belum absen masuk', detail: 'Absen pulang baru tersedia setelah anda absen masuk hari ini', life: 4000 })
     return
   }
+  if (mode === 'pulang' && pulangTertutup.value) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Absen pulang ditutup',
+      detail: `Batas waktu absen pulang sudah lewat (ditutup otomatis mulai jam ${pengaturan.value?.jam_tutup_pulang}), absen pulang untuk hari ini tidak lagi tersedia`,
+      life: 5000,
+    })
+    return
+  }
 
   cameraMode.value = mode
   capturedBlob.value = null
@@ -602,7 +620,7 @@ async function downloadDokumen(item) {
         <Message severity="info" :closable="false">
           Absen masuk dibuka mulai jam <b>{{ pengaturan?.jam_mulai_pagi }}</b> (dianggap terlambat setelah jam
           <b>{{ pengaturan?.jam_batas_pagi }}</b>, dan otomatis DITUTUP setelah jam <b>{{ pengaturan?.jam_tutup_pagi }}</b> kalau belum absen masuk sama sekali).
-          Absen pulang dibuka mulai jam <b>{{ pengaturan?.jam_mulai_pulang }}</b> (setelah absen masuk berhasil dicatat).
+          Absen pulang dibuka mulai jam <b>{{ pengaturan?.jam_mulai_pulang }}</b> (setelah absen masuk berhasil dicatat), dan otomatis DITUTUP setelah jam <b>{{ pengaturan?.jam_tutup_pulang }}</b> kalau belum sempat absen pulang.
         </Message>
       </div>
 
@@ -632,11 +650,12 @@ async function downloadDokumen(item) {
           <div class="absen-card-status">
             <Tag v-if="sudahPulang" severity="success" value="Sudah absen pulang" />
             <span v-else-if="!sudahMasuk" class="text-muted">menunggu absen masuk</span>
+            <Tag v-else-if="pulangTertutup" severity="danger" value="Absen pulang ditutup" />
             <span v-else-if="!canPulang" class="text-muted">belum dibuka / tidak aktif</span>
           </div>
           <Button
-            :label="sudahPulang ? 'Sudah Absen Pulang' : 'Absen Pulang'"
-            :icon="sudahPulang ? 'pi pi-check' : 'pi pi-camera'"
+            :label="sudahPulang ? 'Sudah Absen Pulang' : pulangTertutup ? 'Absen Pulang Ditutup' : 'Absen Pulang'"
+            :icon="sudahPulang ? 'pi pi-check' : pulangTertutup ? 'pi pi-lock' : 'pi pi-camera'"
             severity="danger"
             :disabled="!canPulang"
             @click="openCamera('pulang')"

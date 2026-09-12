@@ -40,6 +40,7 @@ const pengaturan = reactive({
   jam_batas_pagi: '',
   jam_tutup_pagi: '',
   jam_mulai_pulang: '',
+  jam_tutup_pulang: '',
   tempat_tugas_allowed: [],
   jabatan_allowed_ids: [],
   kantor_lat: null,
@@ -117,7 +118,8 @@ const pengaturanValid = computed(
     jamValid(pengaturan.jam_mulai_pagi) &&
     jamValid(pengaturan.jam_batas_pagi) &&
     jamValid(pengaturan.jam_tutup_pagi) &&
-    jamValid(pengaturan.jam_mulai_pulang),
+    jamValid(pengaturan.jam_mulai_pulang) &&
+    jamValid(pengaturan.jam_tutup_pulang),
 )
 
 async function savePengaturan() {
@@ -643,9 +645,13 @@ function kodeDokumen(jenis) {
                   <label class="field-label">Jam Mulai Absen Pulang</label>
                   <InputText v-model="pengaturan.jam_mulai_pulang" placeholder="15:00" style="width: 100%" />
                 </div>
+                <div>
+                  <label class="field-label">Jam Tutup Absen Pulang (setelah ini otomatis ditutup)</label>
+                  <InputText v-model="pengaturan.jam_tutup_pulang" placeholder="20:00" style="width: 100%" />
+                </div>
               </div>
               <Message severity="info" :closable="false" style="margin-top: 0.5rem">
-                Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu.
+                Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu. Absen pulang juga otomatis ditutup begitu lewat jam tutup absen pulang, walaupun pegawai sudah absen masuk dan belum sempat absen pulang.
               </Message>
             </div>
 

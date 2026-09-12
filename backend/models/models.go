@@ -389,8 +389,11 @@ func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
 //     absenMasuk di handlers/absensi.go). Ini juga berarti absen pulang tidak
 //     akan tersedia untuk hari itu (lihat absenPulang -- absen pulang
 //     mensyaratkan sudah ada absen masuk).
-//   - JamMulaiPulang: absen pulang baru dibuka (tombolnya aktif) mulai jam
-//     ini -- sebelum itu pegawai belum bisa absen pulang.
+//   - JamMulaiPulang..JamTutupPulang: absen pulang baru dibuka (tombolnya
+//     aktif) mulai JamMulaiPulang -- sebelum itu pegawai belum bisa absen
+//     pulang. Setelah JamTutupPulang absen pulang otomatis DITUTUP -- ditolak
+//     sama sekali walaupun pegawai sudah absen masuk dan belum sempat absen
+//     pulang hari itu (lihat absenPulang di handlers/absensi.go).
 //   - TempatTugasAllowed/JabatanAllowedIDs: filter siapa yang boleh memakai
 //     menu Absen, disimpan sebagai teks JSON ("[\"Kantor Pusat\"]" / "[3,5]")
 //     mengikuti pola DataLama/DataBaru di PerubahanDataPegawai -- diparsing
@@ -413,6 +416,7 @@ type PengaturanAbsensi struct {
 	JamBatasPagi       string   `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5;default:'07:30'"`
 	JamTutupPagi       string   `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5;default:'09:00'"`
 	JamMulaiPulang     string   `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
+	JamTutupPulang     string   `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5;default:'20:00'"`
 	TempatTugasAllowed string   `json:"-" gorm:"column:tempat_tugas_allowed;type:text"`
 	JabatanAllowedIDs  string   `json:"-" gorm:"column:jabatan_allowed_ids;type:text"`
 	KantorLat          *float64 `json:"-" gorm:"column:kantor_lat"`

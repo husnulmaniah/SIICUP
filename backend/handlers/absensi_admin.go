@@ -26,6 +26,7 @@ type pengaturanAbsensiPayload struct {
 	JamBatasPagi       string   `json:"jam_batas_pagi"`
 	JamTutupPagi       string   `json:"jam_tutup_pagi"`
 	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
+	JamTutupPulang     string   `json:"jam_tutup_pulang"`
 	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
 	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
 	KantorLat          *float64 `json:"kantor_lat"`
@@ -44,6 +45,7 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		"jam batas absen pagi":   p.JamBatasPagi,
 		"jam tutup absen pagi":   p.JamTutupPagi,
 		"jam mulai absen pulang": p.JamMulaiPulang,
+		"jam tutup absen pulang": p.JamTutupPulang,
 	} {
 		if _, ok := parseJamToMinutes(v); !ok {
 			utils.Error(w, http.StatusBadRequest, label+" tidak valid, gunakan format HH:MM")
@@ -53,12 +55,18 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	mulaiMin, _ := parseJamToMinutes(p.JamMulaiPagi)
 	batasMin, _ := parseJamToMinutes(p.JamBatasPagi)
 	tutupMin, _ := parseJamToMinutes(p.JamTutupPagi)
+	mulaiPulangMin, _ := parseJamToMinutes(p.JamMulaiPulang)
+	tutupPulangMin, _ := parseJamToMinutes(p.JamTutupPulang)
 	if batasMin <= mulaiMin {
 		utils.Error(w, http.StatusBadRequest, "jam batas absen pagi harus lebih besar dari jam mulai absen pagi")
 		return
 	}
 	if tutupMin <= batasMin {
 		utils.Error(w, http.StatusBadRequest, "jam tutup absen pagi (batas absen masuk otomatis ditutup) harus lebih besar dari jam batas absen pagi")
+		return
+	}
+	if tutupPulangMin <= mulaiPulangMin {
+		utils.Error(w, http.StatusBadRequest, "jam tutup absen pulang (batas absen pulang otomatis ditutup) harus lebih besar dari jam mulai absen pulang")
 		return
 	}
 	if (p.KantorLat == nil) != (p.KantorLng == nil) {
@@ -89,6 +97,7 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	item.JamBatasPagi = p.JamBatasPagi
 	item.JamTutupPagi = p.JamTutupPagi
 	item.JamMulaiPulang = p.JamMulaiPulang
+	item.JamTutupPulang = p.JamTutupPulang
 	item.TempatTugasAllowed = string(tempatJSON)
 	item.JabatanAllowedIDs = string(jabatanJSON)
 	item.KantorLat = p.KantorLat

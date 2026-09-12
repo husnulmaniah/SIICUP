@@ -256,6 +256,7 @@ type pengaturanAbsensiOut struct {
 	JamBatasPagi       string   `json:"jam_batas_pagi"`
 	JamTutupPagi       string   `json:"jam_tutup_pagi"`
 	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
+	JamTutupPulang     string   `json:"jam_tutup_pulang"`
 	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
 	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
 	KantorLat          *float64 `json:"kantor_lat"`
@@ -284,6 +285,7 @@ func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut 
 		JamBatasPagi:       item.JamBatasPagi,
 		JamTutupPagi:       item.JamTutupPagi,
 		JamMulaiPulang:     item.JamMulaiPulang,
+		JamTutupPulang:     item.JamTutupPulang,
 		TempatTugasAllowed: tempat,
 		JabatanAllowedIDs:  jabatan,
 		KantorLat:          item.KantorLat,
@@ -593,6 +595,14 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	if !found || existing.JamMasuk == nil {
 		utils.Error(w, http.StatusBadRequest, "anda belum absen masuk hari ini -- absen pulang hanya tersedia setelah absen masuk berhasil dicatat")
+		return
+	}
+
+	// batas waktu keras: lewat JamTutupPulang, absen pulang otomatis DITUTUP
+	// untuk hari itu -- walaupun pegawai sudah absen masuk dan belum sempat
+	// absen pulang (lihat komentar pada models.PengaturanAbsensi).
+	if tutupMin, ok := parseJamToMinutes(setting.JamTutupPulang); ok && nowMin > tutupMin {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("batas waktu absen pulang sudah lewat (ditutup otomatis mulai jam %s), absen pulang untuk hari ini tidak lagi tersedia", setting.JamTutupPulang))
 		return
 	}
 
