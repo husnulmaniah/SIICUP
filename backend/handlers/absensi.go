@@ -300,6 +300,12 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h) }
 	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan") }
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
+	// administratorOnly: khusus untuk mengubah Pengaturan Absen (jendela
+	// waktu, filter siapa yang boleh absen, titik koordinat kantor) --
+	// role admin TIDAK boleh melihat maupun mengubah pengaturan ini,
+	// berbeda dari fitur rekap/dokumen lain yang tetap boleh diakses
+	// admin & administrator (manage di atas).
+	administratorOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator") }
 
 	// pengaturan (aktif/jam) -- dibaca semua role yang login supaya frontend
 	// pegawai tahu jendela waktu & status aktif; hanya admin/administrator
@@ -320,9 +326,11 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/absensi/dokumen/{id}/file", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadAbsensiDokumen(w, r, db) }))
 	mux.Handle("DELETE /api/absensi/dokumen/{id}", manage(func(w http.ResponseWriter, r *http.Request) { deleteAbsensiDokumen(w, r, db) }))
 
+	// Pengaturan Absen: administrator SAJA (lihat administratorOnly di atas)
+	mux.Handle("PUT /api/absensi/pengaturan", administratorOnly(func(w http.ResponseWriter, r *http.Request) { updatePengaturanAbsensi(w, r, db) }))
+	mux.Handle("GET /api/absensi/opsi-tempat-tugas", administratorOnly(func(w http.ResponseWriter, r *http.Request) { opsiTempatTugasAbsensi(w, r, db) }))
+
 	// admin/administrator saja
-	mux.Handle("PUT /api/absensi/pengaturan", manage(func(w http.ResponseWriter, r *http.Request) { updatePengaturanAbsensi(w, r, db) }))
-	mux.Handle("GET /api/absensi/opsi-tempat-tugas", manage(func(w http.ResponseWriter, r *http.Request) { opsiTempatTugasAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap", manage(func(w http.ResponseWriter, r *http.Request) { rekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/export", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/pdf", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensiPegawaiPDF(w, r, db) }))

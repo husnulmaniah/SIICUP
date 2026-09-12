@@ -4,6 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 import { toApiDate } from '../utils/date'
+import { useAuthStore } from '../stores/auth'
 
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
@@ -22,6 +23,7 @@ import MultiSelect from 'primevue/multiselect'
 
 const toast = useToast()
 const confirm = useConfirm()
+const auth = useAuthStore()
 
 // jenis dokumen -> kode singkat, mengikuti models.AbsensiDokumenKode di
 // backend (Surat Tugas & Berita Acara sama-sama dibaca DD/Dinas Dalam).
@@ -234,7 +236,16 @@ watch([periodDate, selectedPegawai], () => loadRekap())
 watch(periodDate, () => loadDokumenAdmin())
 
 onMounted(async () => {
-  await Promise.all([loadPengaturan(), loadPegawaiOptions(), loadTempatTugasOptions(), loadJabatanOptions()])
+  // kartu Pengaturan (jendela waktu, filter siapa yang boleh absen, titik
+  // koordinat kantor) HANYA untuk role administrator -- role admin tidak
+  // boleh melihat maupun mengubahnya (lihat v-if pada kartu Pengaturan di
+  // template, dan pembatasan yang sama di backend: PUT /absensi/pengaturan
+  // & GET /absensi/opsi-tempat-tugas sekarang administratorOnly). Makanya
+  // data-data ini tidak perlu dimuat sama sekali untuk role admin.
+  const tugasPengaturan = auth.isAdministrator
+    ? [loadPengaturan(), loadTempatTugasOptions(), loadJabatanOptions()]
+    : []
+  await Promise.all([loadPegawaiOptions(), ...tugasPengaturan])
   await Promise.all([loadRekap(), loadDokumenAdmin()])
 })
 
@@ -586,9 +597,18 @@ function kodeDokumen(jenis) {
 <template>
   <div class="page-wrap">
     <div class="page-title">Rekap Absen</div>
-    <p class="page-subtitle">Rekap kehadiran seluruh pegawai, pengaturan jendela waktu absen, dan aktif/nonaktifkan menu Absen.</p>
+    <p class="page-subtitle">
+      {{
+        auth.isAdministrator
+          ? 'Rekap kehadiran seluruh pegawai, pengaturan jendela waktu absen, dan aktif/nonaktifkan menu Absen.'
+          : 'Rekap kehadiran seluruh pegawai.'
+      }}
+    </p>
 
-    <div class="card" style="margin-bottom: 1.5rem">
+    <!-- Kartu Pengaturan Absen (jendela waktu, siapa yang boleh absen, titik
+         koordinat kantor) HANYA untuk role administrator -- role admin tidak
+         boleh melihat maupun mengubah pengaturan ini sama sekali. -->
+    <div v-if="auth.isAdministrator" class="card" style="margin-bottom: 1.5rem">
       <div v-if="loadingPengaturan" style="display: flex; justify-content: center; padding: 1.5rem">
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
       </div>
