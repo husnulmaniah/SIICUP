@@ -151,24 +151,6 @@ async function fetchList() {
   }
 }
 
-// Notifikasi "surat rekomendasi dinas siap diajukan ke BKD" untuk pegawai --
-// diambil terpisah dari `items` (yang mengikuti filter status/paginasi tabel
-// di atas) supaya banner-nya tetap tampil meskipun pegawai sedang memfilter
-// tabel ke status lain (mis. "Menunggu"). Selalu ditampilkan selama pegawai
-// masih punya pengajuan berstatus "disetujui" -- tidak ada mekanisme
-// dismiss/"sudah dilihat".
-const approvedCutiForBkd = ref([])
-async function fetchApprovedForBkd() {
-  if (!isPegawai.value) return
-  try {
-    const { data } = await http.get('/pengajuan-cuti', { params: { status: 'disetujui', pageSize: 100 } })
-    approvedCutiForBkd.value = data.data || []
-  } catch (e) {
-    // non-kritis -- gagal memuat notifikasi BKD tidak perlu mengganggu halaman utama
-  }
-}
-const showBkdNotice = computed(() => isPegawai.value && approvedCutiForBkd.value.length > 0)
-
 function onPage(event) {
   page.value = Math.floor(event.first / event.rows) + 1
   pageSize.value = event.rows
@@ -696,7 +678,6 @@ const actionsMenuItems = computed(() => [
 onMounted(() => {
   loadOptions()
   fetchList()
-  fetchApprovedForBkd()
 })
 </script>
 
@@ -708,17 +689,6 @@ onMounted(() => {
       <span v-else-if="isAtasan">Tinjau dan proses pengajuan cuti bawahan anda.</span>
       <span v-else>Pantau dan kelola seluruh pengajuan cuti pegawai.</span>
     </p>
-
-    <Message v-if="showBkdNotice" severity="success" :closable="false" style="margin-bottom: 1rem">
-      <div style="display: flex; flex-direction: column; gap: 0.25rem">
-        <strong>Surat rekomendasi dinas sudah tersedia.</strong>
-        <span>
-          Silahkan ajukan ke BKD dengan mengakses link berikut:
-          <a href="https://apelcumorut.com/" target="_blank" rel="noopener noreferrer" style="font-weight: 600">https://apelcumorut.com/</a>.
-          Jika NIP tidak ditemukan, silahkan hubungi pihak BKD untuk diaktifkan akunnya.
-        </span>
-      </div>
-    </Message>
 
     <div class="card">
       <SelectButton
@@ -886,6 +856,20 @@ onMounted(() => {
                   <Button icon="pi pi-trash" size="small" severity="danger" rounded text @click="confirmDelete(data)" />
                 </template>
               </div>
+            </template>
+          </Column>
+          <Column v-if="isPegawai" header="" style="width: 180px">
+            <template #body="{ data }">
+              <a
+                v-if="data.status === 'disetujui'"
+                href="https://apelcumorut.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="bkd-notice-link"
+                title="Surat rekomendasi dinas sudah tersedia. Ajukan ke BKD lewat link ini. Jika NIP tidak ditemukan, hubungi pihak BKD untuk aktivasi akun."
+              >
+                <i class="pi pi-send"></i> Ajukan ke BKD
+              </a>
             </template>
           </Column>
         </DataTable>
@@ -1173,5 +1157,18 @@ onMounted(() => {
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--p-content-border-color);
   font-size: 0.85rem;
+}
+.bkd-notice-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #16a34a;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.bkd-notice-link:hover {
+  text-decoration: underline;
 }
 </style>
