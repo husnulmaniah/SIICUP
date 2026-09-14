@@ -151,6 +151,24 @@ async function fetchList() {
   }
 }
 
+// Notifikasi "surat rekomendasi dinas siap diajukan ke BKD" untuk pegawai --
+// diambil terpisah dari `items` (yang mengikuti filter status/paginasi tabel
+// di atas) supaya banner-nya tetap tampil meskipun pegawai sedang memfilter
+// tabel ke status lain (mis. "Menunggu"). Selalu ditampilkan selama pegawai
+// masih punya pengajuan berstatus "disetujui" -- tidak ada mekanisme
+// dismiss/"sudah dilihat".
+const approvedCutiForBkd = ref([])
+async function fetchApprovedForBkd() {
+  if (!isPegawai.value) return
+  try {
+    const { data } = await http.get('/pengajuan-cuti', { params: { status: 'disetujui', pageSize: 100 } })
+    approvedCutiForBkd.value = data.data || []
+  } catch (e) {
+    // non-kritis -- gagal memuat notifikasi BKD tidak perlu mengganggu halaman utama
+  }
+}
+const showBkdNotice = computed(() => isPegawai.value && approvedCutiForBkd.value.length > 0)
+
 function onPage(event) {
   page.value = Math.floor(event.first / event.rows) + 1
   pageSize.value = event.rows
@@ -678,6 +696,7 @@ const actionsMenuItems = computed(() => [
 onMounted(() => {
   loadOptions()
   fetchList()
+  fetchApprovedForBkd()
 })
 </script>
 
@@ -689,6 +708,17 @@ onMounted(() => {
       <span v-else-if="isAtasan">Tinjau dan proses pengajuan cuti bawahan anda.</span>
       <span v-else>Pantau dan kelola seluruh pengajuan cuti pegawai.</span>
     </p>
+
+    <Message v-if="showBkdNotice" severity="success" :closable="false" style="margin-bottom: 1rem">
+      <div style="display: flex; flex-direction: column; gap: 0.25rem">
+        <strong>Surat rekomendasi dinas sudah tersedia.</strong>
+        <span>
+          Silahkan ajukan ke BKD dengan mengakses link berikut:
+          <a href="https://apelcumorut.com/" target="_blank" rel="noopener noreferrer" style="font-weight: 600">https://apelcumorut.com/</a>.
+          Jika NIP tidak ditemukan, silahkan hubungi pihak BKD untuk diaktifkan akunnya.
+        </span>
+      </div>
+    </Message>
 
     <div class="card">
       <SelectButton
