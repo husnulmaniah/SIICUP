@@ -866,7 +866,7 @@ onMounted(() => {
                 target="_blank"
                 rel="noopener noreferrer"
                 class="bkd-notice-link"
-                title="Surat rekomendasi dinas sudah tersedia. Ajukan ke BKD lewat link ini. Jika NIP tidak ditemukan, hubungi pihak BKD untuk aktivasi akun."
+                title="Surat rekomendasi dinas sudah tersedia. Klik link ini untuk mengirim pengajuan ke BKD. Jika NIP tidak ditemukan, hubungi pihak BKD untuk aktivasi akun."
               >
                 <i class="pi pi-send"></i> Ajukan ke BKD
               </a>
