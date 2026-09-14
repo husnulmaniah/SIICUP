@@ -329,6 +329,12 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// mengubah pengaturan ini, berbeda dari fitur rekap/dokumen lain yang
 	// tetap boleh diakses admin & administrator (manage di atas).
 	administratorOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator") }
+	// pdfOnly: unduh PDF rekap absen (satu pegawai) khusus administrator &
+	// admin (Admin Kepegawaian) -- SENGAJA tidak memakai manage() di atas,
+	// jadi akun yang HANYA ditandai IsAdminAbsensi (tanpa role administrator
+	// atau admin) tidak bisa mengunduh PDF ini walau tetap bisa melihat
+	// rekap & export Excel (lihat frontend/src/views/RekapAbsensiView.vue).
+	pdfOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 
 	// pengaturan (aktif/jam) -- dibaca semua role yang login supaya frontend
 	// pegawai tahu jendela waktu & status aktif; hanya admin/administrator
@@ -356,7 +362,7 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// admin/administrator saja
 	mux.Handle("GET /api/absensi/rekap", manage(func(w http.ResponseWriter, r *http.Request) { rekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/export", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensi(w, r, db) }))
-	mux.Handle("GET /api/absensi/rekap/pdf", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensiPegawaiPDF(w, r, db) }))
+	mux.Handle("GET /api/absensi/rekap/pdf", pdfOnly(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensiPegawaiPDF(w, r, db) }))
 }
 
 func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

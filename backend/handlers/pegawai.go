@@ -361,21 +361,30 @@ func listPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	countQuery := db.Model(&models.Pegawai{})
 
-	switch claims.RoleName {
-	case "atasan":
-		if claims.IDPegawai == nil {
-			utils.Success(w, "ok", []models.Pegawai{})
-			return
+	// Akun ber-flag IsAdminAbsensi (lihat models.User.IsAdminAbsensi) TETAP
+	// perlu melihat SELURUH pegawai walau role dasarnya "pegawai"/"atasan" --
+	// dipakai untuk filter "Semua pegawai" di Rekap Absen dan pemilihan
+	// pegawai pada Input Surat Kolektif (BA/Surat Tugas/Surat Izin/SKS), lihat
+	// frontend/src/views/RekapAbsensiView.vue. Jadi pembatasan di bawah
+	// (hanya bawahan/hanya diri sendiri) dilewati untuk akun tersebut,
+	// disamakan dengan administrator/admin.
+	if !claims.IsAdminAbsensi {
+		switch claims.RoleName {
+		case "atasan":
+			if claims.IDPegawai == nil {
+				utils.Success(w, "ok", []models.Pegawai{})
+				return
+			}
+			query = query.Where("id_atasan = ?", *claims.IDPegawai)
+			countQuery = countQuery.Where("id_atasan = ?", *claims.IDPegawai)
+		case "pegawai":
+			if claims.IDPegawai == nil {
+				utils.Success(w, "ok", []models.Pegawai{})
+				return
+			}
+			query = query.Where("id = ?", *claims.IDPegawai)
+			countQuery = countQuery.Where("id = ?", *claims.IDPegawai)
 		}
-		query = query.Where("id_atasan = ?", *claims.IDPegawai)
-		countQuery = countQuery.Where("id_atasan = ?", *claims.IDPegawai)
-	case "pegawai":
-		if claims.IDPegawai == nil {
-			utils.Success(w, "ok", []models.Pegawai{})
-			return
-		}
-		query = query.Where("id = ?", *claims.IDPegawai)
-		countQuery = countQuery.Where("id = ?", *claims.IDPegawai)
 	}
 
 	if search != "" {

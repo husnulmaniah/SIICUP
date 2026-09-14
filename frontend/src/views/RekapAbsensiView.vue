@@ -847,6 +847,7 @@ function kodeDokumen(jenis) {
           <template #body="{ data }">
             <Button icon="pi pi-eye" size="small" text rounded title="Lihat Detail" @click="openDetail(data)" />
             <Button
+              v-if="auth.canManageMaster"
               icon="pi pi-file-pdf"
               size="small"
               text
@@ -1024,6 +1025,7 @@ function kodeDokumen(jenis) {
             NIP {{ detailItem.pegawai?.nip }}
           </span>
           <Button
+            v-if="auth.canManageMaster"
             label="Unduh PDF"
             icon="pi pi-file-pdf"
             size="small"
