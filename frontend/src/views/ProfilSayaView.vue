@@ -110,6 +110,8 @@ const form = reactive({
 const skFile = ref(null)
 const skFileInputRef = ref(null)
 
+const hasSkTerakhir = computed(() => !!profile.value?.sk_terakhir_nama)
+
 function openAjukan() {
   if (!profile.value) return
   form.nama = profile.value.nama || ''
@@ -124,6 +126,20 @@ function openAjukan() {
   skFile.value = null
   formErrors.value = ''
   dialogVisible.value = true
+}
+
+async function previewSkTerakhirSaatIni() {
+  if (!profile.value?.id) return
+  try {
+    const res = await http.get(`/pegawai/${profile.value.id}/dokumen/sk-terakhir`, { responseType: 'blob' })
+    const ext = (profile.value.sk_terakhir_nama || '').split('.').pop().toLowerCase()
+    previewType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    previewTitle.value = 'Berkas SK Terakhir Saat Ini'
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
 }
 
 function pickSkFile() {
@@ -146,7 +162,7 @@ async function submitAjukan() {
     formErrors.value = 'Nama wajib diisi'
     return
   }
-  if (!skFile.value) {
+  if (!skFile.value && !hasSkTerakhir.value) {
     formErrors.value = 'Berkas SK Terakhir wajib diupload sebagai dasar perubahan data'
     return
   }
@@ -165,7 +181,7 @@ async function submitAjukan() {
     }
     const fd = new FormData()
     fd.append('data', JSON.stringify(payload))
-    fd.append('file', skFile.value)
+    if (skFile.value) fd.append('file', skFile.value)
     await http.post('/perubahan-data', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({
       severity: 'success',
@@ -384,13 +400,25 @@ function formatDate(v) {
           <InputText v-model="form.email" style="width: 100%" />
         </div>
         <div class="col-12">
-          <label class="field-label">Berkas SK Terakhir <span style="color: #ef4444">*</span></label>
+          <label class="field-label">
+            Berkas SK Terakhir
+            <span v-if="!hasSkTerakhir" style="color: #ef4444">*</span>
+            <span v-else style="font-weight: 400; color: var(--p-text-muted-color)">(opsional jika tidak diganti)</span>
+          </label>
+          <div v-if="hasSkTerakhir" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem">
+            <Tag severity="info" value="SK Tersimpan" />
+            <span style="font-size: 0.85rem">{{ profile.sk_terakhir_nama }}</span>
+            <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkTerakhirSaatIni" />
+          </div>
           <input ref="skFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkFileChosen" />
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
-            <Button label="Pilih Berkas" icon="pi pi-upload" outlined @click="pickSkFile" />
+            <Button :label="hasSkTerakhir ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkFile" />
             <span style="font-size: 0.85rem">{{ skFile?.name || 'Belum ada berkas dipilih' }}</span>
           </div>
-          <small style="color: var(--p-text-muted-color); display: block; margin-top: 0.3rem">Format PDF, JPG, atau PNG. Berkas ini menjadi dasar & bukti perubahan data yang diajukan.</small>
+          <small style="color: var(--p-text-muted-color); display: block; margin-top: 0.3rem">
+            <template v-if="hasSkTerakhir">Jika SK terakhir sudah sesuai dan tidak ingin diganti, berkas ini tidak perlu diupload ulang. Upload berkas baru hanya jika ingin mengganti SK.</template>
+            <template v-else>Format PDF, JPG, atau PNG. Berkas ini menjadi dasar & bukti perubahan data yang diajukan.</template>
+          </small>
         </div>
       </div>
       <template #footer>

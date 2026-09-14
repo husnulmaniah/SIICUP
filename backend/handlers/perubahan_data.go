@@ -121,8 +121,11 @@ func getPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 // createPerubahanData menerima multipart/form-data: field "data" berisi JSON
 // pegawaiEditableData (nilai BARU yang diajukan, lengkap -- bukan hanya yang
-// berubah), dan field file "file" berisi scan SK terakhir yang menjadi dasar
-// perubahan tersebut (wajib diupload setiap kali mengajukan perubahan data).
+// berubah), dan field file "file" (opsional) berisi scan SK terakhir yang
+// menjadi dasar perubahan tersebut. Jika pegawai belum pernah memiliki SK
+// terakhir tersimpan, upload wajib dilakukan; jika sudah ada dan tidak ingin
+// diganti, field ini boleh dikosongkan dan SK yang sudah ada akan dipakai
+// kembali sebagai dasar pengajuan.
 func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	if claims.IDPegawai == nil {
@@ -162,32 +165,47 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		}
 	}
 
-	fh := formFileHeader(r, "file")
-	if fh == nil {
-		utils.Error(w, http.StatusBadRequest, "berkas SK terakhir wajib diupload untuk setiap pengajuan perubahan data")
-		return
-	}
-	ext := strings.ToLower(fh.Filename[strings.LastIndex(fh.Filename, "."):])
-	if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-		utils.Error(w, http.StatusBadRequest, "berkas SK terakhir harus berformat PDF, JPG, atau PNG")
-		return
-	}
-	f, err := fh.Open()
-	if err != nil {
-		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK terakhir")
-		return
-	}
-	fileData, err := io.ReadAll(f)
-	f.Close()
-	if err != nil {
-		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK terakhir")
-		return
-	}
-
 	var pegawai models.Pegawai
 	if err := db.First(&pegawai, *claims.IDPegawai).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
 		return
+	}
+
+	hasExistingSk := strings.TrimSpace(pegawai.SkTerakhirNama) != "" && len(pegawai.SkTerakhirFile) > 0
+
+	// Berkas SK terakhir wajib diupload untuk pengajuan pertama kali; jika
+	// pegawai sudah memiliki SK terakhir tersimpan dan tidak ingin
+	// menggantinya, upload boleh dilewati dan SK yang sudah ada akan
+	// dipakai kembali sebagai dasar pengajuan.
+	fh := formFileHeader(r, "file")
+	var skNamaFile string
+	var skFileData []byte
+	if fh == nil {
+		if !hasExistingSk {
+			utils.Error(w, http.StatusBadRequest, "berkas SK terakhir wajib diupload untuk pengajuan perubahan data")
+			return
+		}
+		skNamaFile = pegawai.SkTerakhirNama
+		skFileData = pegawai.SkTerakhirFile
+	} else {
+		ext := strings.ToLower(fh.Filename[strings.LastIndex(fh.Filename, "."):])
+		if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+			utils.Error(w, http.StatusBadRequest, "berkas SK terakhir harus berformat PDF, JPG, atau PNG")
+			return
+		}
+		f, err := fh.Open()
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK terakhir")
+			return
+		}
+		fileData, err := io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK terakhir")
+			return
+		}
+		skNamaFile = fh.Filename
+		skFileData = fileData
 	}
 
 	lamaJSON, _ := json.Marshal(pegawaiSnapshot(pegawai))
@@ -197,8 +215,8 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		IDPegawai:  *claims.IDPegawai,
 		DataLama:   string(lamaJSON),
 		DataBaru:   string(baruJSON),
-		SkNamaFile: fh.Filename,
-		SkFile:     fileData,
+		SkNamaFile: skNamaFile,
+		SkFile:     skFileData,
 		Status:     models.StatusPending,
 	}
 	if err := db.Create(&item).Error; err != nil {
