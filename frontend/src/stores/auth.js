@@ -14,11 +14,11 @@ export const useAuthStore = defineStore('auth', {
     isAdmin: (state) => state.user?.role === 'admin',
     isPegawai: (state) => state.user?.role === 'pegawai',
     isAtasan: (state) => state.user?.role === 'atasan',
-    // admin_absensi: role khusus yang HANYA boleh mengelola menu Rekap Absen
-    // (rekap kehadiran & input surat kolektif -- berita acara, surat tugas,
-    // SKS, dll), tanpa akses ke Pengajuan Cuti, Data Pegawai, atau menu
-    // administrasi lainnya (lihat layouts/AppLayout.vue & router/index.js).
-    isAdminAbsensi: (state) => state.user?.role === 'admin_absensi',
+    // isAdminAbsensi: centang tambahan pada akun (pegawai/atasan/dll), BUKAN
+    // role tersendiri -- akun tetap punya menu sesuai role aslinya (Dashboard,
+    // Pengajuan Cuti, Absen, dst.) dan HANYA mendapat tambahan 1 menu "Input
+    // Rekapan Absensi" (lihat layouts/AppLayout.vue & router/index.js).
+    isAdminAbsensi: (state) => !!state.user?.is_admin_absensi,
     canManageMaster: (state) => ['administrator', 'admin'].includes(state.user?.role),
   },
 

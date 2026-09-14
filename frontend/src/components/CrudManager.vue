@@ -17,6 +17,7 @@ import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import Password from 'primevue/password'
+import Checkbox from 'primevue/checkbox'
 import Tag from 'primevue/tag'
 import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
@@ -269,7 +270,7 @@ watch(search, () => {
 function resetForm() {
   Object.keys(form).forEach((k) => delete form[k])
   for (const f of props.config.formFields) {
-    form[f.field] = f.type === 'number' ? null : ''
+    form[f.field] = f.type === 'number' ? null : f.type === 'checkbox' ? false : ''
   }
 }
 
@@ -287,6 +288,10 @@ function openEdit(row) {
   for (const f of props.config.formFields) {
     let v = row[f.field]
     if (f.type === 'date' && v) v = new Date(v)
+    if (f.type === 'checkbox') {
+      form[f.field] = !!v
+      continue
+    }
     form[f.field] = v ?? (f.type === 'number' ? null : '')
   }
   form.__id = row.id
@@ -302,6 +307,9 @@ function serializeForm() {
     }
     if (f.type === 'password' && !v) {
       continue // don't send empty password on edit
+    }
+    if (f.type === 'select' && v === '') {
+      v = null // field select opsional yang dikosongkan (mis. "Pilih...") harus dikirim null, bukan string kosong
     }
     payload[f.field] = v
   }
@@ -580,6 +588,9 @@ const canManage = computed(() => true) // route guard already restricts page acc
               <template v-else-if="col.type === 'badge'">
                 <Tag :value="fieldValue(data, col.field) || '-'" severity="info" />
               </template>
+              <template v-else-if="col.type === 'boolean'">
+                <Tag :value="fieldValue(data, col.field) ? 'Ya' : 'Tidak'" :severity="fieldValue(data, col.field) ? 'success' : 'secondary'" />
+              </template>
               <template v-else>{{ fieldValue(data, col.field) ?? '-' }}</template>
             </template>
           </Column>
@@ -601,9 +612,13 @@ const canManage = computed(() => true) // route guard already restricts page acc
       <Message v-if="formErrors" severity="error" :closable="false" style="margin-bottom: 1rem">{{ formErrors }}</Message>
       <div style="display: flex; flex-direction: column; gap: 1rem">
         <div v-for="f in config.formFields" :key="f.field">
-          <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem">
+          <label v-if="f.type !== 'checkbox'" style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem">
             {{ f.label }} <span v-if="f.required || (f.requiredOnCreate && !isEditing)" style="color: #ef4444">*</span>
           </label>
+          <div v-if="f.type === 'checkbox'" style="display: flex; align-items: center; gap: 0.5rem">
+            <Checkbox v-model="form[f.field]" :inputId="'chk-' + f.field" binary />
+            <label :for="'chk-' + f.field" style="font-size: 0.85rem; font-weight: 600; cursor: pointer">{{ f.label }}</label>
+          </div>
           <InputText v-if="f.type === 'text'" v-model="form[f.field]" :placeholder="f.placeholder" style="width: 100%" />
           <InputNumber v-else-if="f.type === 'number'" v-model="form[f.field]" style="width: 100%" fluid />
           <Textarea v-else-if="f.type === 'textarea'" v-model="form[f.field]" rows="3" style="width: 100%" />

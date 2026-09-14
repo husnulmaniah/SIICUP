@@ -1,10 +1,13 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import http from '../api/http'
 import Avatar from 'primevue/avatar'
 import Button from 'primevue/button'
 import Menu from 'primevue/menu'
+import Popover from 'primevue/popover'
+import Badge from 'primevue/badge'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -12,20 +15,71 @@ const route = useRoute()
 
 const userMenu = ref(null)
 
+// ============================================================
+// notifikasi lonceng (khusus administrator & admin/Admin Kepegawaian) --
+// menghitung & menampilkan Pengajuan Cuti + Perubahan Data Pegawai yang
+// masih berstatus "pending" (baru masuk, belum diproses), supaya
+// administrator/admin langsung tahu ada pengajuan baru (lihat
+// backend/handlers/notifikasi.go untuk sumber datanya).
+// ============================================================
+const notifPanel = ref(null)
+const notifData = ref({ total: 0, items: [] })
+const notifLoading = ref(false)
+let notifTimer = null
+
+async function fetchNotifikasi() {
+  if (!auth.canManageMaster) return
+  notifLoading.value = true
+  try {
+    const { data } = await http.get('/notifikasi/pending')
+    notifData.value = data.data
+  } catch (e) {
+    // diamkan -- gagal memuat notifikasi tidak boleh mengganggu layar utama
+  } finally {
+    notifLoading.value = false
+  }
+}
+
+function toggleNotifPanel(event) {
+  fetchNotifikasi()
+  notifPanel.value?.toggle(event)
+}
+
+function bukaNotifikasi(item) {
+  notifPanel.value?.hide()
+  router.push(item.link)
+}
+
+function waktuRelatif(iso) {
+  if (!iso) return ''
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const menit = Math.floor(diffMs / 60000)
+  if (menit < 1) return 'Baru saja'
+  if (menit < 60) return `${menit} menit lalu`
+  const jam = Math.floor(menit / 60)
+  if (jam < 24) return `${jam} jam lalu`
+  return `${Math.floor(jam / 24)} hari lalu`
+}
+
+onMounted(() => {
+  if (auth.canManageMaster) {
+    fetchNotifikasi()
+    // polling ringan setiap 30 detik supaya badge tetap update tanpa harus
+    // reload halaman -- cukup jarang untuk tidak membebani server.
+    notifTimer = setInterval(fetchNotifikasi, 30000)
+  }
+})
+
+onUnmounted(() => {
+  if (notifTimer) clearInterval(notifTimer)
+})
+
 const roleLabel = computed(() => {
-  const map = { administrator: 'Administrator', admin: 'Admin', admin_absensi: 'Admin Absensi', pegawai: 'Pegawai', atasan: 'Atasan' }
+  const map = { administrator: 'Administrator', admin: 'Admin', pegawai: 'Pegawai', atasan: 'Atasan' }
   return map[auth.role] || auth.role
 })
 
 const navSections = computed(() => {
-  // admin_absensi: akun khusus rekap absensi -- HANYA menu Rekap Absen
-  // (rekap kehadiran & input surat kolektif: berita acara, surat tugas,
-  // SKS, dll). Tidak ada Dashboard, Pengajuan Cuti, Data Pegawai, atau menu
-  // administrasi lainnya.
-  if (auth.isAdminAbsensi) {
-    return [{ header: null, items: [{ label: 'Rekap Absen', icon: 'pi pi-camera', to: '/rekap-absen' }] }]
-  }
-
   const sections = [
     { header: null, items: [{ label: 'Dashboard', icon: 'pi pi-home', to: '/dashboard' }] },
     { header: null, items: [{ label: 'Pengajuan Cuti', icon: 'pi pi-calendar', to: '/pengajuan-cuti' }] },
@@ -43,6 +97,11 @@ const navSections = computed(() => {
 
   if (auth.canManageMaster) {
     sections.push({ header: null, items: [{ label: 'Rekap Absen', icon: 'pi pi-camera', to: '/rekap-absen' }] })
+  } else if (auth.isAdminAbsensi) {
+    // Akun (pegawai/atasan) yang dicentang "Admin Absensi" tetap punya semua
+    // menu normalnya (Dashboard, Pengajuan Cuti, Absen, Profil Saya, dst.)
+    // dan HANYA mendapat tambahan 1 menu ini -- bukan akun terpisah.
+    sections.push({ header: null, items: [{ label: 'Input Rekapan Absensi', icon: 'pi pi-camera', to: '/rekap-absen' }] })
   }
 
   if (auth.canManageMaster) {
@@ -174,6 +233,35 @@ const menuLainnyaAktif = computed(
           <span>SI Cuti Pegawai</span>
         </div>
         <div class="topbar-title">{{ roleLabel }}</div>
+
+        <!-- Lonceng notifikasi: khusus administrator & admin (Admin
+             Kepegawaian) -- menampilkan jumlah Pengajuan Cuti + Perubahan
+             Data Pegawai yang baru masuk & belum diproses. -->
+        <button v-if="auth.canManageMaster" type="button" class="notif-bell" @click="toggleNotifPanel">
+          <i class="pi pi-bell"></i>
+          <Badge v-if="notifData.total > 0" :value="notifData.total > 99 ? '99+' : notifData.total" severity="danger" class="notif-badge" />
+        </button>
+        <Popover v-if="auth.canManageMaster" ref="notifPanel" class="notif-popover">
+          <div class="notif-header">
+            <span>Notifikasi</span>
+            <span class="notif-header-count">{{ notifData.total }} menunggu diproses</span>
+          </div>
+          <div v-if="notifLoading && !notifData.items.length" class="notif-empty">Memuat...</div>
+          <div v-else-if="!notifData.items.length" class="notif-empty">Tidak ada pengajuan baru.</div>
+          <div v-else class="notif-list">
+            <a v-for="item in notifData.items" :key="item.type + '-' + item.id" class="notif-item" @click="bukaNotifikasi(item)">
+              <i :class="item.type === 'pengajuan_cuti' ? 'pi pi-calendar' : 'pi pi-user-edit'"></i>
+              <div class="notif-item-body">
+                <div class="notif-item-title">
+                  {{ item.type === 'pengajuan_cuti' ? 'Pengajuan Cuti baru' : 'Perubahan Data Pegawai baru' }}
+                </div>
+                <div class="notif-item-desc">{{ item.nama }} — {{ item.keterangan }}</div>
+                <div class="notif-item-time">{{ waktuRelatif(item.created_at) }}</div>
+              </div>
+            </a>
+          </div>
+        </Popover>
+
         <div class="topbar-user" @click="userMenu.toggle($event)">
           <Avatar :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #6366f1; color: #fff" />
           <span class="user-name">{{ auth.user?.nama }}</span>
@@ -348,7 +436,6 @@ const menuLainnyaAktif = computed(
 }
 
 .topbar-user {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -365,6 +452,110 @@ const menuLainnyaAktif = computed(
   font-size: 0.88rem;
   font-weight: 500;
   color: #374151;
+}
+
+/* ============================================================
+   Lonceng notifikasi (administrator & admin) di topbar
+   ============================================================ */
+.notif-bell {
+  margin-left: auto;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #4b5563;
+  font-size: 1.05rem;
+}
+
+.notif-bell:hover {
+  background: #f3f4f6;
+}
+
+.notif-bell :deep(.notif-badge) {
+  position: absolute;
+  top: 0.05rem;
+  right: 0.05rem;
+}
+
+.notif-popover {
+  width: min(360px, calc(100vw - 2rem));
+}
+
+.notif-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.15rem 0.1rem 0.6rem;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 0.4rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.notif-header-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
+}
+
+.notif-empty {
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+
+.notif-list {
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.notif-item:hover {
+  background: #f3f4f6;
+}
+
+.notif-item i {
+  margin-top: 0.15rem;
+  color: #6366f1;
+  font-size: 0.95rem;
+}
+
+.notif-item-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.notif-item-desc {
+  font-size: 0.8rem;
+  color: #4b5563;
+  margin-top: 0.1rem;
+}
+
+.notif-item-time {
+  font-size: 0.72rem;
+  color: var(--p-text-muted-color);
+  margin-top: 0.2rem;
 }
 
 .content-area {

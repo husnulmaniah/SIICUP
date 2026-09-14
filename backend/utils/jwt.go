@@ -15,16 +15,21 @@ type Claims struct {
 	RoleID    uint   `json:"role_id"`
 	RoleName  string `json:"role_name"`
 	IDPegawai *uint  `json:"id_pegawai"`
+	// IsAdminAbsensi: lihat models.User.IsAdminAbsensi -- akun (role apa pun,
+	// biasanya pegawai/atasan) yang tambahan boleh mengakses menu "Input
+	// Rekapan Absensi" tanpa mengubah role utamanya.
+	IsAdminAbsensi bool `json:"is_admin_absensi"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID uint, username string, roleID uint, roleName string, idPegawai *uint) (string, error) {
+func GenerateToken(userID uint, username string, roleID uint, roleName string, idPegawai *uint, isAdminAbsensi bool) (string, error) {
 	claims := Claims{
-		UserID:    userID,
-		Username:  username,
-		RoleID:    roleID,
-		RoleName:  roleName,
-		IDPegawai: idPegawai,
+		UserID:         userID,
+		Username:       username,
+		RoleID:         roleID,
+		RoleName:       roleName,
+		IDPegawai:      idPegawai,
+		IsAdminAbsensi: isAdminAbsensi,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

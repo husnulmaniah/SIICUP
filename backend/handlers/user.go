@@ -138,6 +138,11 @@ type userPayload struct {
 	Nama      string `json:"nama"`
 	IDRole    uint   `json:"id_role"`
 	IDPegawai *uint  `json:"id_pegawai"`
+	// IsAdminAbsensi: lihat models.User.IsAdminAbsensi -- centang tambahan
+	// di form Akun Pengguna, terpisah dari pilihan Role, supaya akun
+	// pegawai/atasan yang sama tetap bisa dipakai untuk absen & mengajukan
+	// cuti sendiri SEKALIGUS mengelola menu "Input Rekapan Absensi".
+	IsAdminAbsensi bool `json:"is_admin_absensi"`
 }
 
 func createUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -155,7 +160,7 @@ func createUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal memproses password")
 		return
 	}
-	user := models.User{Username: p.Username, Pass: hash, Nama: p.Nama, IDRole: p.IDRole, IDPegawai: p.IDPegawai}
+	user := models.User{Username: p.Username, Pass: hash, Nama: p.Nama, IDRole: p.IDRole, IDPegawai: p.IDPegawai, IsAdminAbsensi: p.IsAdminAbsensi}
 	if err := db.Create(&user).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan user (username mungkin sudah dipakai): "+err.Error())
 		return
@@ -187,6 +192,7 @@ func updateUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		updates["id_role"] = p.IDRole
 	}
 	updates["id_pegawai"] = p.IDPegawai
+	updates["is_admin_absensi"] = p.IsAdminAbsensi
 	if p.Password != "" {
 		hash, err := utils.HashPassword(p.Password)
 		if err != nil {

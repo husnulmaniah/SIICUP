@@ -41,7 +41,7 @@ func LoginHandler(db *gorm.DB) http.HandlerFunc {
 			roleName = user.Role.Role
 		}
 
-		token, err := utils.GenerateToken(user.ID, user.Username, user.IDRole, roleName, user.IDPegawai)
+		token, err := utils.GenerateToken(user.ID, user.Username, user.IDRole, roleName, user.IDPegawai, user.IsAdminAbsensi)
 		if err != nil {
 			utils.Error(w, http.StatusInternalServerError, "gagal membuat token")
 			return
@@ -50,13 +50,14 @@ func LoginHandler(db *gorm.DB) http.HandlerFunc {
 		utils.Success(w, "login berhasil", map[string]interface{}{
 			"token": token,
 			"user": map[string]interface{}{
-				"id":         user.ID,
-				"username":   user.Username,
-				"nama":       user.Nama,
-				"role":       roleName,
-				"id_role":    user.IDRole,
-				"id_pegawai": user.IDPegawai,
-				"pegawai":    user.Pegawai,
+				"id":               user.ID,
+				"username":         user.Username,
+				"nama":             user.Nama,
+				"role":             roleName,
+				"id_role":          user.IDRole,
+				"id_pegawai":       user.IDPegawai,
+				"pegawai":          user.Pegawai,
+				"is_admin_absensi": user.IsAdminAbsensi,
 			},
 		})
 	}

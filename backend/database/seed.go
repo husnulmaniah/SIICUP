@@ -22,7 +22,7 @@ func Seed(db *gorm.DB) {
 	}
 	log.Println("database kosong, menjalankan seeding data awal...")
 
-	roles := []models.Role{{Role: "administrator"}, {Role: "admin"}, {Role: "admin_absensi"}, {Role: "pegawai"}, {Role: "atasan"}}
+	roles := []models.Role{{Role: "administrator"}, {Role: "admin"}, {Role: "pegawai"}, {Role: "atasan"}}
 	db.Create(&roles)
 	roleByName := map[string]uint{}
 	for _, r := range roles {
@@ -115,24 +115,44 @@ func Seed(db *gorm.DB) {
 	log.Println("  siti (pegawai)/ admin123")
 }
 
-// EnsureRoleAdminAbsensi memastikan role "admin_absensi" selalu ada di
-// database, termasuk untuk instalasi yang sudah pernah di-seed sebelumnya
-// (mis. server produksi yang sudah berjalan) -- idempotent, dijalankan
-// setiap server start. Role ini dipakai untuk akun yang hanya boleh
-// mengelola menu Rekap Absen (rekap kehadiran & input surat kolektif:
-// berita acara, surat tugas, SKS, dll), tanpa akses ke Pengajuan Cuti, Data
-// Pegawai, atau menu administrasi lainnya -- lihat middleware.RequireRole
-// pada RegisterAbsensiRoutes (backend/handlers/absensi.go) dan pembatasan
-// menu/route di frontend (stores/auth.js, router/index.js, layouts/AppLayout.vue).
-func EnsureRoleAdminAbsensi(db *gorm.DB) {
-	var existing models.Role
-	if err := db.Where("role = ?", "admin_absensi").First(&existing).Error; err == nil {
+// MigrateAdminAbsensiRole membersihkan sisa role "admin_absensi" dari
+// percobaan implementasi sebelumnya (role terpisah yang HANYA bisa
+// mengelola Rekap Absen, tanpa bisa absen/mengajukan cuti sendiri).
+// Pendekatan itu diganti dengan flag models.User.IsAdminAbsensi yang
+// ditambahkan ke akun pegawai/atasan yang sudah ada, supaya satu akun bisa
+// dipakai untuk absen sendiri SEKALIGUS mengelola rekap absensi seluruh
+// pegawai (tidak perlu akun terpisah). Idempotent, dijalankan setiap server
+// start: kalau role "admin_absensi" tidak ada (server baru/sudah pernah
+// dibersihkan), fungsi ini tidak melakukan apa pun.
+func MigrateAdminAbsensiRole(db *gorm.DB) {
+	var role models.Role
+	if err := db.Where("role = ?", "admin_absensi").First(&role).Error; err != nil {
+		return // belum pernah ada, tidak ada yang perlu dimigrasikan
+	}
+
+	var pegawaiRole models.Role
+	if err := db.Where("role = ?", "pegawai").First(&pegawaiRole).Error; err != nil {
+		log.Printf("gagal migrasi role 'admin_absensi': role 'pegawai' tidak ditemukan: %v", err)
 		return
 	}
-	if err := db.Create(&models.Role{Role: "admin_absensi"}).Error; err != nil {
-		log.Printf("gagal menambahkan role 'admin_absensi': %v", err)
+
+	var users []models.User
+	db.Where("id_role = ?", role.ID).Find(&users)
+	for _, u := range users {
+		if err := db.Model(&u).Updates(map[string]interface{}{
+			"id_role":          pegawaiRole.ID,
+			"is_admin_absensi": true,
+		}).Error; err != nil {
+			log.Printf("gagal migrasi akun '%s' dari role 'admin_absensi': %v", u.Username, err)
+			continue
+		}
+		log.Printf("akun '%s' dipindahkan dari role 'admin_absensi' ke role 'pegawai' + tanda Admin Absensi", u.Username)
+	}
+
+	if err := db.Delete(&role).Error; err != nil {
+		log.Printf("gagal menghapus role 'admin_absensi' lama: %v", err)
 	} else {
-		log.Println("role 'admin_absensi' ditambahkan (akun khusus rekap absensi & surat kolektif)")
+		log.Println("role 'admin_absensi' lama dibersihkan")
 	}
 }
 

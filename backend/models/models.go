@@ -122,15 +122,24 @@ func (Pegawai) TableName() string { return "pegawai" }
 // ============================================================
 
 type User struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	Username  string    `json:"username" gorm:"size:50;not null;unique"`
-	Pass      string    `json:"-" gorm:"column:pass;size:255;not null"`
-	Nama      string    `json:"nama" gorm:"size:150;not null"`
-	IDRole    uint      `json:"id_role" gorm:"column:id_role;not null"`
-	Role      *Role     `json:"role,omitempty" gorm:"foreignKey:IDRole;references:ID"`
-	IDPegawai *uint     `json:"id_pegawai" gorm:"column:id_pegawai"`
-	Pegawai   *Pegawai  `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
-	TglDibuat time.Time `json:"tgl_dibuat" gorm:"column:tgl_dibuat;autoCreateTime"`
+	ID        uint     `json:"id" gorm:"primaryKey"`
+	Username  string   `json:"username" gorm:"size:50;not null;unique"`
+	Pass      string   `json:"-" gorm:"column:pass;size:255;not null"`
+	Nama      string   `json:"nama" gorm:"size:150;not null"`
+	IDRole    uint     `json:"id_role" gorm:"column:id_role;not null"`
+	Role      *Role    `json:"role,omitempty" gorm:"foreignKey:IDRole;references:ID"`
+	IDPegawai *uint    `json:"id_pegawai" gorm:"column:id_pegawai"`
+	Pegawai   *Pegawai `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	// IsAdminAbsensi menandai akun (biasanya milik role "pegawai"/"atasan",
+	// bisa juga "admin"/"administrator" meski tidak berpengaruh karena
+	// mereka sudah punya akses penuh) sebagai tambahan boleh mengelola menu
+	// "Input Rekapan Absensi" (rekap kehadiran SELURUH pegawai & input surat
+	// kolektif: berita acara, surat tugas, SKS, dll) TANPA mengubah role
+	// utamanya -- jadi pegawai yang sama tetap bisa absen & mengajukan cuti
+	// sendiri lewat akun yang sama (tidak perlu akun terpisah). Lihat
+	// RegisterAbsensiRoutes (absensi.go) & utils.Claims.IsAdminAbsensi.
+	IsAdminAbsensi bool      `json:"is_admin_absensi" gorm:"column:is_admin_absensi;default:false"`
+	TglDibuat      time.Time `json:"tgl_dibuat" gorm:"column:tgl_dibuat;autoCreateTime"`
 }
 
 func (User) TableName() string { return "user" }

@@ -22,17 +22,17 @@ const routes = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'dashboard', component: DashboardView },
-      // admin_absensi TIDAK punya menu Pengajuan Cuti sama sekali (lihat
-      // AppLayout.vue) -- dibatasi eksplisit di sini juga supaya tidak bisa
-      // diakses langsung lewat URL.
       { path: 'pengajuan-cuti', name: 'pengajuan-cuti', component: PengajuanCutiView, meta: { roles: ['administrator', 'admin', 'pegawai', 'atasan'] } },
       { path: 'master/:tableKey', name: 'master', component: MasterDataView },
       { path: 'pengaturan-formulir', name: 'pengaturan-formulir', component: PengaturanFormulirView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'profil-saya', name: 'profil-saya', component: ProfilSayaView, meta: { roles: ['pegawai'] } },
       { path: 'absen', name: 'absen', component: AbsensiView, meta: { roles: ['pegawai'] } },
-      // admin_absensi hanya boleh mengakses menu ini (rekap kehadiran &
-      // input surat kolektif: berita acara, surat tugas, SKS, dll).
-      { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin', 'admin_absensi'] } },
+      // Rekap Absen: bisa diakses administrator/admin (lewat meta.roles di
+      // bawah) ATAU akun mana pun yang dicentang "Admin Absensi" (flag
+      // is_admin_absensi, lihat stores/auth.js) -- pengecekan flag ini
+      // ditambahkan khusus di beforeEach karena meta.roles hanya bisa
+      // mencocokkan role, bukan flag tambahan.
+      { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin'], allowAdminAbsensi: true } },
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
     ],
   },
@@ -53,13 +53,6 @@ router.beforeEach((to) => {
   if (to.name === 'login' && auth.isLoggedIn) {
     return { name: 'dashboard' }
   }
-  // admin_absensi tidak punya Dashboard sendiri -- langsung arahkan ke satu-
-  // satunya menu yang boleh diaksesnya (Rekap Absen), baik saat baru login
-  // maupun saat dialihkan ke sini karena mencoba membuka halaman lain yang
-  // tidak diizinkan (lihat pengecekan to.meta.roles di bawah).
-  if (to.name === 'dashboard' && auth.isAdminAbsensi) {
-    return { name: 'rekap-absen' }
-  }
   if (to.name === 'master') {
     const cfg = getConfig(to.params.tableKey)
     if (!cfg || !cfg.roles.includes(auth.role)) {
@@ -67,7 +60,11 @@ router.beforeEach((to) => {
     }
   }
   if (to.meta.roles && !to.meta.roles.includes(auth.role)) {
-    return { name: 'dashboard' }
+    // izinkan lewat kalau rute ini membolehkan akun ber-flag Admin Absensi
+    // (lihat meta.allowAdminAbsensi pada rute 'rekap-absen' di atas).
+    if (!(to.meta.allowAdminAbsensi && auth.isAdminAbsensi)) {
+      return { name: 'dashboard' }
+    }
   }
   return true
 })

@@ -157,7 +157,7 @@ export const tableConfigs = {
 
   user: {
     title: 'Akun Pengguna',
-    subtitle: 'Kelola akun login untuk setiap role (administrator, admin, admin absensi, atasan, pegawai)',
+    subtitle: 'Kelola akun login untuk setiap role (administrator, admin, atasan, pegawai)',
     endpoint: '/user',
     roles: ['administrator'],
     columns: [
@@ -165,6 +165,7 @@ export const tableConfigs = {
       { field: 'nama', header: 'Nama' },
       { field: 'role.role', header: 'Role', type: 'badge' },
       { field: 'pegawai.nama', header: 'Terhubung ke Pegawai' },
+      { field: 'is_admin_absensi', header: 'Admin Absensi', type: 'boolean' },
     ],
     formFields: [
       { field: 'username', label: 'Username', type: 'text', required: true },
@@ -172,6 +173,12 @@ export const tableConfigs = {
       { field: 'password', label: 'Password', type: 'password', requiredOnCreate: true, hint: 'Kosongkan saat edit jika tidak ingin mengubah password' },
       { field: 'id_role', label: 'Role', type: 'select', required: true, ref: 'role', optionLabel: 'role', optionValue: 'id' },
       { field: 'id_pegawai', label: 'Hubungkan ke Pegawai (opsional)', type: 'select', ref: 'pegawai', optionLabel: (o) => `${o.nama} (${o.nip})`, optionValue: 'id' },
+      {
+        field: 'is_admin_absensi',
+        label: 'Admin Absensi',
+        type: 'checkbox',
+        hint: 'Jika dicentang, akun ini tetap punya menu biasa (Dashboard, Pengajuan Cuti, Absen, dst.) DITAMBAH 1 menu "Input Rekapan Absensi" untuk mengelola rekap absensi semua pegawai & surat kolektif.',
+      },
     ],
     searchPlaceholder: 'Cari username / nama...',
   },

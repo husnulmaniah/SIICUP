@@ -56,10 +56,12 @@ func RegisterPerubahanDataRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
 		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
 	}
-	// anyRole di sini sengaja TIDAK benar-benar "role apa saja" -- role
-	// "admin_absensi" (akun khusus rekap absensi & surat kolektif, lihat
-	// RegisterAbsensiRoutes di absensi.go) sengaja dikecualikan karena tidak
-	// punya urusan dengan modul Perubahan Data Pegawai sama sekali.
+	// anyRole di sini sengaja TIDAK benar-benar "role apa saja" -- hanya 4
+	// role dasar yang ada di sistem (administrator, admin, pegawai, atasan).
+	// "Admin Absensi" bukan role tersendiri, melainkan tanda tambahan
+	// (User.IsAdminAbsensi, lihat RegisterAbsensiRoutes di absensi.go) pada
+	// akun ber-role pegawai/atasan/dll, jadi akun tersebut tetap otomatis
+	// tercakup di sini lewat role dasarnya.
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
 	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai") }
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
