@@ -154,6 +154,17 @@ const selectedPegawai = ref(null)
 const rekap = ref([])
 const loadingRekap = ref(false)
 
+// Paginasi ala DataTables (dropdown "Tampilkan N entri" + info "Showing X to
+// Y of Z entries" + nomor halaman bulat) -- dipakai konsisten di semua tabel
+// pada aplikasi ini (lihat CrudManager.vue/PengajuanCutiView.vue). Di sini
+// dilakukan di sisi BROWSER (bukan lazy ke server) karena /absensi/rekap
+// sudah mengembalikan seluruh pegawai untuk bulan yang dipilih sekaligus --
+// PrimeVue DataTable otomatis menghitung totalRecords dari panjang data saat
+// paginator tidak "lazy".
+const entriesOptions = [5, 10, 25, 50, 100]
+const rekapPageSize = ref(10)
+const rekapFirst = ref(0)
+
 // ------------------------------------------------------------
 // daftar pegawai untuk filter rekap & pilihan pegawai pada input surat
 // kolektif.
@@ -232,6 +243,7 @@ async function loadRekap() {
     if (selectedPegawai.value) params.id_pegawai = selectedPegawai.value
     const { data } = await http.get('/absensi/rekap', { params })
     rekap.value = data.data?.data || []
+    rekapFirst.value = 0
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat rekap', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
@@ -567,6 +579,12 @@ async function submitKolektif() {
 // admin bisa lihat & hapus kalau salah input.
 const dokumenAdminList = ref([])
 const loadingDokumenAdmin = ref(false)
+// Paginasi ala DataTables untuk tabel "Surat yang Sudah Diinput Bulan Ini" --
+// lihat komentar pada rekapPageSize/rekapFirst di atas untuk penjelasan pola
+// yang sama (client-side, karena /absensi/dokumen/rekap juga mengembalikan
+// seluruh surat bulan itu sekaligus).
+const dokumenPageSize = ref(10)
+const dokumenFirst = ref(0)
 
 async function loadDokumenAdmin() {
   loadingDokumenAdmin.value = true
@@ -574,6 +592,7 @@ async function loadDokumenAdmin() {
     const params = { bulan: periodDate.value.getMonth() + 1, tahun: periodDate.value.getFullYear() }
     const { data } = await http.get('/absensi/dokumen/rekap', { params })
     dokumenAdminList.value = data.data || []
+    dokumenFirst.value = 0
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat daftar surat', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
@@ -760,7 +779,23 @@ function kodeDokumen(jenis) {
         <Button label="Export Excel" icon="pi pi-file-excel" severity="success" outlined @click="exportExcel" />
       </div>
 
-      <DataTable :value="rekap" :loading="loadingRekap" size="small" stripedRows responsiveLayout="scroll">
+      <div class="entries-picker">
+        <span class="entries-picker-label">Tampilkan</span>
+        <Select v-model="rekapPageSize" :options="entriesOptions" @change="rekapFirst = 0" />
+      </div>
+
+      <DataTable
+        :value="rekap"
+        :loading="loadingRekap"
+        paginator
+        :rows="rekapPageSize"
+        v-model:first="rekapFirst"
+        paginatorTemplate="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+        currentPageReportTemplate="Showing {first} to {last} of {totalRecords} entries"
+        size="small"
+        stripedRows
+        responsiveLayout="scroll"
+      >
         <Column header="Nama">
           <template #body="{ data }">{{ data.pegawai?.nama }}</template>
         </Column>
@@ -936,7 +971,22 @@ function kodeDokumen(jenis) {
       </div>
 
       <h4 style="margin-top: 1.75rem">Surat yang Sudah Diinput Bulan Ini</h4>
-      <DataTable :value="dokumenAdminList" :loading="loadingDokumenAdmin" size="small" stripedRows responsiveLayout="scroll">
+      <div class="entries-picker">
+        <span class="entries-picker-label">Tampilkan</span>
+        <Select v-model="dokumenPageSize" :options="entriesOptions" @change="dokumenFirst = 0" />
+      </div>
+      <DataTable
+        :value="dokumenAdminList"
+        :loading="loadingDokumenAdmin"
+        paginator
+        :rows="dokumenPageSize"
+        v-model:first="dokumenFirst"
+        paginatorTemplate="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+        currentPageReportTemplate="Showing {first} to {last} of {totalRecords} entries"
+        size="small"
+        stripedRows
+        responsiveLayout="scroll"
+      >
         <Column header="Tanggal">
           <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
         </Column>
