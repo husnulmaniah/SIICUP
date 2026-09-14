@@ -786,7 +786,19 @@ func deletePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if item.Status == models.StatusDisetuju && item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
 		_ = adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, -item.JumlahHari)
 	}
-	if err := db.Delete(&item).Error; err != nil {
+	// Dokumen kelengkapan (PengajuanDokumen) punya foreign key ke
+	// pengajuan_cuti(id) TANPA cascade delete -- pengajuan yang masih punya
+	// baris dokumen (berkas yang diupload pegawai, atau surat yang dihasilkan
+	// sistem begitu disetujui) gagal dihapus dengan pelanggaran foreign key
+	// kalau dokumennya tidak dihapus lebih dulu. Dilakukan dalam satu
+	// transaksi supaya dokumen tidak ikut terhapus kalau baris pengajuannya
+	// sendiri ternyata gagal dihapus.
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("id_pengajuan = ?", item.ID).Delete(&models.PengajuanDokumen{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&item).Error
+	}); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menghapus data: "+err.Error())
 		return
 	}
@@ -1114,6 +1126,14 @@ func importPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	if isReplaceMode(r) {
+		// Sama seperti deletePengajuan -- PengajuanDokumen punya foreign key
+		// ke pengajuan_cuti(id) tanpa cascade delete, jadi harus dihapus lebih
+		// dulu supaya menghapus seluruh pengajuan_cuti lama tidak gagal karena
+		// pelanggaran foreign key.
+		if err := deleteAllRows(db, &models.PengajuanDokumen{}); err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal menghapus dokumen lama: "+err.Error())
+			return
+		}
 		if err := deleteAllRows(db, &models.PengajuanCuti{}); err != nil {
 			utils.Error(w, http.StatusBadRequest, "gagal menghapus data lama: "+err.Error())
 			return
