@@ -22,12 +22,17 @@ const routes = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'dashboard', component: DashboardView },
-      { path: 'pengajuan-cuti', name: 'pengajuan-cuti', component: PengajuanCutiView },
+      // admin_absensi TIDAK punya menu Pengajuan Cuti sama sekali (lihat
+      // AppLayout.vue) -- dibatasi eksplisit di sini juga supaya tidak bisa
+      // diakses langsung lewat URL.
+      { path: 'pengajuan-cuti', name: 'pengajuan-cuti', component: PengajuanCutiView, meta: { roles: ['administrator', 'admin', 'pegawai', 'atasan'] } },
       { path: 'master/:tableKey', name: 'master', component: MasterDataView },
       { path: 'pengaturan-formulir', name: 'pengaturan-formulir', component: PengaturanFormulirView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'profil-saya', name: 'profil-saya', component: ProfilSayaView, meta: { roles: ['pegawai'] } },
       { path: 'absen', name: 'absen', component: AbsensiView, meta: { roles: ['pegawai'] } },
-      { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin'] } },
+      // admin_absensi hanya boleh mengakses menu ini (rekap kehadiran &
+      // input surat kolektif: berita acara, surat tugas, SKS, dll).
+      { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin', 'admin_absensi'] } },
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
     ],
   },
@@ -47,6 +52,13 @@ router.beforeEach((to) => {
   }
   if (to.name === 'login' && auth.isLoggedIn) {
     return { name: 'dashboard' }
+  }
+  // admin_absensi tidak punya Dashboard sendiri -- langsung arahkan ke satu-
+  // satunya menu yang boleh diaksesnya (Rekap Absen), baik saat baru login
+  // maupun saat dialihkan ke sini karena mencoba membuka halaman lain yang
+  // tidak diizinkan (lihat pengecekan to.meta.roles di bawah).
+  if (to.name === 'dashboard' && auth.isAdminAbsensi) {
+    return { name: 'rekap-absen' }
   }
   if (to.name === 'master') {
     const cfg = getConfig(to.params.tableKey)

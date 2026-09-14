@@ -301,12 +301,18 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h) }
 	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan") }
-	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
+	// manage: administrator & admin (kepegawaian penuh) DAN admin_absensi --
+	// role khusus yang HANYA boleh mengelola menu Rekap Absen (rekap
+	// kehadiran & input surat kolektif: berita acara, surat tugas, SKS,
+	// dll), tidak punya akses ke modul lain (Pengajuan Cuti, Data Pegawai,
+	// dst. -- lihat RegisterPengajuanCutiRoutes/RegisterPegawaiRoutes yang
+	// TIDAK menyertakan "admin_absensi").
+	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "admin_absensi") }
 	// administratorOnly: khusus untuk mengubah Pengaturan Absen (jendela
 	// waktu, filter siapa yang boleh absen, titik koordinat kantor) --
-	// role admin TIDAK boleh melihat maupun mengubah pengaturan ini,
-	// berbeda dari fitur rekap/dokumen lain yang tetap boleh diakses
-	// admin & administrator (manage di atas).
+	// role admin dan admin_absensi TIDAK boleh melihat maupun mengubah
+	// pengaturan ini, berbeda dari fitur rekap/dokumen lain yang tetap
+	// boleh diakses admin & administrator (manage di atas).
 	administratorOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator") }
 
 	// pengaturan (aktif/jam) -- dibaca semua role yang login supaya frontend
@@ -909,7 +915,7 @@ func fotoAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	isOwner := claims.IDPegawai != nil && item.IDPegawai == *claims.IDPegawai
-	isAdmin := claims.RoleName == "administrator" || claims.RoleName == "admin"
+	isAdmin := claims.RoleName == "administrator" || claims.RoleName == "admin" || claims.RoleName == "admin_absensi"
 	if !isOwner && !isAdmin {
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
 		return

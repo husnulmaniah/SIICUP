@@ -13,11 +13,19 @@ const route = useRoute()
 const userMenu = ref(null)
 
 const roleLabel = computed(() => {
-  const map = { administrator: 'Administrator', admin: 'Admin', pegawai: 'Pegawai', atasan: 'Atasan' }
+  const map = { administrator: 'Administrator', admin: 'Admin', admin_absensi: 'Admin Absensi', pegawai: 'Pegawai', atasan: 'Atasan' }
   return map[auth.role] || auth.role
 })
 
 const navSections = computed(() => {
+  // admin_absensi: akun khusus rekap absensi -- HANYA menu Rekap Absen
+  // (rekap kehadiran & input surat kolektif: berita acara, surat tugas,
+  // SKS, dll). Tidak ada Dashboard, Pengajuan Cuti, Data Pegawai, atau menu
+  // administrasi lainnya.
+  if (auth.isAdminAbsensi) {
+    return [{ header: null, items: [{ label: 'Rekap Absen', icon: 'pi pi-camera', to: '/rekap-absen' }] }]
+  }
+
   const sections = [
     { header: null, items: [{ label: 'Dashboard', icon: 'pi pi-home', to: '/dashboard' }] },
     { header: null, items: [{ label: 'Pengajuan Cuti', icon: 'pi pi-calendar', to: '/pengajuan-cuti' }] },

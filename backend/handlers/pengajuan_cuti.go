@@ -258,7 +258,11 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
-	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h) }
+	// anyRole di sini sengaja TIDAK benar-benar "role apa saja" -- role
+	// "admin_absensi" (akun khusus rekap absensi & surat kolektif, lihat
+	// RegisterAbsensiRoutes di absensi.go) sengaja dikecualikan karena tidak
+	// punya urusan dengan modul Pengajuan Cuti sama sekali.
+	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
 	// approve/reject/return: atasan (bawahannya sendiri) DAN admin/administrator
 	// (siapa saja) -- canAccessPengajuan di bawah masih mengecek relasi
 	// atasan-bawahan untuk role "atasan".

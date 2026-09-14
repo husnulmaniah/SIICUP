@@ -157,7 +157,7 @@ export const tableConfigs = {
 
   user: {
     title: 'Akun Pengguna',
-    subtitle: 'Kelola akun login untuk setiap role (administrator, admin, atasan, pegawai)',
+    subtitle: 'Kelola akun login untuk setiap role (administrator, admin, admin absensi, atasan, pegawai)',
     endpoint: '/user',
     roles: ['administrator'],
     columns: [

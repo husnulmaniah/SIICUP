@@ -22,7 +22,7 @@ func Seed(db *gorm.DB) {
 	}
 	log.Println("database kosong, menjalankan seeding data awal...")
 
-	roles := []models.Role{{Role: "administrator"}, {Role: "admin"}, {Role: "pegawai"}, {Role: "atasan"}}
+	roles := []models.Role{{Role: "administrator"}, {Role: "admin"}, {Role: "admin_absensi"}, {Role: "pegawai"}, {Role: "atasan"}}
 	db.Create(&roles)
 	roleByName := map[string]uint{}
 	for _, r := range roles {
@@ -113,6 +113,27 @@ func Seed(db *gorm.DB) {
 	log.Println("  admin         / admin123")
 	log.Println("  andi (atasan) / admin123")
 	log.Println("  siti (pegawai)/ admin123")
+}
+
+// EnsureRoleAdminAbsensi memastikan role "admin_absensi" selalu ada di
+// database, termasuk untuk instalasi yang sudah pernah di-seed sebelumnya
+// (mis. server produksi yang sudah berjalan) -- idempotent, dijalankan
+// setiap server start. Role ini dipakai untuk akun yang hanya boleh
+// mengelola menu Rekap Absen (rekap kehadiran & input surat kolektif:
+// berita acara, surat tugas, SKS, dll), tanpa akses ke Pengajuan Cuti, Data
+// Pegawai, atau menu administrasi lainnya -- lihat middleware.RequireRole
+// pada RegisterAbsensiRoutes (backend/handlers/absensi.go) dan pembatasan
+// menu/route di frontend (stores/auth.js, router/index.js, layouts/AppLayout.vue).
+func EnsureRoleAdminAbsensi(db *gorm.DB) {
+	var existing models.Role
+	if err := db.Where("role = ?", "admin_absensi").First(&existing).Error; err == nil {
+		return
+	}
+	if err := db.Create(&models.Role{Role: "admin_absensi"}).Error; err != nil {
+		log.Printf("gagal menambahkan role 'admin_absensi': %v", err)
+	} else {
+		log.Println("role 'admin_absensi' ditambahkan (akun khusus rekap absensi & surat kolektif)")
+	}
 }
 
 // EnsureStatusPegawai melengkapi data master Status (status kepegawaian)

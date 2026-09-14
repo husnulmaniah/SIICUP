@@ -79,7 +79,11 @@ func RegisterJatahCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
-	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h) }
+	// anyRole di sini sengaja TIDAK benar-benar "role apa saja" -- role
+	// "admin_absensi" (akun khusus rekap absensi & surat kolektif, lihat
+	// RegisterAbsensiRoutes di absensi.go) sengaja dikecualikan karena tidak
+	// punya urusan dengan modul Jatah Cuti Tahunan sama sekali.
+	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
 
 	mux.Handle("GET /api/jatah-cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { listJatahCuti(w, r, db) }))
 	mux.Handle("GET /api/jatah-cuti/export", manage(func(w http.ResponseWriter, r *http.Request) { exportJatahCuti(w, r, db) }))

@@ -19,10 +19,10 @@ import (
 // Acara/Surat Izin) untuk tanggal absen yang terlewat -- lihat
 // riwayatAbsenSaya (absensi.go) untuk bagaimana tanggal_terlewat/tanggal_
 // tercover dihitung. Sejak fitur ini diubah, surat HANYA diinput oleh
-// administrator/admin (bisa kolektif -- beberapa pegawai & rentang tanggal
-// sekaligus lewat inputAbsensiDokumenKolektif), tidak lagi diupload sendiri
-// oleh pegawai -- pegawai hanya bisa melihat/mengunduh surat yang sudah
-// diinput untuknya (listAbsensiDokumenSaya/downloadAbsensiDokumen).
+// administrator/admin/admin_absensi (bisa kolektif -- beberapa pegawai &
+// rentang tanggal sekaligus lewat inputAbsensiDokumenKolektif), tidak lagi
+// diupload sendiri oleh pegawai -- pegawai hanya bisa melihat/mengunduh
+// surat yang sudah diinput untuknya (listAbsensiDokumenSaya/downloadAbsensiDokumen).
 
 var absensiDokumenLabels = map[string]string{
 	models.AbsensiDokumenSKS:         "Surat Keterangan Sakit (SKS)",
@@ -33,7 +33,7 @@ var absensiDokumenLabels = map[string]string{
 
 func canAccessAbsensiDokumen(claims *utils.Claims, item models.AbsensiDokumen) bool {
 	switch claims.RoleName {
-	case "administrator", "admin":
+	case "administrator", "admin", "admin_absensi":
 		return true
 	case "pegawai", "atasan":
 		return claims.IDPegawai != nil && item.IDPegawai == *claims.IDPegawai
