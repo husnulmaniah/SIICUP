@@ -263,7 +263,7 @@ const menuLainnyaAktif = computed(
         </Popover>
 
         <div class="topbar-user" @click="userMenu.toggle($event)">
-          <Avatar :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #6366f1; color: #fff" />
+          <Avatar :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #0d9488; color: #fff" />
           <span class="user-name">{{ auth.user?.nama }}</span>
           <i class="pi pi-angle-down"></i>
         </div>
@@ -334,7 +334,7 @@ const menuLainnyaAktif = computed(
 
 .sidebar {
   width: 260px;
-  background: #111827;
+  background: #0f2436;
   color: #e5e7eb;
   position: fixed;
   top: 0;
@@ -391,7 +391,7 @@ const menuLainnyaAktif = computed(
 }
 
 .nav-item.active {
-  background: #6366f1;
+  background: #0d9488;
   color: #fff;
 }
 
@@ -427,7 +427,7 @@ const menuLainnyaAktif = computed(
 }
 
 .topbar-brand i {
-  color: #6366f1;
+  color: #0d9488;
 }
 
 .topbar-title {
@@ -536,7 +536,7 @@ const menuLainnyaAktif = computed(
 
 .notif-item i {
   margin-top: 0.15rem;
-  color: #6366f1;
+  color: #0d9488;
   font-size: 0.95rem;
 }
 
@@ -609,7 +609,7 @@ const menuLainnyaAktif = computed(
 }
 
 .bottom-nav-item.active {
-  color: #6366f1;
+  color: #0d9488;
   font-weight: 600;
 }
 
@@ -688,13 +688,13 @@ const menuLainnyaAktif = computed(
 }
 
 .more-item.active {
-  background: #eef2ff;
-  color: #4f46e5;
+  background: #f0fdfa;
+  color: #0f766e;
   font-weight: 600;
 }
 
 .more-item.active i {
-  color: #4f46e5;
+  color: #0f766e;
 }
 
 .more-item.keluar {

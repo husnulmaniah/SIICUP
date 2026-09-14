@@ -1446,7 +1446,7 @@ function kodeDokumen(jenis) {
   display: block;
 }
 .foto-thumb:hover {
-  border-color: #6366f1;
+  border-color: #0d9488;
 }
 
 /* ---------- baris "Tidak Absen Pulang (TAP)" ---------- */
@@ -1466,7 +1466,7 @@ function kodeDokumen(jenis) {
   gap: 0.15rem;
 }
 .koordinat-link {
-  color: #4f46e5;
+  color: #0f766e;
   text-decoration: none;
   white-space: nowrap;
   font-size: 0.82rem;

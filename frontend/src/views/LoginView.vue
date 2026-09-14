@@ -72,7 +72,7 @@ async function submit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #818cf8 100%);
+  background: linear-gradient(135deg, #0d3b52 0%, #0d9488 55%, #5eead4 100%);
   padding: 1rem;
 }
 
@@ -89,7 +89,7 @@ async function submit() {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: #4338ca;
+  color: #0f766e;
   margin-bottom: 0.25rem;
 }
 

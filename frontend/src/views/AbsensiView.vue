@@ -1001,7 +1001,7 @@ async function downloadDokumen(item) {
   display: block;
 }
 .foto-thumb:hover {
-  border-color: #6366f1;
+  border-color: #0d9488;
 }
 .koordinat-cell {
   display: flex;
@@ -1009,7 +1009,7 @@ async function downloadDokumen(item) {
   gap: 0.15rem;
 }
 .koordinat-link {
-  color: #4f46e5;
+  color: #0f766e;
   text-decoration: none;
   white-space: nowrap;
   font-size: 0.82rem;
