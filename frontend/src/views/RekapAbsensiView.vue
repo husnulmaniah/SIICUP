@@ -20,6 +20,11 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Textarea from 'primevue/textarea'
 import MultiSelect from 'primevue/multiselect'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
+import TabPanels from 'primevue/tabpanels'
+import TabPanel from 'primevue/tabpanel'
 
 const toast = useToast()
 const confirm = useConfirm()
@@ -611,10 +616,19 @@ function kodeDokumen(jenis) {
       }}
     </p>
 
-    <!-- Kartu Pengaturan Absen (jendela waktu, siapa yang boleh absen, titik
-         koordinat kantor) HANYA untuk role administrator -- role admin tidak
-         boleh melihat maupun mengubah pengaturan ini sama sekali. -->
-    <div v-if="auth.isAdministrator" class="card" style="margin-bottom: 1.5rem">
+    <!-- Tab "Rekap Absen" (semua bisa lihat), "Pengaturan Absen" (HANYA
+         administrator -- role admin tidak boleh melihat/mengubah sama
+         sekali) & "Surat Kolektif" (admin & administrator), menggantikan
+         tampilan lama yang menumpuk ketiganya sekaligus di satu halaman. -->
+    <Tabs value="rekap">
+      <TabList>
+        <Tab value="rekap"><i class="pi pi-list" style="margin-right: 0.4rem"></i> Rekap Absen</Tab>
+        <Tab v-if="auth.isAdministrator" value="pengaturan"><i class="pi pi-cog" style="margin-right: 0.4rem"></i> Pengaturan Absen</Tab>
+        <Tab value="surat"><i class="pi pi-file" style="margin-right: 0.4rem"></i> Surat Kolektif</Tab>
+      </TabList>
+      <TabPanels>
+    <TabPanel v-if="auth.isAdministrator" value="pengaturan">
+    <div class="card">
       <div v-if="loadingPengaturan" style="display: flex; justify-content: center; padding: 1.5rem">
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
       </div>
@@ -723,7 +737,9 @@ function kodeDokumen(jenis) {
         </div>
       </div>
     </div>
+    </TabPanel>
 
+    <TabPanel value="rekap">
     <div class="card">
       <div class="rekap-toolbar">
         <DatePicker v-model="periodDate" view="month" dateFormat="MM yy" showIcon style="width: 180px" />
@@ -810,6 +826,139 @@ function kodeDokumen(jenis) {
         <template #empty>Tidak ada data pegawai.</template>
       </DataTable>
     </div>
+    </TabPanel>
+
+    <TabPanel value="surat">
+    <div class="card">
+      <h3 style="margin-top: 0">Input Surat Kolektif (BA / Surat Tugas / Surat Izin / SKS)</h3>
+      <p class="text-muted">
+        Input surat pendukung untuk beberapa pegawai &amp; rentang tanggal sekaligus -- tanggal yang tercover akan
+        terbaca DD (Dinas Dalam) untuk Surat Tugas/Berita Acara, I (Izin) untuk Surat Izin, atau S (Sakit) untuk SKS
+        pada riwayat/rekap pegawai bersangkutan.
+      </p>
+      <div class="kolektif-form">
+        <div class="kolektif-span">
+          <label class="field-label">Pegawai</label>
+          <MultiSelect
+            v-model="kolektifForm.id_pegawai"
+            :options="pegawaiOptions"
+            optionLabel="label"
+            optionValue="value"
+            filter
+            display="chip"
+            :loading="loadingPegawai"
+            :maxSelectedLabels="20"
+            filterPlaceholder="Ketik nama atau NIP pegawai"
+            emptyFilterMessage="Pegawai tidak ditemukan -- coba nama atau NIP yang lain"
+            placeholder="Pilih satu atau beberapa pegawai"
+            style="width: 100%"
+            @filter="onPegawaiFilter"
+          />
+          <small v-if="pegawaiKeyword" class="text-muted">
+            {{ pegawaiHasil }} pegawai cocok dengan pencarian "{{ pegawaiKeyword }}"<span v-if="pegawaiHasil > PEGAWAI_PAGE_SIZE">
+              -- ditampilkan {{ PEGAWAI_PAGE_SIZE }} teratas, persempit pencarian bila pegawai yang dicari belum
+              terlihat</span
+            >.
+          </small>
+          <small v-else class="text-muted">
+            Menampilkan {{ Math.min(PEGAWAI_PAGE_SIZE, pegawaiTotal) }} dari {{ pegawaiTotal }} pegawai -- ketik nama
+            atau NIP pada kotak cari untuk menemukan pegawai lainnya.
+          </small>
+        </div>
+
+        <div>
+          <label class="field-label">Tanggal Mulai</label>
+          <DatePicker
+            v-model="kolektifForm.tanggal_mulai"
+            dateFormat="dd-mm-yy"
+            showIcon
+            :disabledDays="hariNonaktif"
+            style="width: 100%"
+          />
+        </div>
+        <div>
+          <label class="field-label">Tanggal Selesai</label>
+          <DatePicker
+            v-model="kolektifForm.tanggal_selesai"
+            dateFormat="dd-mm-yy"
+            showIcon
+            :disabledDays="hariNonaktif"
+            style="width: 100%"
+          />
+        </div>
+        <div>
+          <label class="field-label">Jenis Surat</label>
+          <Select
+            v-model="kolektifForm.jenis"
+            :options="[
+              { label: 'Surat Tugas (DD)', value: 'surat_tugas' },
+              { label: 'Berita Acara (DD)', value: 'berita_acara' },
+              { label: 'Surat Izin (I)', value: 'surat_izin' },
+              { label: 'SKS -- Surat Keterangan Sakit (S)', value: 'sks' },
+            ]"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Pilih jenis surat"
+            style="width: 100%"
+          />
+        </div>
+        <div>
+          <label class="field-label">Berkas (PDF/JPG/PNG)</label>
+          <input ref="kolektifFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onKolektifFileChosen" />
+          <Button
+            class="berkas-btn"
+            :label="kolektifFile ? kolektifFile.name : 'Pilih Berkas'"
+            icon="pi pi-file"
+            severity="secondary"
+            outlined
+            @click="pickKolektifFile"
+          />
+        </div>
+
+        <div class="kolektif-span">
+          <Message severity="info" :closable="false">
+            Tanggal di luar hari kerja otomatis dilewati saat disimpan, mengikuti tempat tugas masing-masing pegawai:
+            pegawai <b>kantor dinas</b> tidak diinput pada <b>Sabtu &amp; Minggu</b>, pegawai <b>sekolah</b> tidak
+            diinput pada <b>Minggu</b>, dan <b>tanggal merah</b> dilewati untuk keduanya
+            <span v-if="semuaPegawaiDinas">-- semua pegawai yang dipilih bertugas di kantor dinas, jadi Sabtu &amp; Minggu dinonaktifkan di kalender.</span>
+            <span v-else-if="adaPegawaiSekolah">-- ada pegawai sekolah di antara yang dipilih, jadi tanggal Sabtu tetap bisa dipilih (hanya berlaku untuk pegawai sekolah).</span>
+          </Message>
+        </div>
+
+        <div class="kolektif-span">
+          <label class="field-label">Keterangan (opsional)</label>
+          <Textarea v-model="kolektifForm.keterangan" rows="2" style="width: 100%" />
+        </div>
+
+        <div class="kolektif-span">
+          <Button label="Input Surat" icon="pi pi-upload" :loading="submittingKolektif" @click="submitKolektif" />
+        </div>
+      </div>
+
+      <h4 style="margin-top: 1.75rem">Surat yang Sudah Diinput Bulan Ini</h4>
+      <DataTable :value="dokumenAdminList" :loading="loadingDokumenAdmin" size="small" stripedRows responsiveLayout="scroll">
+        <Column header="Tanggal">
+          <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
+        </Column>
+        <Column header="Nama Pegawai">
+          <template #body="{ data }">{{ data.pegawai?.nama }}</template>
+        </Column>
+        <Column field="label" header="Jenis Surat" />
+        <Column header="Kode">
+          <template #body="{ data }"><Tag :value="kodeDokumen(data.jenis)" /></template>
+        </Column>
+        <Column field="keterangan" header="Keterangan" />
+        <Column header="Aksi">
+          <template #body="{ data }">
+            <Button icon="pi pi-trash" size="small" text rounded severity="danger" title="Hapus" @click="confirmHapusDokumenAdmin(data)" />
+          </template>
+        </Column>
+        <template #empty>Belum ada surat yang diinput pada bulan ini.</template>
+      </DataTable>
+    </div>
+    </TabPanel>
+      </TabPanels>
+    </Tabs>
 
     <Dialog
       v-model:visible="detailDialog"
@@ -949,135 +1098,6 @@ function kodeDokumen(jenis) {
     >
       <img v-if="fotoDialogUrl" :src="fotoDialogUrl" style="width: 100%; border-radius: 8px" alt="Foto absen" />
     </Dialog>
-
-    <!-- ================= input surat kolektif (BA/Surat Tugas/Izin/SKS) ================= -->
-    <div class="card" style="margin-top: 1.5rem">
-      <h3 style="margin-top: 0">Input Surat Kolektif (BA / Surat Tugas / Surat Izin / SKS)</h3>
-      <p class="text-muted">
-        Input surat pendukung untuk beberapa pegawai &amp; rentang tanggal sekaligus -- tanggal yang tercover akan
-        terbaca DD (Dinas Dalam) untuk Surat Tugas/Berita Acara, I (Izin) untuk Surat Izin, atau S (Sakit) untuk SKS
-        pada riwayat/rekap pegawai bersangkutan.
-      </p>
-      <div class="kolektif-form">
-        <div class="kolektif-span">
-          <label class="field-label">Pegawai</label>
-          <MultiSelect
-            v-model="kolektifForm.id_pegawai"
-            :options="pegawaiOptions"
-            optionLabel="label"
-            optionValue="value"
-            filter
-            display="chip"
-            :loading="loadingPegawai"
-            :maxSelectedLabels="20"
-            filterPlaceholder="Ketik nama atau NIP pegawai"
-            emptyFilterMessage="Pegawai tidak ditemukan -- coba nama atau NIP yang lain"
-            placeholder="Pilih satu atau beberapa pegawai"
-            style="width: 100%"
-            @filter="onPegawaiFilter"
-          />
-          <small v-if="pegawaiKeyword" class="text-muted">
-            {{ pegawaiHasil }} pegawai cocok dengan pencarian "{{ pegawaiKeyword }}"<span v-if="pegawaiHasil > PEGAWAI_PAGE_SIZE">
-              -- ditampilkan {{ PEGAWAI_PAGE_SIZE }} teratas, persempit pencarian bila pegawai yang dicari belum
-              terlihat</span
-            >.
-          </small>
-          <small v-else class="text-muted">
-            Menampilkan {{ Math.min(PEGAWAI_PAGE_SIZE, pegawaiTotal) }} dari {{ pegawaiTotal }} pegawai -- ketik nama
-            atau NIP pada kotak cari untuk menemukan pegawai lainnya.
-          </small>
-        </div>
-
-        <div>
-          <label class="field-label">Tanggal Mulai</label>
-          <DatePicker
-            v-model="kolektifForm.tanggal_mulai"
-            dateFormat="dd-mm-yy"
-            showIcon
-            :disabledDays="hariNonaktif"
-            style="width: 100%"
-          />
-        </div>
-        <div>
-          <label class="field-label">Tanggal Selesai</label>
-          <DatePicker
-            v-model="kolektifForm.tanggal_selesai"
-            dateFormat="dd-mm-yy"
-            showIcon
-            :disabledDays="hariNonaktif"
-            style="width: 100%"
-          />
-        </div>
-        <div>
-          <label class="field-label">Jenis Surat</label>
-          <Select
-            v-model="kolektifForm.jenis"
-            :options="[
-              { label: 'Surat Tugas (DD)', value: 'surat_tugas' },
-              { label: 'Berita Acara (DD)', value: 'berita_acara' },
-              { label: 'Surat Izin (I)', value: 'surat_izin' },
-              { label: 'SKS -- Surat Keterangan Sakit (S)', value: 'sks' },
-            ]"
-            optionLabel="label"
-            optionValue="value"
-            placeholder="Pilih jenis surat"
-            style="width: 100%"
-          />
-        </div>
-        <div>
-          <label class="field-label">Berkas (PDF/JPG/PNG)</label>
-          <input ref="kolektifFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onKolektifFileChosen" />
-          <Button
-            class="berkas-btn"
-            :label="kolektifFile ? kolektifFile.name : 'Pilih Berkas'"
-            icon="pi pi-file"
-            severity="secondary"
-            outlined
-            @click="pickKolektifFile"
-          />
-        </div>
-
-        <div class="kolektif-span">
-          <Message severity="info" :closable="false">
-            Tanggal di luar hari kerja otomatis dilewati saat disimpan, mengikuti tempat tugas masing-masing pegawai:
-            pegawai <b>kantor dinas</b> tidak diinput pada <b>Sabtu &amp; Minggu</b>, pegawai <b>sekolah</b> tidak
-            diinput pada <b>Minggu</b>, dan <b>tanggal merah</b> dilewati untuk keduanya
-            <span v-if="semuaPegawaiDinas">-- semua pegawai yang dipilih bertugas di kantor dinas, jadi Sabtu &amp; Minggu dinonaktifkan di kalender.</span>
-            <span v-else-if="adaPegawaiSekolah">-- ada pegawai sekolah di antara yang dipilih, jadi tanggal Sabtu tetap bisa dipilih (hanya berlaku untuk pegawai sekolah).</span>
-          </Message>
-        </div>
-
-        <div class="kolektif-span">
-          <label class="field-label">Keterangan (opsional)</label>
-          <Textarea v-model="kolektifForm.keterangan" rows="2" style="width: 100%" />
-        </div>
-
-        <div class="kolektif-span">
-          <Button label="Input Surat" icon="pi pi-upload" :loading="submittingKolektif" @click="submitKolektif" />
-        </div>
-      </div>
-
-      <h4 style="margin-top: 1.75rem">Surat yang Sudah Diinput Bulan Ini</h4>
-      <DataTable :value="dokumenAdminList" :loading="loadingDokumenAdmin" size="small" stripedRows responsiveLayout="scroll">
-        <Column header="Tanggal">
-          <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
-        </Column>
-        <Column header="Nama Pegawai">
-          <template #body="{ data }">{{ data.pegawai?.nama }}</template>
-        </Column>
-        <Column field="label" header="Jenis Surat" />
-        <Column header="Kode">
-          <template #body="{ data }"><Tag :value="kodeDokumen(data.jenis)" /></template>
-        </Column>
-        <Column field="keterangan" header="Keterangan" />
-        <Column header="Aksi">
-          <template #body="{ data }">
-            <Button icon="pi pi-trash" size="small" text rounded severity="danger" title="Hapus" @click="confirmHapusDokumenAdmin(data)" />
-          </template>
-        </Column>
-        <template #empty>Belum ada surat yang diinput pada bulan ini.</template>
-      </DataTable>
-    </div>
   </div>
 </template>
 
