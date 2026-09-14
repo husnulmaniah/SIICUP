@@ -345,11 +345,14 @@ async function cekLokasiKantor() {
 
   const jarak = haversineMeter(pos.lat, pos.lng, kantorLat, kantorLng)
   // GPS ponsel (apalagi di dalam gedung) sering meleset 50-150m walaupun
-  // pegawai tidak bergerak. Supaya tidak berulang kali ditolak hanya karena
-  // noise GPS, jarak dibandingkan setelah dikurangi toleransi akurasi
-  // (dibatasi maks. 100m) -- pengecekan akhir & mengikat tetap dilakukan
-  // ulang di server (absensiCekRadius di backend) dengan aturan yang sama.
-  const toleransi = pos.accuracy > 0 ? Math.min(pos.accuracy, 100) : 0
+  // pegawai tidak bergerak -- accuracy yang dilaporkan browser sering terlalu
+  // percaya diri di dalam gedung (sinyal memantul di dinding/lantai beton),
+  // jadi toleransi minimal 30m tetap dipakai walau accuracy dilaporkan sangat
+  // kecil (mis. 13m), supaya pegawai yang benar-benar di kantor tidak
+  // berulang kali ditolak. Toleransi dibatasi maks. 100m -- pengecekan akhir
+  // & mengikat tetap dilakukan ulang di server (absensiCekRadius di backend)
+  // dengan aturan yang sama (lihat toleransiAkurasiMinimum/Maksimal di sana).
+  const toleransi = pos.accuracy > 30 ? Math.min(pos.accuracy, 100) : 30
   const jarakEfektif = Math.max(jarak - toleransi, 0)
   if (jarakEfektif > radius) {
     locationBlocked.value = true

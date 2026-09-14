@@ -140,6 +140,17 @@ func distanceMeters(lat1, lng1, lat2, lng2 float64) float64 {
 // ribuan meter) bisa lolos geofence dari lokasi manapun.
 const toleransiAkurasiMaksimal = 100.0
 
+// toleransiAkurasiMinimum adalah batas BAWAH toleransi -- dipakai walau
+// accuracy yang dilaporkan perangkat sangat kecil (mis. 13m) atau tidak
+// dilaporkan sama sekali. Nilai accuracy dari Geolocation API browser sering
+// terlalu percaya diri terutama DI DALAM GEDUNG (sinyal GPS memantul di
+// dinding/lantai beton -- dikenal sebagai multipath), sehingga posisi
+// sebenarnya bisa meleset 50-150m dari titik yang dilaporkan walau accuracy
+// tertulis hanya belasan meter. Tanpa batas bawah ini, pegawai yang memang
+// berada di kantor bisa berulang kali ditolak absen hanya karena GPS
+// ponselnya melaporkan accuracy yang (secara keliru) sangat kecil.
+const toleransiAkurasiMinimum = 30.0
+
 // absensiCekRadius memvalidasi titik koordinat (lat,lng) hasil GPS pegawai
 // terhadap titik koordinat kantor yang diatur administrator. Kalau
 // KantorLat/KantorLng belum diatur (nil), geofence dianggap belum aktif dan
@@ -154,8 +165,9 @@ const toleransiAkurasiMaksimal = 100.0
 // meski pegawai tidak bergerak sama sekali. Supaya pegawai yang benar-benar
 // berada di kantor tidak ditolak berulang kali hanya karena noise GPS,
 // jarak yang dibandingkan dengan radius kantor dikurangi toleransi sebesar
-// akurasi tersebut (dibatasi maksimal toleransiAkurasiMaksimal meter supaya
-// geofence tetap berarti untuk lokasi yang jelas-jelas jauh dari kantor).
+// akurasi tersebut, dengan batas bawah toleransiAkurasiMinimum meter (lihat
+// komentarnya) dan batas atas toleransiAkurasiMaksimal meter supaya geofence
+// tetap berarti untuk lokasi yang jelas-jelas jauh dari kantor).
 func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng, akurasi *float64) (ok bool, pesan string) {
 	if setting.KantorLat == nil || setting.KantorLng == nil {
 		return true, ""
@@ -169,8 +181,11 @@ func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng, akurasi *float
 	}
 	jarak := distanceMeters(*setting.KantorLat, *setting.KantorLng, *lat, *lng)
 
-	toleransi := 0.0
-	if akurasi != nil && *akurasi > 0 {
+	// toleransi minimal toleransiAkurasiMinimum berlaku SELALU (lihat
+	// komentarnya) -- kalau accuracy yang dilaporkan lebih besar dari itu,
+	// pakai accuracy tersebut (dibatasi maksimal toleransiAkurasiMaksimal).
+	toleransi := toleransiAkurasiMinimum
+	if akurasi != nil && *akurasi > toleransi {
 		toleransi = math.Min(*akurasi, toleransiAkurasiMaksimal)
 	}
 	jarakEfektif := math.Max(jarak-toleransi, 0)
