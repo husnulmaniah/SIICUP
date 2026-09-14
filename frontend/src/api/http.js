@@ -15,10 +15,18 @@ http.interceptors.request.use((config) => {
 
 http.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response && error.response.status === 401) {
-      localStorage.removeItem('cuti_token')
-      localStorage.removeItem('cuti_user')
+      // Bersihkan state store auth (bukan cuma localStorage) supaya
+      // auth.isLoggedIn langsung false dan router guard tidak
+      // membatalkan redirect ke halaman login (lihat router/index.js).
+      try {
+        const { useAuthStore } = await import('../stores/auth')
+        useAuthStore().logout()
+      } catch {
+        localStorage.removeItem('cuti_token')
+        localStorage.removeItem('cuti_user')
+      }
       if (router.currentRoute.value.name !== 'login') {
         router.push({ name: 'login' })
       }

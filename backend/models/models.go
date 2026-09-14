@@ -314,14 +314,33 @@ type Absensi struct {
 	// bukan untuk menolak absennya (kamera/pencahayaan pegawai bisa saja gagal
 	// mendeteksi kedipan walau pegawainya asli hadir).
 	KedipanMasukOk bool `json:"kedipan_masuk_ok" gorm:"column:kedipan_masuk_ok;default:true"`
+	// DinasDalamMasuk: pegawai mencentang tombol "Dinas Dalam" saat mengambil
+	// foto absen masuk -- kalau true, validasi radius kantor (absensiCekRadius)
+	// DILEWATI untuk absen masuk hari itu (boleh absen dari mana saja), dan
+	// rekap/riwayat/export menampilkan status "Dinas Dalam" untuk hari itu,
+	// BUKAN "Hadir". Ini terpisah dari sistem dokumen Surat Tugas/Berita Acara
+	// (AbsensiDokumen, kode "DD") yang diinput administrator -- ini laporan
+	// mandiri pegawai pada saat absen, bukan dokumen yang diinput admin.
+	DinasDalamMasuk bool `json:"dinas_dalam_masuk" gorm:"column:dinas_dalam_masuk;default:false"`
 
 	JamPulang       *time.Time `json:"jam_pulang" gorm:"column:jam_pulang"`
 	FotoPulang      []byte     `json:"-" gorm:"column:foto_pulang;type:bytea"`
 	LatPulang       *float64   `json:"lat_pulang" gorm:"column:lat_pulang"`
 	LngPulang       *float64   `json:"lng_pulang" gorm:"column:lng_pulang"`
 	KedipanPulangOk bool       `json:"kedipan_pulang_ok" gorm:"column:kedipan_pulang_ok;default:true"`
+	// DinasDalamPulang: sama seperti DinasDalamMasuk, tapi untuk absen pulang
+	// (pegawai bisa mencentang salah satu/kedua-duanya secara independen,
+	// misalnya dinas dalam saat pulang walau absen masuk normal di kantor).
+	DinasDalamPulang bool `json:"dinas_dalam_pulang" gorm:"column:dinas_dalam_pulang;default:false"`
 
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+// IsDinasDalam mengembalikan true kalau salah satu (atau kedua) absen masuk/
+// pulang hari itu ditandai Dinas Dalam oleh pegawai -- dipakai di rekap/
+// export untuk menampilkan status "Dinas Dalam" alih-alih "Hadir".
+func (a Absensi) IsDinasDalam() bool {
+	return a.DinasDalamMasuk || a.DinasDalamPulang
 }
 
 func (Absensi) TableName() string { return "absensi" }

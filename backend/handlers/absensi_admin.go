@@ -227,6 +227,16 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 
 		tercover := []tanggalTercoverEntry{}
 		jumlahDD, jumlahIzin, jumlahSakit := 0, 0, 0
+		// absen masuk/pulang yang ditandai Dinas Dalam sendiri oleh pegawai
+		// (lihat models.Absensi.IsDinasDalam) ikut dihitung sebagai "DD" di
+		// sini, sama seperti dokumen Surat Tugas/Berita Acara yang diinput
+		// administrator -- keduanya sama-sama berarti "Dinas Dalam" bagi
+		// pegawai yang bersangkutan, walau sumbernya berbeda.
+		for _, a := range rows {
+			if a.JamMasuk != nil && a.IsDinasDalam() {
+				jumlahDD++
+			}
+		}
 		docs := dokumenByPegawai[p.ID]
 		sort.Slice(docs, func(i, j int) bool { return docs[i].Tanggal.After(docs[j].Tanggal) })
 		for _, d := range docs {
@@ -354,7 +364,11 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 					out.Koordinat = "-"
 					out.LinkMaps = "-"
 				}
-				out.Status = "Hadir"
+				if a.IsDinasDalam() {
+					out.Status = "Dinas Dalam"
+				} else {
+					out.Status = "Hadir"
+				}
 			case terlewatSet[key]:
 				out.JamMasuk, out.Terlambat, out.JamPulang, out.Koordinat, out.LinkMaps = "-", "-", "-", "-", "-"
 				out.Status = "Tidak Hadir"

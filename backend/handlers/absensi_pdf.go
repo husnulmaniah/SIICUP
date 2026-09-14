@@ -126,8 +126,13 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 		row := barisRekapPDF{Tanggal: d, JamMasuk: "-", Terlambat: "-", JamPulang: "-", Koordinat: "-", Status: "Tidak Absen"}
 
 		if a, ada := absenByTanggal[key]; ada && (a.JamMasuk != nil || a.JamPulang != nil) {
-			row.Status = "Hadir"
-			ringkasan.Hadir++
+			if a.IsDinasDalam() {
+				row.Status = "Dinas Dalam"
+				ringkasan.DinasDalam++
+			} else {
+				row.Status = "Hadir"
+				ringkasan.Hadir++
+			}
 			if a.JamMasuk != nil {
 				row.JamMasuk = formatJamAbsensi(a.JamMasuk)
 			}

@@ -251,8 +251,12 @@ onMounted(async () => {
   await Promise.all([loadRekap(), loadDokumenAdmin()])
 })
 
+// Hadir TIDAK termasuk hari yang ditandai Dinas Dalam (baik absen masuk
+// maupun pulangnya) -- hari itu sudah dihitung terpisah lewat jumlah_dd
+// (lihat buildRekapItems di backend, yang menggabungkan Dinas Dalam mandiri
+// pegawai dengan dokumen Surat Tugas/Berita Acara yang diinput admin).
 function jumlahHadir(item) {
-  return item.absensi.filter((a) => a.jam_masuk).length
+  return item.absensi.filter((a) => a.jam_masuk && !a.dinas_dalam_masuk && !a.dinas_dalam_pulang).length
 }
 function jumlahTerlambat(item) {
   return item.absensi.filter((a) => a.terlambat_menit > 0).length
@@ -835,6 +839,13 @@ function kodeDokumen(jenis) {
         <DataTable :value="detailItem.absensi" size="small" stripedRows responsiveLayout="scroll">
           <Column header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
+          </Column>
+          <Column header="Status">
+            <template #body="{ data }">
+              <Tag v-if="data.dinas_dalam_masuk || data.dinas_dalam_pulang" severity="info" value="Dinas Dalam" />
+              <Tag v-else-if="data.jam_masuk" severity="success" value="Hadir" />
+              <span v-else>-</span>
+            </template>
           </Column>
           <Column header="Jam Masuk">
             <template #body="{ data }">

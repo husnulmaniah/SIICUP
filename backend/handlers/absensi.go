@@ -494,10 +494,18 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	lat := parseFloatForm(r, "lat")
 	lng := parseFloatForm(r, "lng")
 	akurasi := parseFloatForm(r, "accuracy")
+	// dinas_dalam: pegawai mencentang tombol "Dinas Dalam" pada dialog kamera
+	// (lihat AbsensiView.vue) -- kalau true, validasi radius kantor DILEWATI
+	// (boleh absen dari mana saja) dan hari itu akan tercatat sebagai "Dinas
+	// Dalam", bukan "Hadir", di rekap/riwayat/export (lihat models.Absensi.
+	// IsDinasDalam & pemakaiannya di absensi_admin.go/absensi_pdf.go).
+	dinasDalam := r.FormValue("dinas_dalam") == "true"
 
-	if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
-		utils.Error(w, http.StatusForbidden, pesan)
-		return
+	if !dinasDalam {
+		if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
+			utils.Error(w, http.StatusForbidden, pesan)
+			return
+		}
 	}
 
 	terlambat := 0
@@ -513,20 +521,22 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		existing.LatMasuk = lat
 		existing.LngMasuk = lng
 		existing.KedipanMasukOk = kedipanOk
+		existing.DinasDalamMasuk = dinasDalam
 		if err := db.Save(&existing).Error; err != nil {
 			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan absen masuk: "+err.Error())
 			return
 		}
 	} else {
 		existing = models.Absensi{
-			IDPegawai:      *claims.IDPegawai,
-			Tanggal:        today,
-			JamMasuk:       &jamMasuk,
-			TerlambatMenit: terlambat,
-			FotoMasuk:      fotoBytes,
-			LatMasuk:       lat,
-			LngMasuk:       lng,
-			KedipanMasukOk: kedipanOk,
+			IDPegawai:       *claims.IDPegawai,
+			Tanggal:         today,
+			JamMasuk:        &jamMasuk,
+			TerlambatMenit:  terlambat,
+			FotoMasuk:       fotoBytes,
+			LatMasuk:        lat,
+			LngMasuk:        lng,
+			KedipanMasukOk:  kedipanOk,
+			DinasDalamMasuk: dinasDalam,
 		}
 		if err := db.Create(&existing).Error; err != nil {
 			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan absen masuk: "+err.Error())
@@ -535,6 +545,9 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	msg := "absen masuk berhasil dicatat"
+	if dinasDalam {
+		msg += " (Dinas Dalam)"
+	}
 	if terlambat > 0 {
 		msg += fmt.Sprintf(" (terlambat %d menit)", terlambat)
 	}
@@ -631,10 +644,14 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	lat := parseFloatForm(r, "lat")
 	lng := parseFloatForm(r, "lng")
 	akurasi := parseFloatForm(r, "accuracy")
+	// dinas_dalam: lihat komentar yang sama pada absenMasuk.
+	dinasDalam := r.FormValue("dinas_dalam") == "true"
 
-	if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
-		utils.Error(w, http.StatusForbidden, pesan)
-		return
+	if !dinasDalam {
+		if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
+			utils.Error(w, http.StatusForbidden, pesan)
+			return
+		}
 	}
 
 	jamPulang := now
@@ -646,12 +663,16 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	existing.LatPulang = lat
 	existing.LngPulang = lng
 	existing.KedipanPulangOk = kedipanOk
+	existing.DinasDalamPulang = dinasDalam
 	if err := db.Save(&existing).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan absen pulang: "+err.Error())
 		return
 	}
 
 	msg := "absen pulang berhasil dicatat"
+	if dinasDalam {
+		msg += " (Dinas Dalam)"
+	}
 	if !kedipanOk {
 		msg += " -- peringatan: kedipan mata tidak terdeteksi pada foto, pastikan wajah terlihat jelas oleh kamera"
 	}

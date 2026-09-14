@@ -13,6 +13,7 @@ import DatePicker from 'primevue/datepicker'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
+import Checkbox from 'primevue/checkbox'
 
 const toast = useToast()
 
@@ -267,6 +268,13 @@ const geoStatus = ref('')
 const locationChecking = ref(false)
 const locationBlocked = ref(false)
 const locationBlockedMsg = ref('')
+// dinasDalam: tombol "Dinas Dalam" pada dialog kamera -- kalau dicentang,
+// pegawai boleh absen dari mana saja (validasi radius kantor dilewati, lihat
+// cekLokasiKantor & absensiCekRadius di backend), tapi hari itu akan tercatat
+// sebagai "Dinas Dalam" pada rekap/riwayat, BUKAN "Hadir" (lihat backend
+// models.Absensi.IsDinasDalam). Berbeda dari surat tugas/berita acara yang
+// diinput admin -- ini laporan mandiri pegawai saat mengambil foto absen.
+const dinasDalam = ref(false)
 
 let mediaStream = null
 let noBlinkTimer = null
@@ -423,6 +431,7 @@ async function openCamera(mode) {
   coords.value = { lat: null, lng: null, accuracy: null }
   locationBlocked.value = false
   locationBlockedMsg.value = ''
+  dinasDalam.value = false
   cameraDialog.value = true
 
   const lolos = await cekLokasiKantor()
@@ -452,6 +461,24 @@ async function retryLocation() {
   }
   await startCameraStream()
 }
+
+// Kalau pegawai mencentang "Dinas Dalam" pada saat dialog sedang menampilkan
+// peringatan lokasi di luar radius (locationBlocked), langsung lewati
+// pemblokiran itu dan buka kameranya -- tidak perlu menekan tombol lain.
+// Validasi radius tetap dilewati juga di backend selama dinas_dalam=true
+// dikirim saat submit (lihat absenMasuk/absenPulang di absensi.go).
+watch(dinasDalam, async (aktif) => {
+  if (aktif && locationBlocked.value) {
+    locationBlocked.value = false
+    locationBlockedMsg.value = ''
+    try {
+      await blink.init()
+    } catch {
+      // lihat komentar di openCamera
+    }
+    await startCameraStream()
+  }
+})
 
 function stopCamera() {
   blink.stop()
@@ -514,6 +541,7 @@ function closeCameraDialog() {
   capturedBlob.value = null
   locationBlocked.value = false
   locationBlockedMsg.value = ''
+  dinasDalam.value = false
 }
 
 async function submitAbsen() {
@@ -526,6 +554,7 @@ async function submitAbsen() {
     if (coords.value.lng != null) fd.append('lng', String(coords.value.lng))
     if (coords.value.accuracy != null) fd.append('accuracy', String(coords.value.accuracy))
     fd.append('kedipan_ok', blink.blinkDetected.value ? 'true' : 'false')
+    fd.append('dinas_dalam', dinasDalam.value ? 'true' : 'false')
     const url = cameraMode.value === 'masuk' ? '/absensi/masuk' : '/absensi/pulang'
     const { data } = await http.post(url, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
@@ -642,6 +671,7 @@ async function downloadDokumen(item) {
           <div v-if="todayRow?.jam_masuk" class="absen-card-detail">
             Jam masuk: {{ formatJam(todayRow.jam_masuk) }}
             <span v-if="todayRow.terlambat_menit > 0" class="text-danger"> (terlambat {{ todayRow.terlambat_menit }} menit)</span>
+            <Tag v-if="todayRow.dinas_dalam_masuk" severity="info" value="Dinas Dalam" style="margin-left: 4px" />
           </div>
         </div>
         <div class="absen-card">
@@ -660,7 +690,10 @@ async function downloadDokumen(item) {
             :disabled="!canPulang"
             @click="openCamera('pulang')"
           />
-          <div v-if="todayRow?.jam_pulang" class="absen-card-detail">Jam pulang: {{ formatJam(todayRow.jam_pulang) }}</div>
+          <div v-if="todayRow?.jam_pulang" class="absen-card-detail">
+            Jam pulang: {{ formatJam(todayRow.jam_pulang) }}
+            <Tag v-if="todayRow.dinas_dalam_pulang" severity="info" value="Dinas Dalam" style="margin-left: 4px" />
+          </div>
         </div>
       </div>
 
@@ -672,6 +705,13 @@ async function downloadDokumen(item) {
         <DataTable :value="riwayat.absensi" :loading="loadingRiwayat" size="small" stripedRows responsiveLayout="scroll">
           <Column field="tanggal" header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
+          </Column>
+          <Column header="Status">
+            <template #body="{ data }">
+              <Tag v-if="data.dinas_dalam_masuk || data.dinas_dalam_pulang" severity="info" value="Dinas Dalam" />
+              <Tag v-else-if="data.jam_masuk" severity="success" value="Hadir" />
+              <span v-else>-</span>
+            </template>
           </Column>
           <Column header="Jam Masuk">
             <template #body="{ data }">
@@ -805,9 +845,18 @@ async function downloadDokumen(item) {
         <p class="text-muted" style="margin-top: 0.5rem">Memeriksa titik koordinat Anda...</p>
       </div>
 
-      <Message v-else-if="locationBlocked" severity="warn" :closable="false">{{ locationBlockedMsg }}</Message>
-
       <template v-else>
+        <div class="dinas-dalam-toggle">
+          <Checkbox v-model="dinasDalam" inputId="dinasDalamChk" binary />
+          <label for="dinasDalamChk">
+            Dinas Dalam <span class="text-muted">(boleh absen dari luar kantor -- rekap akan tertulis "Dinas Dalam", bukan "Hadir")</span>
+          </label>
+        </div>
+
+        <Message v-if="locationBlocked" severity="warn" :closable="false">{{ locationBlockedMsg }}</Message>
+      </template>
+
+      <template v-if="!locationChecking && !locationBlocked">
         <Message v-if="cameraError" severity="error" :closable="false">{{ cameraError }}</Message>
         <Message v-else-if="blink.modelsError.value" severity="warn" :closable="false">
           {{ blink.modelsError.value }} -- deteksi kedipan otomatis tidak tersedia, gunakan tombol "Ambil Foto" secara manual.
@@ -1016,6 +1065,21 @@ async function downloadDokumen(item) {
 .geo-status {
   text-align: center;
   margin-top: 0.5rem;
+}
+.dinas-dalam-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.dinas-dalam-toggle label {
+  font-size: 0.85rem;
+  line-height: 1.3;
+  cursor: pointer;
 }
 .field {
   margin-bottom: 1rem;
