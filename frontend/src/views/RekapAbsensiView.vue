@@ -322,16 +322,23 @@ watch([periodDate, selectedPegawai], () => loadRekap())
 watch(periodDate, () => loadDokumenAdmin())
 
 onMounted(async () => {
-  // kartu Pengaturan (jendela waktu, filter siapa yang boleh absen, titik
-  // koordinat kantor) HANYA untuk role administrator -- role admin tidak
-  // boleh melihat maupun mengubahnya (lihat v-if pada kartu Pengaturan di
-  // template, dan pembatasan yang sama di backend: PUT /absensi/pengaturan
-  // & GET /absensi/opsi-tempat-tugas sekarang administratorOnly). Makanya
-  // data-data ini tidak perlu dimuat sama sekali untuk role admin.
-  const tugasPengaturan = auth.isAdministrator
-    ? [loadPengaturan(), loadTempatTugasOptions(), loadJabatanOptions()]
-    : []
-  await Promise.all([loadPegawaiOptions(), ...tugasPengaturan])
+  // kartu Pengaturan (filter siapa yang boleh absen, titik koordinat
+  // kantor) HANYA untuk role administrator -- role admin/Admin Absensi
+  // tidak boleh melihat maupun mengubahnya (lihat v-if pada kartu
+  // Pengaturan di template, dan pembatasan yang sama di backend: PUT
+  // /absensi/pengaturan & GET /absensi/opsi-tempat-tugas sekarang
+  // administratorOnly), jadi loadTempatTugasOptions/loadJabatanOptions
+  // tetap hanya untuk administrator.
+  //
+  // Tapi loadPengaturan() (GET jendela waktu absen, termasuk
+  // jam_tutup_pulang) dimuat untuk SEMUA role yang bisa membuka halaman
+  // ini -- endpoint-nya memang terbuka untuk siapa saja yang login (lihat
+  // anyRole di GET /absensi/pengaturan), dan nilainya juga dipakai tabel
+  // Riwayat Absen untuk menentukan kapan jendela absen pulang sudah
+  // otomatis DITUTUP (lihat absenPulangSudahTutup), bukan cuma dipakai
+  // kartu Pengaturan.
+  const tugasAdminOnly = auth.isAdministrator ? [loadTempatTugasOptions(), loadJabatanOptions()] : []
+  await Promise.all([loadPegawaiOptions(), loadPengaturan(), ...tugasAdminOnly])
   await Promise.all([loadRekap(), loadDokumenAdmin()])
 })
 
@@ -339,8 +346,13 @@ onMounted(async () => {
 // maupun pulangnya) -- hari itu sudah dihitung terpisah lewat jumlah_dd
 // (lihat buildRekapItems di backend, yang menggabungkan Dinas Dalam mandiri
 // pegawai dengan dokumen Surat Tugas/Berita Acara yang diinput admin).
+// Juga TIDAK termasuk hari yang sudah berubah status jadi "Tidak Absen
+// Pulang" (lihat tidakAbsenPulang) -- hari itu dianggap belum lengkap
+// absennya, jadi tidak lagi dihitung sebagai Hadir penuh.
 function jumlahHadir(item) {
-  return item.absensi.filter((a) => a.jam_masuk && !a.dinas_dalam_masuk && !a.dinas_dalam_pulang).length
+  return item.absensi.filter(
+    (a) => a.jam_masuk && !a.dinas_dalam_masuk && !a.dinas_dalam_pulang && !tidakAbsenPulang(a),
+  ).length
 }
 function jumlahTerlambat(item) {
   return item.absensi.filter((a) => a.terlambat_menit > 0).length
@@ -435,6 +447,53 @@ function formatTanggal(key) {
 function formatJam(iso) {
   if (!iso) return '-'
   return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+}
+
+// ============================================================
+// tandai baris "Tidak Absen Pulang (TAP)": sudah absen masuk tapi sampai
+// jendela absen pulang DITUTUP tidak pernah absen pulang. Memakai jam
+// tutup yang sesungguhnya (pengaturan.jam_tutup_pulang, mis. "20:00")
+// dan zona waktu kantor (WITA / Asia/Makassar) -- sama persis dengan
+// aturan yang dipakai backend untuk menolak absen pulang setelah lewat
+// JamTutupPulang (lihat handlers/absensi.go) -- BUKAN sekadar "sudah
+// ganti hari kalender", supaya untuk hari ini pun begitu jendela absen
+// pulang tutup (mis. jam 20:00), pegawai yang belum absen pulang langsung
+// berubah statusnya, tidak perlu menunggu sampai besok.
+//
+// Dipakai zona waktu kantor (bukan zona waktu perangkat admin yang
+// sedang melihat rekap) supaya hasilnya konsisten di mana pun admin
+// mengakses halaman ini.
+const waktuKantorFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Makassar',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+function waktuKantorSekarang() {
+  const parts = Object.fromEntries(waktuKantorFmt.formatToParts(new Date()).map((p) => [p.type, p.value]))
+  return { tanggal: `${parts.year}-${parts.month}-${parts.day}`, jam: `${parts.hour}:${parts.minute}` }
+}
+function absenPulangSudahTutup(data) {
+  const tglAbsen = dateKey(data.tanggal)
+  const skrg = waktuKantorSekarang()
+  if (tglAbsen < skrg.tanggal) return true // sudah ganti hari -- jendela pasti sudah tutup
+  if (tglAbsen > skrg.tanggal) return false // tanggal masa depan, seharusnya tidak terjadi
+  // hari yang sama: baru dianggap tutup begitu jam sekarang melewati jam
+  // tutup pulang pada pengaturan. Kalau pengaturan belum termuat (kosong),
+  // jangan buru-buru menandai TAP.
+  if (!pengaturan.jam_tutup_pulang) return false
+  return skrg.jam >= pengaturan.jam_tutup_pulang
+}
+function tidakAbsenPulang(data) {
+  if (data.dinas_dalam_masuk || data.dinas_dalam_pulang) return false
+  if (!data.jam_masuk || data.jam_pulang) return false
+  return absenPulangSudahTutup(data)
+}
+function rowClassRiwayat(data) {
+  return { 'row-tap': tidakAbsenPulang(data) }
 }
 function formatKoordinat(row, jenis) {
   const lat = jenis === 'masuk' ? row.lat_masuk : row.lat_pulang
@@ -1122,13 +1181,20 @@ function kodeDokumen(jenis) {
         </div>
 
         <h4>Riwayat Absen</h4>
-        <DataTable :value="detailItem.absensi" size="small" stripedRows responsiveLayout="scroll">
+        <DataTable
+          :value="detailItem.absensi"
+          size="small"
+          stripedRows
+          responsiveLayout="scroll"
+          :rowClass="rowClassRiwayat"
+        >
           <Column header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
           </Column>
           <Column header="Status">
             <template #body="{ data }">
               <Tag v-if="data.dinas_dalam_masuk || data.dinas_dalam_pulang" severity="info" value="Dinas Dalam" />
+              <Tag v-else-if="tidakAbsenPulang(data)" severity="danger" value="Tidak Absen Pulang" />
               <Tag v-else-if="data.jam_masuk" severity="success" value="Hadir" />
               <span v-else>-</span>
             </template>
@@ -1145,6 +1211,7 @@ function kodeDokumen(jenis) {
           <Column header="Jam Pulang">
             <template #body="{ data }">
               <a v-if="data.jam_pulang" href="#" @click.prevent="lihatFoto(data, 'pulang')">{{ formatJam(data.jam_pulang) }}</a>
+              <strong v-else-if="tidakAbsenPulang(data)" class="tap-note" title="Tidak Absen Pulang">TAP</strong>
               <span v-else>-</span>
             </template>
           </Column>
@@ -1380,6 +1447,16 @@ function kodeDokumen(jenis) {
 }
 .foto-thumb:hover {
   border-color: #6366f1;
+}
+
+/* ---------- baris "Tidak Absen Pulang (TAP)" ---------- */
+:deep(.row-tap) > td {
+  background-color: #fce4ec !important;
+}
+.tap-note {
+  color: #c2185b;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 /* ---------- tautan titik koordinat ke Google Maps ---------- */
