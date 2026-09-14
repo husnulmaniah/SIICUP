@@ -297,17 +297,77 @@ function haversineMeter(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+// -- Pengambilan lokasi GPS: beberapa sampel, bukan satu kali tembak --
+// Versi sebelumnya hanya memanggil getCurrentPosition() SEKALI dan memakai
+// apa pun hasilnya. Ini rawan meleset jauh (pernah tercatat selisih
+// 500-800m padahal masih di kantor yang sama) karena chip GPS ponsel butuh
+// beberapa detik untuk "settle" -- pembacaan pertama begitu GPS baru mulai
+// mencari sinyal (apalagi kalau sebelumnya GPS mati/idle) sering jauh lebih
+// tidak akurat daripada pembacaan berikutnya beberapa detik kemudian,
+// walaupun browser tetap melaporkan angka accuracy yang kelihatan wajar.
+//
+// Sekarang dipakai watchPosition() untuk mengumpulkan beberapa sampel
+// selama jendela waktu singkat, lalu diambil sampel dengan accuracy
+// (radius kesalahan yang dilaporkan, dalam meter) TERKECIL -- itulah
+// pembacaan yang paling presisi. Berhenti lebih awal begitu sudah dapat
+// sampel yang cukup akurat, supaya pegawai tidak menunggu lebih lama dari
+// perlu; tetap dibatasi jendela waktu maksimum supaya tidak menunggu tanpa
+// henti kalau GPS memang tidak kunjung stabil (fallback: pakai sampel
+// terbaik yang berhasil didapat sejauh itu, atau null kalau tidak ada sama
+// sekali).
+const GPS_TARGET_ACCURACY_M = 15
+const GPS_MAX_WAIT_MS = 7000
+
 function getLocationOnce() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       resolve(null)
       return
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-    )
+    let best = null
+    let watchId = null
+    let settled = false
+    let hardTimer = null
+
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (hardTimer) clearTimeout(hardTimer)
+      if (watchId != null) navigator.geolocation.clearWatch(watchId)
+      resolve(best)
+    }
+
+    const onSample = (pos) => {
+      const sample = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }
+      if (!best || best.accuracy == null || (sample.accuracy != null && sample.accuracy < best.accuracy)) {
+        best = sample
+      }
+      // sudah cukup akurat -- tak perlu menunggu sampel lagi.
+      if (sample.accuracy != null && sample.accuracy <= GPS_TARGET_ACCURACY_M) {
+        finish()
+      }
+    }
+
+    const onError = (err) => {
+      // izin lokasi ditolak: menunggu lebih lama tidak akan membantu.
+      // Error lain (timeout sampel tunggal / posisi sesaat tak tersedia)
+      // diabaikan -- watchPosition akan mencoba lagi sendiri, dan tetap ada
+      // batas waktu total di bawah.
+      if (err && err.code === 1) finish()
+    }
+
+    try {
+      watchId = navigator.geolocation.watchPosition(onSample, onError, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: GPS_MAX_WAIT_MS,
+      })
+    } catch {
+      resolve(null)
+      return
+    }
+
+    hardTimer = setTimeout(finish, GPS_MAX_WAIT_MS)
   })
 }
 

@@ -81,6 +81,73 @@ function hapusLokasiKantor() {
   pengaturan.kantor_lng = null
 }
 
+// ------------------------------------------------------------
+// Tempel koordinat/link Google Maps -- alternatif dari "Ambil Lokasi Saat
+// Ini" (yang mensyaratkan administrator SEDANG BERADA di titik kantor
+// dengan GPS aktif). Dengan ini administrator bisa menentukan Titik Kantor
+// langsung dari Google Maps di komputer manapun: cari gedung kantornya di
+// Google Maps, klik kanan titik yang tepat pada gedung lalu pilih koordinat
+// yang muncul di menu (atau salin dari address bar), lalu tempel di sini.
+// Koordinat dari Google Maps ini juga lebih presisi & stabil dibanding GPS
+// ponsel (yang sering meleset 50-150m di dalam gedung), sehingga radius
+// yang wajar (mis. 100-200m) sudah cukup menjangkau SELURUH gedung kantor
+// walau titik yang dipilih bukan pas di tengah gedung.
+// ------------------------------------------------------------
+const tempelKoordinat = ref('')
+
+// parseKoordinatMaps mengekstrak (lat, lng) dari teks yang ditempel dari
+// Google Maps. Pola dicoba dari yang paling presisi ke paling umum, supaya
+// kalau sebuah link Google Maps memuat lebih dari satu pola sekaligus, yang
+// dipakai adalah titik PIN/tempat sebenarnya, bukan sekadar titik tengah
+// tampilan peta saat itu:
+//   1. "!3d<lat>!4d<lng>"  -- titik pin tempat (place) pada link ".../place/...@lat,lng,zoom/data=...!3d<lat>!4d<lng>..."
+//   2. "?q=<lat>,<lng>"    -- link berbagi lokasi ("maps?q=lat,lng")
+//   3. "@<lat>,<lng>"      -- titik tengah tampilan peta pada address bar ("maps/@lat,lng,zoomm")
+//   4. "<lat>, <lng>"      -- koordinat polos hasil klik-kanan > salin koordinat pada peta
+function parseKoordinatMaps(text) {
+  const s = (text || '').trim()
+  if (!s) return null
+
+  const cobaPola = (regex) => {
+    const m = s.match(regex)
+    if (!m) return null
+    const lat = Number(m[1])
+    const lng = Number(m[2])
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return null
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
+    return { lat, lng }
+  }
+
+  return (
+    cobaPola(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/) ||
+    cobaPola(/[?&]q=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/) ||
+    cobaPola(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/) ||
+    cobaPola(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/)
+  )
+}
+
+function terapkanTempelKoordinat() {
+  const hasil = parseKoordinatMaps(tempelKoordinat.value)
+  if (!hasil) {
+    toast.add({
+      severity: 'error',
+      summary: 'Format tidak dikenali',
+      detail: 'Tempel koordinat (contoh: "-1.976688, 121.335284") atau link Google Maps yang mengandung koordinat, lalu klik Terapkan.',
+      life: 6000,
+    })
+    return
+  }
+  pengaturan.kantor_lat = Number(hasil.lat.toFixed(6))
+  pengaturan.kantor_lng = Number(hasil.lng.toFixed(6))
+  tempelKoordinat.value = ''
+  toast.add({
+    severity: 'success',
+    summary: 'Koordinat diterapkan',
+    detail: `${pengaturan.kantor_lat}, ${pengaturan.kantor_lng} -- jangan lupa klik Simpan Pengaturan di bawah.`,
+    life: 5000,
+  })
+}
+
 const tempatTugasOptions = ref([])
 const jabatanOptions = ref([])
 
@@ -694,6 +761,22 @@ function kodeDokumen(jenis) {
 
             <div class="pengaturan-group">
               <div class="group-title">Titik Koordinat Kantor &amp; Radius Absen</div>
+
+              <label class="field-label">Tempel Koordinat / Link Google Maps</label>
+              <div class="kantor-tempel">
+                <InputText
+                  v-model="tempelKoordinat"
+                  placeholder='Contoh: -1.976688, 121.335284 (atau tempel link Google Maps)'
+                  style="flex: 1 1 220px"
+                  @keyup.enter="terapkanTempelKoordinat"
+                />
+                <Button label="Terapkan" icon="pi pi-map" size="small" @click="terapkanTempelKoordinat" />
+              </div>
+              <small class="text-muted" style="display: block; margin-bottom: 0.75rem">
+                Cari gedung kantor di Google Maps, klik-kanan pada titik yang tepat di gedung tersebut lalu pilih
+                koordinat yang muncul paling atas (atau salin link/koordinatnya), lalu tempel di atas ini.
+              </small>
+
               <div class="kantor-grid">
                 <InputNumber v-model="pengaturan.kantor_lat" placeholder="Lintang (lat)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
                 <InputNumber v-model="pengaturan.kantor_lng" placeholder="Bujur (lng)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
@@ -705,8 +788,10 @@ function kodeDokumen(jenis) {
               </div>
               <small class="text-muted">
                 Kalau diisi, kamera absen hanya akan terbuka jika pegawai berada dalam radius ini dari titik kantor.
-                Kosongkan (Hapus Titik Kantor) untuk menonaktifkan pembatasan lokasi. Gunakan "Ambil Lokasi Saat Ini"
-                saat Anda berada di titik kantor yang ingin dijadikan patokan.
+                Kosongkan (Hapus Titik Kantor) untuk menonaktifkan pembatasan lokasi. Radius sebaiknya cukup besar
+                (mis. 100-200m) supaya menjangkau SELURUH area gedung kantor, bukan hanya satu titik di dalamnya --
+                "Ambil Lokasi Saat Ini" hanya akurat kalau Anda sedang berada tepat di titik kantor yang dijadikan
+                patokan.
               </small>
             </div>
           </div>
@@ -1174,6 +1259,15 @@ function kodeDokumen(jenis) {
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-bottom: 1rem;
+}
+.kantor-tempel {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+.kantor-tempel :deep(.p-inputtext) {
+  min-width: 220px;
 }
 .kantor-grid {
   display: grid;

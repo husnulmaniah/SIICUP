@@ -18,17 +18,41 @@ import * as faceapi from '@vladmandic/face-api'
 // Model di-load SEKALI saja untuk seluruh sesi aplikasi (modelsLoadPromise
 // di-cache di level modul), supaya membuka menu Absen berkali-kali tidak
 // mengunduh ulang ~550KB model tiap kali.
-
-let modelsLoadPromise = null
-function loadModels() {
-  if (!modelsLoadPromise) {
-    modelsLoadPromise = Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-    ])
-  }
-  return modelsLoadPromise
+//
+// -- Ambang batas ADAPTIF (bukan nilai EAR mutlak tetap) --
+// Versi sebelumnya membandingkan EAR terhadap nilai mutlak tetap (mis. "mata
+// tertutup kalau EAR < 0.21"). Ini TIDAK cukup andal karena EAR mata terbuka
+// normal berbeda-beda antar pegawai (bentuk mata, sudut kamera, pakai
+// kacamata) dan antar kondisi cahaya (absen pulang sore/malam hari sering
+// lebih redup daripada absen masuk pagi) -- skala EAR ikut bergeser, bukan
+// cuma nilainya. Pegawai yang mata/kondisinya menghasilkan EAR terbuka lebih
+// rendah dari rata-rata (mis. 0.24) akan SELALU gagal terdeteksi berkedip
+// dengan ambang mutlak, walau kedipannya sebenarnya sama jelasnya.
+//
+// Sekarang dipakai baseline EAR "mata terbuka" yang dihitung & diperbarui
+// SENDIRI selama sesi berjalan (exponential moving average, hanya diperbarui
+// saat mata dianggap terbuka supaya baseline tidak ikut turun saat berkedip),
+// lalu kedipan dideteksi relatif terhadap baseline itu (EAR turun ke bawah
+// ~72% baseline = tertutup, naik lagi ke atas ~85% baseline = terbuka).
+// Dengan begitu ambang batas otomatis menyesuaikan diri ke wajah & kondisi
+// cahaya pegawai yang sedang absen saat itu.
+const EAR_OPEN_RATIO = 0.85
+const EAR_CLOSED_RATIO = 0.72
+// Klem baseline ke rentang EAR mata terbuka yang wajar secara umum, supaya
+// kalau frame pertama kebetulan menangkap mata separuh tertutup/silau,
+// baseline tidak jadi terlalu ekstrem (yang akan membuat blink mustahil
+// terdeteksi, atau sebaliknya terlalu sensitif).
+const EAR_BASELINE_MIN = 0.16
+const EAR_BASELINE_MAX = 0.42
+const BASELINE_EMA_ALPHA = 0.12
+function clampBaseline(v) {
+  return Math.min(EAR_BASELINE_MAX, Math.max(EAR_BASELINE_MIN, v))
 }
+
+// Kedipan wajar berlangsung < 400ms, tapi deteksi kita hanya sampling tiap
+// ~200ms jadi kita beri toleransi jendela waktu tertutup->terbuka sampai 1.5s
+// (mencakup jeda antar-sampling + kedipan yang agak lambat).
+const MAX_CLOSED_MS = 1500
 
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y)
@@ -42,16 +66,16 @@ function eyeAspectRatio(eye) {
   return (dist(p2, p6) + dist(p3, p5)) / (2 * dist(p1, p4))
 }
 
-// Ambang batas EAR -- nilai umum yang dipakai pada implementasi blink
-// detection berbasis EAR (mata dianggap "tertutup" di bawah ~0.21, "terbuka
-// normal" di atas ~0.26; ada gap di antaranya supaya tidak flip-flop akibat
-// noise deteksi).
-const EAR_CLOSED = 0.21
-const EAR_OPEN = 0.26
-// Kedipan wajar berlangsung < 400ms, tapi deteksi kita hanya sampling tiap
-// ~200ms jadi kita beri toleransi jendela waktu tertutup->terbuka sampai 1.5s
-// (mencakup jeda antar-sampling + kedipan yang agak lambat).
-const MAX_CLOSED_MS = 1500
+let modelsLoadPromise = null
+function loadModels() {
+  if (!modelsLoadPromise) {
+    modelsLoadPromise = Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+    ])
+  }
+  return modelsLoadPromise
+}
 
 export function useBlinkLiveness() {
   const modelsReady = ref(false)
@@ -65,6 +89,12 @@ export function useBlinkLiveness() {
   let wasClosed = false
   let closedSince = 0
   let ticking = false
+  let baselineEar = null
+  // earHistory: 1 sampel EAR mentah sebelumnya, dipakai untuk smoothing
+  // sederhana (rata-rata 2 sampel) supaya noise deteksi landmark satu frame
+  // (lebih sering terjadi di cahaya redup) tidak salah terbaca sebagai
+  // kedipan atau, sebaliknya, menutupi kedipan yang sesungguhnya.
+  let prevRawEar = null
 
   async function init() {
     if (modelsReady.value) return
@@ -83,14 +113,20 @@ export function useBlinkLiveness() {
     currentEar.value = null
     wasClosed = false
     closedSince = 0
+    baselineEar = null
+    prevRawEar = null
   }
 
   async function tick() {
     if (ticking || !videoEl || videoEl.readyState < 2) return
     ticking = true
     try {
+      // inputSize 320 (naik dari 224) & scoreThreshold sedikit diturunkan
+      // supaya wajah tetap terdeteksi pada kondisi cahaya lebih redup (mis.
+      // absen pulang sore/malam hari) -- masih cukup cepat untuk sampling
+      // tiap 200ms pada HP kelas menengah.
       const result = await faceapi
-        .detectSingleFace(videoEl, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+        .detectSingleFace(videoEl, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
         .withFaceLandmarks(true)
       if (!result) {
         faceDetected.value = false
@@ -100,21 +136,42 @@ export function useBlinkLiveness() {
       faceDetected.value = true
       const leftEar = eyeAspectRatio(result.landmarks.getLeftEye())
       const rightEar = eyeAspectRatio(result.landmarks.getRightEye())
-      const ear = (leftEar + rightEar) / 2
+      const rawEar = (leftEar + rightEar) / 2
+      // smoothing 2-sampel supaya noise per-frame tidak memicu/menutupi
+      // kedipan secara keliru.
+      const ear = prevRawEar == null ? rawEar : (rawEar + prevRawEar) / 2
+      prevRawEar = rawEar
       currentEar.value = ear
 
+      if (baselineEar == null) {
+        // Bootstrap: anggap frame pertama yang berhasil terdeteksi adalah
+        // kondisi mata terbuka normal (paling mungkin benar -- pegawai baru
+        // menghadapkan wajah ke kamera, belum sempat berkedip).
+        baselineEar = clampBaseline(ear)
+      }
+
       const now = Date.now()
-      if (ear < EAR_CLOSED) {
+      const openThreshold = baselineEar * EAR_OPEN_RATIO
+      const closedThreshold = baselineEar * EAR_CLOSED_RATIO
+
+      if (ear <= closedThreshold) {
         if (!wasClosed) {
           wasClosed = true
           closedSince = now
         }
-      } else if (ear > EAR_OPEN) {
+      } else if (ear >= openThreshold) {
         if (wasClosed && now - closedSince < MAX_CLOSED_MS) {
           blinkDetected.value = true
         }
         wasClosed = false
+        // Baseline hanya diperbarui saat mata dianggap terbuka (bukan saat
+        // tertutup/di zona abu-abu di antaranya), supaya baseline tidak
+        // ikut turun akibat kedipan itu sendiri, dan tetap mengikuti
+        // perubahan cahaya/posisi yang lambat selama sesi absen.
+        baselineEar = clampBaseline(baselineEar * (1 - BASELINE_EMA_ALPHA) + ear * BASELINE_EMA_ALPHA)
       }
+      // ear di antara closedThreshold..openThreshold: zona abu-abu (transisi
+      // menutup/membuka) -- sengaja tidak mengubah status apa pun di sini.
     } catch {
       // deteksi gagal sesaat (mis. frame video belum benar-benar siap) --
       // abaikan, akan dicoba lagi pada tick berikutnya.
