@@ -138,7 +138,21 @@ func distanceMeters(lat1, lng1, lat2, lng2 float64) float64 {
 // diberikan karena ketidakpastian GPS (lihat absensiCekRadius) -- tanpa
 // batas ini, pegawai dengan lokasi berbasis menara seluler (akurasi bisa
 // ribuan meter) bisa lolos geofence dari lokasi manapun.
-const toleransiAkurasiMaksimal = 100.0
+//
+// Nilai ini SENGAJA diturunkan dari 100m ke 50m. Sebelumnya, administrator
+// yang mengatur radius kecil (mis. 50m, sesuai luas gedung kantor
+// sebenarnya) tetap mendapati toleransi ini menambah hingga 100m ekstra --
+// sehingga absen tetap diterima sampai +-150m dari titik kantor. Ini memaksa
+// administrator memperbesar radius (mis. jadi 350m) supaya pegawai yang
+// sungguh di kantor tidak tertolak, padahal efeknya, digabung toleransi,
+// absen jadi bisa dilakukan dari ratusan meter (bisa sampai ke rumah
+// terdekat) -- toleransi seharusnya HANYA menutupi noise GPS, bukan dipakai
+// mengompensasi radius yang sengaja diperbesar. Sejak pengambilan GPS di
+// frontend memakai beberapa sampel dan mengambil accuracy terbaik (lihat
+// getLocationOnce di AbsensiView.vue), pembacaan yang sampai ke sini
+// biasanya sudah cukup presisi sehingga toleransi maksimal tidak perlu
+// sebesar dulu.
+const toleransiAkurasiMaksimal = 50.0
 
 // toleransiAkurasiMinimum adalah batas BAWAH toleransi -- dipakai walau
 // accuracy yang dilaporkan perangkat sangat kecil (mis. 13m) atau tidak

@@ -194,6 +194,27 @@ const pengaturanValid = computed(
     jamValid(pengaturan.jam_tutup_pulang),
 )
 
+// -- Perkiraan jangkauan absen efektif --
+// Radius yang diatur di sini BUKAN satu-satunya jarak yang dipakai untuk
+// menerima/menolak absen -- backend & AbsensiView.vue selalu menambahkan
+// toleransi otomatis (30-50m) di atas radius ini untuk menutupi noise GPS
+// (lihat toleransiAkurasiMinimum/Maksimal di backend/handlers/absensi.go).
+// Jadi radius 50m sebenarnya bisa menerima absen dari sekitar 80-100m, radius
+// 350m bisa menerima dari 380-400m (sudah menjangkau luar area kantor,
+// termasuk kemungkinan rumah pegawai terdekat). Ditampilkan di sini supaya
+// administrator TIDAK memperbesar radius hanya untuk mengakali GPS yang
+// kurang akurat -- toleransi itu sudah otomatis, radius cukup diisi sesuai
+// luas gedung/halaman kantor sebenarnya (bisa diukur pakai fitur "Ukur
+// jarak" di Google Maps).
+const TOLERANSI_MIN = 30
+const TOLERANSI_MAKS = 50
+const jangkauanEfektif = computed(() => {
+  const r = Number(pengaturan.radius_meter) || 0
+  if (r <= 0) return null
+  return { min: r + TOLERANSI_MIN, maks: r + TOLERANSI_MAKS }
+})
+const radiusTerlaluBesar = computed(() => Number(pengaturan.radius_meter) > 150)
+
 async function savePengaturan() {
   if (!pengaturanValid.value) {
     toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Semua jam wajib berformat HH:MM (contoh: 07:30)', life: 4000 })
@@ -845,13 +866,27 @@ function kodeDokumen(jenis) {
                 <Button label="Ambil Lokasi Saat Ini" icon="pi pi-map-marker" size="small" outlined :loading="locatingKantor" @click="ambilLokasiKantor" />
                 <Button v-if="pengaturan.kantor_lat != null" label="Hapus Titik Kantor" icon="pi pi-times" size="small" text severity="danger" @click="hapusLokasiKantor" />
               </div>
-              <small class="text-muted">
+              <small class="text-muted" style="display: block; margin-bottom: 0.5rem">
                 Kalau diisi, kamera absen hanya akan terbuka jika pegawai berada dalam radius ini dari titik kantor.
-                Kosongkan (Hapus Titik Kantor) untuk menonaktifkan pembatasan lokasi. Radius sebaiknya cukup besar
-                (mis. 100-200m) supaya menjangkau SELURUH area gedung kantor, bukan hanya satu titik di dalamnya --
-                "Ambil Lokasi Saat Ini" hanya akurat kalau Anda sedang berada tepat di titik kantor yang dijadikan
-                patokan.
+                Kosongkan (Hapus Titik Kantor) untuk menonaktifkan pembatasan lokasi. Isi radius sesuai luas gedung/
+                halaman kantor SEBENARNYA (mis. 50-100m -- bisa diukur pakai fitur "Ukur jarak" di Google Maps),
+                bukan dibesar-besarkan untuk mengakali GPS yang kurang akurat -- sistem SUDAH otomatis menambah
+                toleransi {{ TOLERANSI_MIN }}-{{ TOLERANSI_MAKS }}m di atas radius ini untuk noise GPS, jadi radius
+                tidak perlu diperbesar lagi untuk alasan itu. "Ambil Lokasi Saat Ini" hanya akurat kalau Anda sedang
+                berada tepat di titik kantor yang dijadikan patokan.
               </small>
+              <small v-if="jangkauanEfektif" class="text-muted" style="display: block">
+                Dengan radius {{ pengaturan.radius_meter }}m, absen akan diterima dari jarak sekitar
+                <strong>{{ jangkauanEfektif.min }}-{{ jangkauanEfektif.maks }} meter</strong> dari titik kantor
+                (radius + toleransi akurasi GPS otomatis).
+              </small>
+              <Message v-if="radiusTerlaluBesar" severity="warn" :closable="false" style="margin-top: 0.5rem">
+                Radius {{ pengaturan.radius_meter }}m tergolong besar -- jangkauan efektifnya bisa sampai
+                {{ jangkauanEfektif?.maks }}m dari titik kantor, kemungkinan sudah menjangkau luar area kantor
+                (termasuk rumah pegawai yang berdekatan). Kalau tujuannya supaya pegawai di kantor tidak tertolak
+                karena GPS kurang akurat, itu sudah ditangani otomatis oleh toleransi di atas -- coba kecilkan radius
+                ini agar sesuai luas kantor sebenarnya.
+              </Message>
             </div>
           </div>
 
