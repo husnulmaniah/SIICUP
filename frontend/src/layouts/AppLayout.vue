@@ -231,7 +231,10 @@ const menuLainnyaAktif = computed(
     <aside class="sidebar">
       <div class="sidebar-brand">
         <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="sidebar-logo" />
-        <span>SIMADU</span>
+        <div class="sidebar-brand-text">
+          <span class="sidebar-brand-title">SIMADU</span>
+          <span class="sidebar-brand-subtitle">Sistem Informasi Manajemen Administrasi Dinas Utama</span>
+        </div>
       </div>
       <nav class="sidebar-nav">
         <template v-for="(section, si) in navSections" :key="si">
@@ -254,45 +257,50 @@ const menuLainnyaAktif = computed(
       <header class="topbar">
         <div class="topbar-brand">
           <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="topbar-logo" />
-          <span>SIMADU</span>
+          <div class="topbar-brand-text">
+            <span class="topbar-brand-title">SIMADU</span>
+            <span class="topbar-brand-subtitle">Sistem Informasi Manajemen Administrasi Dinas Utama</span>
+          </div>
         </div>
         <div class="topbar-title">{{ roleLabel }}</div>
 
-        <!-- Lonceng notifikasi: khusus administrator & admin (Admin
-             Kepegawaian) -- menampilkan jumlah Pengajuan Cuti + Perubahan
-             Data Pegawai yang baru masuk & belum diproses. -->
-        <button v-if="auth.canManageMaster" type="button" class="notif-bell" @click="toggleNotifPanel">
-          <i class="pi pi-bell"></i>
-          <Badge v-if="notifData.total > 0" :value="notifData.total > 99 ? '99+' : notifData.total" severity="danger" class="notif-badge" />
-        </button>
-        <Popover v-if="auth.canManageMaster" ref="notifPanel" class="notif-popover">
-          <div class="notif-header">
-            <span>Notifikasi</span>
-            <span class="notif-header-count">{{ notifData.total }} menunggu diproses</span>
-          </div>
-          <div v-if="notifLoading && !notifData.items.length" class="notif-empty">Memuat...</div>
-          <div v-else-if="!notifData.items.length" class="notif-empty">Tidak ada pengajuan baru.</div>
-          <div v-else class="notif-list">
-            <a v-for="item in notifData.items" :key="item.type + '-' + item.id" class="notif-item" @click="bukaNotifikasi(item)">
-              <i :class="notifIcon(item.type)"></i>
-              <div class="notif-item-body">
-                <div class="notif-item-title">
-                  {{ notifTitle(item.type) }}
+        <div class="topbar-right">
+          <!-- Lonceng notifikasi: khusus administrator & admin (Admin
+               Kepegawaian) -- menampilkan jumlah Pengajuan Cuti + Perubahan
+               Data Pegawai yang baru masuk & belum diproses. -->
+          <button v-if="auth.canManageMaster" type="button" class="notif-bell" @click="toggleNotifPanel">
+            <i class="pi pi-bell"></i>
+            <Badge v-if="notifData.total > 0" :value="notifData.total > 99 ? '99+' : notifData.total" severity="danger" class="notif-badge" />
+          </button>
+          <Popover v-if="auth.canManageMaster" ref="notifPanel" class="notif-popover">
+            <div class="notif-header">
+              <span>Notifikasi</span>
+              <span class="notif-header-count">{{ notifData.total }} menunggu diproses</span>
+            </div>
+            <div v-if="notifLoading && !notifData.items.length" class="notif-empty">Memuat...</div>
+            <div v-else-if="!notifData.items.length" class="notif-empty">Tidak ada pengajuan baru.</div>
+            <div v-else class="notif-list">
+              <a v-for="item in notifData.items" :key="item.type + '-' + item.id" class="notif-item" @click="bukaNotifikasi(item)">
+                <i :class="notifIcon(item.type)"></i>
+                <div class="notif-item-body">
+                  <div class="notif-item-title">
+                    {{ notifTitle(item.type) }}
+                  </div>
+                  <div class="notif-item-desc">{{ item.nama }} — {{ item.keterangan }}</div>
+                  <div class="notif-item-time">{{ waktuRelatif(item.created_at) }}</div>
                 </div>
-                <div class="notif-item-desc">{{ item.nama }} — {{ item.keterangan }}</div>
-                <div class="notif-item-time">{{ waktuRelatif(item.created_at) }}</div>
-              </div>
-            </a>
-          </div>
-        </Popover>
+              </a>
+            </div>
+          </Popover>
 
-        <div class="topbar-user" @click="userMenu.toggle($event)">
-          <Avatar v-if="fotoProfilUrl" :image="fotoProfilUrl" shape="circle" />
-          <Avatar v-else :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #0d9488; color: #fff" />
-          <span class="user-name">{{ auth.user?.nama }}</span>
-          <i class="pi pi-angle-down"></i>
+          <div class="topbar-user" @click="userMenu.toggle($event)">
+            <Avatar v-if="fotoProfilUrl" :image="fotoProfilUrl" shape="circle" />
+            <Avatar v-else :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #0d9488; color: #fff" />
+            <span class="user-name">{{ auth.user?.nama }}</span>
+            <i class="pi pi-angle-down"></i>
+          </div>
+          <Menu ref="userMenu" :model="userMenuItems" :popup="true" />
         </div>
-        <Menu ref="userMenu" :model="userMenuItems" :popup="true" />
       </header>
 
       <main class="content-area">
@@ -378,8 +386,6 @@ const menuLainnyaAktif = computed(
   align-items: center;
   gap: 0.6rem;
   padding: 1.15rem 1.25rem;
-  font-weight: 700;
-  font-size: 1.02rem;
   color: #fff;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -390,6 +396,26 @@ const menuLainnyaAktif = computed(
   max-width: 2.6rem;
   flex-shrink: 0;
   object-fit: contain;
+}
+
+.sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-brand-title {
+  font-weight: 700;
+  font-size: 1.02rem;
+  line-height: 1.2;
+}
+
+.sidebar-brand-subtitle {
+  font-size: 0.62rem;
+  font-weight: 400;
+  color: #94a3b8;
+  line-height: 1.25;
+  margin-top: 0.15rem;
 }
 
 .sidebar-nav {
@@ -437,13 +463,13 @@ const menuLainnyaAktif = computed(
 }
 
 .topbar {
-  height: 60px;
+  min-height: 60px;
   background: #fff;
   border-bottom: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0 1.25rem;
+  padding: 0.45rem 1.25rem;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -454,9 +480,7 @@ const menuLainnyaAktif = computed(
   display: none;
   align-items: center;
   gap: 0.5rem;
-  font-weight: 700;
-  color: #111827;
-  font-size: 0.98rem;
+  min-width: 0;
 }
 
 .topbar-logo {
@@ -467,9 +491,42 @@ const menuLainnyaAktif = computed(
   object-fit: contain;
 }
 
+.topbar-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar-brand-title {
+  font-weight: 700;
+  color: #111827;
+  font-size: 0.98rem;
+  line-height: 1.15;
+}
+
+.topbar-brand-subtitle {
+  font-size: 0.56rem;
+  font-weight: 400;
+  color: #64748b;
+  line-height: 1.2;
+  margin-top: 0.1rem;
+}
+
 .topbar-title {
   font-weight: 600;
   color: #374151;
+}
+
+/* grup kanan topbar (lonceng notifikasi + profil/logout) -- margin-left:
+   auto di sini (bukan di elemen masing-masing) supaya grup ini SELALU
+   menempel di ujung kanan topbar, baik ada lonceng notifikasi (admin/
+   administrator) maupun tidak (pegawai/atasan), dan konsisten di semua
+   ukuran layar (HP, tablet, laptop). */
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .topbar-user {
@@ -495,7 +552,6 @@ const menuLainnyaAktif = computed(
    Lonceng notifikasi (administrator & admin) di topbar
    ============================================================ */
 .notif-bell {
-  margin-left: auto;
   position: relative;
   display: inline-flex;
   align-items: center;

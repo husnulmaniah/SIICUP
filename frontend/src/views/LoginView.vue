@@ -44,7 +44,7 @@ async function submit() {
           <div class="login-kepanjangan">Sistem Informasi Manajemen Administrasi Dinas Utama</div>
         </div>
       </div>
-      <p class="login-subtitle">Masuk untuk mengelola pengajuan cuti</p>
+      <p class="login-subtitle">Masuk untuk mengelola administrasi dinas utama</p>
 
       <Message v-if="errorMsg" severity="error" :closable="false" style="margin-bottom: 1rem">{{ errorMsg }}</Message>
 
