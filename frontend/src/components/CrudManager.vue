@@ -81,17 +81,12 @@ const docUploading = ref(false)
 const dokumenSlots = [
   { jenis: 'sk-terakhir', field: 'sk_terakhir_nama', label: 'SK Terakhir' },
   { jenis: 'sk-kgb', field: 'sk_kgb_nama', label: 'SK Kenaikan Gaji Berkala' },
+  // SK Pensiun SENGAJA selalu ditampilkan (tidak digembok di belakang status
+  // "Pensiun" seperti sebelumnya) -- justru upload berkas inilah yang
+  // memicu status pegawai berubah otomatis jadi "Pensiun" di backend (lihat
+  // uploadDokumenPegawai di handlers/pegawai.go), bukan sebaliknya.
   { jenis: 'sk-pensiun', field: 'sk_pensiun_nama', label: 'SK Pensiun' },
 ]
-
-function isPensiun(item) {
-  const s = item?.status?.status || ''
-  return s.toLowerCase().includes('pensiun')
-}
-
-function visibleDokumenSlots(item) {
-  return dokumenSlots.filter((d) => d.jenis !== 'sk-pensiun' || isPensiun(item))
-}
 
 function docFilename(jenis) {
   const slot = dokumenSlots.find((d) => d.jenis === jenis)
@@ -133,6 +128,78 @@ async function openDetail(row) {
     detailLoading.value = false
   }
   loadDetailJatahCuti(row.id)
+  loadDetailFoto(detailItem.value)
+}
+
+// ---- foto profil pegawai (di dialog Detail Pegawai) ----
+// Administrator/admin boleh mengelola foto profil pegawai APA SAJA dari
+// sini (mis. menyiapkan foto pegawai baru) -- endpoint backend yang sama
+// (/pegawai/{id}/foto) juga dipakai pegawai sendiri lewat ProfilSayaView.vue
+// untuk mengganti foto profilnya sendiri kapan saja tanpa persetujuan.
+const detailFotoUrl = ref('')
+const fotoUploading = ref(false)
+const fotoFileInputRef = ref(null)
+
+function closeDetailFoto() {
+  if (detailFotoUrl.value) {
+    window.URL.revokeObjectURL(detailFotoUrl.value)
+    detailFotoUrl.value = ''
+  }
+}
+
+async function loadDetailFoto(item) {
+  closeDetailFoto()
+  if (!item?.foto_profil_nama) return
+  try {
+    const res = await http.get(`/pegawai/${item.id}/foto`, { responseType: 'blob' })
+    detailFotoUrl.value = window.URL.createObjectURL(res.data)
+  } catch (e) {
+    detailFotoUrl.value = ''
+  }
+}
+
+function pickFotoFile() {
+  fotoFileInputRef.value?.click()
+}
+
+async function onFotoFileChosen(e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file || !detailItem.value) return
+  fotoUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    await http.post(`/pegawai/${detailItem.value.id}/foto`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    detailItem.value.foto_profil_nama = file.name
+    await loadDetailFoto(detailItem.value)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Foto profil berhasil diperbarui', life: 3000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal upload foto', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    fotoUploading.value = false
+  }
+}
+
+function confirmRemoveFoto() {
+  confirm.require({
+    message: 'Hapus foto profil pegawai ini?',
+    header: 'Konfirmasi Hapus Foto',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await http.delete(`/pegawai/${detailItem.value.id}/foto`)
+        detailItem.value.foto_profil_nama = ''
+        await loadDetailFoto(detailItem.value)
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Foto profil berhasil dihapus', life: 3000 })
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      }
+    },
+  })
 }
 
 function pickDocFile(jenis) {
@@ -154,6 +221,20 @@ async function onDocFileChosen(e) {
     })
     const slot = dokumenSlots.find((d) => d.jenis === jenis)
     if (slot) detailItem.value[slot.field] = data.data.nama_file
+    if (jenis === 'sk-pensiun') {
+      // Upload SK Pensiun otomatis mengubah status pegawai jadi "Pensiun" di
+      // backend (lihat uploadDokumenPegawai) -- muat ulang detail & tabel
+      // supaya tag Status di dialog ini dan baris tabel di belakangnya ikut
+      // ter-update tanpa perlu tutup-buka dialog / reload halaman.
+      try {
+        const refreshed = await http.get(`/pegawai/${detailItem.value.id}`)
+        detailItem.value = refreshed.data.data
+      } catch {
+        // biarkan detailItem apa adanya kalau gagal muat ulang -- upload
+        // dokumennya sendiri sudah berhasil (toast sukses tetap tampil)
+      }
+      fetchList()
+    }
     toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Dokumen berhasil diupload', life: 3000 })
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal upload', detail: e.response?.data?.message || e.message, life: 4000 })
@@ -791,11 +872,42 @@ const canManage = computed(() => true) // route guard already restricts page acc
 
     <!-- Detail Pegawai + Dokumen dialog -->
     <input ref="docFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onDocFileChosen" />
-    <Dialog v-model:visible="detailDialogVisible" modal header="Detail Pegawai" :style="{ width: '40rem', maxWidth: '95vw' }">
+    <input ref="fotoFileInputRef" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onFotoFileChosen" />
+    <Dialog
+      v-model:visible="detailDialogVisible"
+      modal
+      header="Detail Pegawai"
+      :style="{ width: '40rem', maxWidth: '95vw' }"
+      @hide="closeDetailFoto"
+    >
       <div v-if="detailLoading" style="display: flex; justify-content: center; padding: 2rem">
         <ProgressSpinner style="width: 38px; height: 38px" />
       </div>
       <template v-else-if="detailItem">
+        <div class="foto-profil-row">
+          <div class="foto-profil-avatar">
+            <img v-if="detailFotoUrl" :src="detailFotoUrl" alt="Foto profil" />
+            <i v-else class="pi pi-user"></i>
+          </div>
+          <div>
+            <div style="font-weight: 600; margin-bottom: 0.4rem">Foto Profil</div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+              <Button
+                :label="detailItem.foto_profil_nama ? 'Ganti Foto' : 'Upload Foto'"
+                icon="pi pi-upload"
+                size="small"
+                outlined
+                :loading="fotoUploading"
+                @click="pickFotoFile"
+              />
+              <Button v-if="detailItem.foto_profil_nama" label="Hapus" icon="pi pi-trash" size="small" severity="danger" text @click="confirmRemoveFoto" />
+            </div>
+            <small style="display: block; margin-top: 0.35rem; color: var(--p-text-muted-color)">
+              Foto ini juga akan muncul di akun pegawai ybs. Pegawai sendiri bisa menggantinya kapan saja lewat Profil Saya, tanpa persetujuan.
+            </small>
+          </div>
+        </div>
+
         <div class="detail-grid">
           <div><span class="detail-label">NIP</span><div>{{ detailItem.nip || '-' }}</div></div>
           <div><span class="detail-label">Nama</span><div>{{ detailItem.nama || '-' }}</div></div>
@@ -811,7 +923,7 @@ const canManage = computed(() => true) // route guard already restricts page acc
         </div>
 
         <h4 style="margin: 1.5rem 0 0.75rem 0">Dokumen</h4>
-        <div v-for="slot in visibleDokumenSlots(detailItem)" :key="slot.jenis" class="doc-row">
+        <div v-for="slot in dokumenSlots" :key="slot.jenis" class="doc-row">
           <div class="doc-info">
             <div class="doc-label">{{ slot.label }}</div>
             <div class="doc-filename">{{ docFilename(slot.jenis) || 'Belum ada dokumen' }}</div>
@@ -829,6 +941,9 @@ const canManage = computed(() => true) // route guard already restricts page acc
             <Button v-if="docFilename(slot.jenis)" icon="pi pi-trash" size="small" severity="danger" text @click="confirmRemoveDokumen(slot.jenis, slot.label)" />
           </div>
         </div>
+        <small style="display: block; margin-top: 0.4rem; color: var(--p-text-muted-color)">
+          Meng-upload SK Pensiun akan otomatis mengubah Status pegawai ini menjadi "Pensiun".
+        </small>
 
         <h4 style="margin: 1.5rem 0 0.75rem 0">Jatah Cuti Tahunan</h4>
         <div v-if="detailJatahCutiLoading" style="display: flex; justify-content: center; padding: 1rem">
@@ -871,6 +986,37 @@ const canManage = computed(() => true) // route guard already restricts page acc
 </template>
 
 <style scoped>
+.foto-profil-row {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.foto-profil-avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: var(--p-surface-100, #f1f5f9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.foto-profil-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.foto-profil-avatar i {
+  font-size: 1.9rem;
+  color: var(--p-text-muted-color, #94a3b8);
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

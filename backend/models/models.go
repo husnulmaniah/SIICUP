@@ -113,6 +113,16 @@ type Pegawai struct {
 	SkKgbFile      []byte `json:"-" gorm:"column:sk_kgb_file;type:bytea"`
 	SkPensiunNama  string `json:"sk_pensiun_nama" gorm:"column:sk_pensiun_nama;size:255"`
 	SkPensiunFile  []byte `json:"-" gorm:"column:sk_pensiun_file;type:bytea"`
+
+	// FotoProfil: foto profil pegawai, ditampilkan di avatar topbar &
+	// halaman Profil Saya masing-masing pegawai (lihat AppLayout.vue,
+	// ProfilSayaView.vue). BERBEDA dari dokumen SK di atas -- pegawai boleh
+	// mengganti/menghapus foto profilnya SENDIRI kapan saja lewat endpoint
+	// khusus (lihat uploadFotoProfilPegawai di handlers/pegawai.go), TIDAK
+	// lewat alur pengajuan Perubahan Data Pegawai yang butuh persetujuan
+	// administrator/admin.
+	FotoProfilNama string `json:"foto_profil_nama" gorm:"column:foto_profil_nama;size:255"`
+	FotoProfilFile []byte `json:"-" gorm:"column:foto_profil_file;type:bytea"`
 }
 
 func (Pegawai) TableName() string { return "pegawai" }

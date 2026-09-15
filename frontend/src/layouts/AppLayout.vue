@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useProfilePhoto } from '../composables/useProfilePhoto'
 import http from '../api/http'
 import Avatar from 'primevue/avatar'
 import Button from 'primevue/button'
@@ -14,6 +15,12 @@ const router = useRouter()
 const route = useRoute()
 
 const userMenu = ref(null)
+
+// Foto profil pegawai yang login (kalau ada) untuk avatar topbar -- lihat
+// composables/useProfilePhoto.js. State-nya dibagikan dengan ProfilSayaView
+// supaya begitu pegawai ganti/hapus foto profilnya sendiri, avatar ini ikut
+// berubah seketika tanpa reload halaman.
+const { url: fotoProfilUrl, refresh: refreshFotoProfil, clear: clearFotoProfil } = useProfilePhoto()
 
 // ============================================================
 // notifikasi lonceng (khusus administrator & admin/Admin Kepegawaian) --
@@ -67,6 +74,9 @@ onMounted(() => {
     // polling ringan setiap 30 detik supaya badge tetap update tanpa harus
     // reload halaman -- cukup jarang untuk tidak membebani server.
     notifTimer = setInterval(fetchNotifikasi, 30000)
+  }
+  if (auth.user?.id_pegawai) {
+    refreshFotoProfil(auth.user.id_pegawai)
   }
 })
 
@@ -162,6 +172,7 @@ const userMenuItems = [
 
 function keluar() {
   auth.logout()
+  clearFotoProfil()
   router.push({ name: 'login' })
 }
 
@@ -263,7 +274,8 @@ const menuLainnyaAktif = computed(
         </Popover>
 
         <div class="topbar-user" @click="userMenu.toggle($event)">
-          <Avatar :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #0d9488; color: #fff" />
+          <Avatar v-if="fotoProfilUrl" :image="fotoProfilUrl" shape="circle" />
+          <Avatar v-else :label="(auth.user?.nama || '?').charAt(0)" shape="circle" style="background: #0d9488; color: #fff" />
           <span class="user-name">{{ auth.user?.nama }}</span>
           <i class="pi pi-angle-down"></i>
         </div>

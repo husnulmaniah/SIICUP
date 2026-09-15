@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
+import { useProfilePhoto } from '../composables/useProfilePhoto'
 
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -35,11 +36,61 @@ async function loadProfile() {
   try {
     const { data } = await http.get('/pegawai/me')
     profile.value = data.data
+    refreshFoto(profile.value?.id)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat data profil', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
     loading.value = false
   }
+}
+
+// ---- foto profil: pegawai boleh mengganti/menghapus SENDIRI kapan saja,
+// TIDAK lewat alur pengajuan Perubahan Data Pegawai (yang butuh persetujuan
+// administrator/admin di bawah) -- berlaku langsung begitu diupload. State
+// foto dibagikan dengan avatar topbar lewat composable ini (lihat
+// composables/useProfilePhoto.js), supaya topbar ikut berubah seketika.
+const { url: fotoUrl, refresh: refreshFoto } = useProfilePhoto()
+const fotoFileInputRef = ref(null)
+const fotoUploading = ref(false)
+
+async function onFotoFileChosen(e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file || !profile.value) return
+  fotoUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    await http.post(`/pegawai/${profile.value.id}/foto`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    profile.value.foto_profil_nama = file.name
+    await refreshFoto(profile.value.id)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Foto profil berhasil diperbarui', life: 3000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal upload foto', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    fotoUploading.value = false
+  }
+}
+
+function confirmHapusFoto() {
+  confirm.require({
+    message: 'Hapus foto profil anda?',
+    header: 'Konfirmasi Hapus Foto',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await http.delete(`/pegawai/${profile.value.id}/foto`)
+        profile.value.foto_profil_nama = ''
+        await refreshFoto(profile.value.id)
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Foto profil berhasil dihapus', life: 3000 })
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      }
+    },
+  })
 }
 
 async function loadRiwayat() {
@@ -282,6 +333,31 @@ function formatDate(v) {
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
       </div>
       <template v-else-if="profile">
+        <div class="foto-profil-row">
+          <div class="foto-profil-avatar">
+            <img v-if="fotoUrl" :src="fotoUrl" alt="Foto profil" />
+            <i v-else class="pi pi-user"></i>
+          </div>
+          <div>
+            <div style="font-weight: 600; margin-bottom: 0.4rem">Foto Profil</div>
+            <input ref="fotoFileInputRef" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onFotoFileChosen" />
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+              <Button
+                :label="profile.foto_profil_nama ? 'Ganti Foto' : 'Upload Foto'"
+                icon="pi pi-upload"
+                size="small"
+                outlined
+                :loading="fotoUploading"
+                @click="fotoFileInputRef?.click()"
+              />
+              <Button v-if="profile.foto_profil_nama" label="Hapus Foto" icon="pi pi-trash" size="small" severity="danger" text @click="confirmHapusFoto" />
+            </div>
+            <small style="display: block; margin-top: 0.4rem; color: var(--p-text-muted-color)">
+              Foto profil bisa anda ganti atau hapus sendiri kapan saja, langsung berlaku tanpa perlu persetujuan administrator/admin. Format JPG atau PNG.
+            </small>
+          </div>
+        </div>
+
         <div class="detail-grid">
           <div><span class="detail-label">NIP</span><div>{{ profile.nip || '-' }}</div></div>
           <div><span class="detail-label">Nama</span><div>{{ profile.nama || '-' }}</div></div>
@@ -448,6 +524,37 @@ function formatDate(v) {
   font-size: 0.85rem;
   font-weight: 600;
   margin-bottom: 0.35rem;
+}
+
+.foto-profil-row {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.foto-profil-avatar {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: var(--p-surface-100, #f1f5f9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.foto-profil-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.foto-profil-avatar i {
+  font-size: 2.1rem;
+  color: var(--p-text-muted-color, #94a3b8);
 }
 
 .detail-grid {
