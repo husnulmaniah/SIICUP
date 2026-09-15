@@ -19,6 +19,7 @@ func main() {
 	database.EnsureStatusPegawai(config.DB)
 	database.EnsurePengaturanSurat(config.DB)
 	database.EnsurePengaturanAbsensi(config.DB)
+	database.EnsurePengaturanPensiun(config.DB)
 	database.MigrateAdminAbsensiRole(config.DB)
 
 	handler := routes.SetupRoutes(config.DB)

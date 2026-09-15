@@ -181,7 +181,7 @@ func resolvePangkatGol(db *gorm.DB, row []string, pangkatColIdx, golColIdx int) 
 
 func RegisterPegawaiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
-		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole(roles...))
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h) }
@@ -328,7 +328,25 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan dokumen: "+err.Error())
 		return
 	}
+	if jenis == "sk-pensiun" {
+		// Sama seperti pengajuan pensiun yang disetujui lewat alur
+		// persetujuan (lihat approvePengajuanPensiun di
+		// handlers/pengajuan_pensiun.go) -- administrator meng-upload SK
+		// Pensiun langsung di sini pun harus menutup akun login pegawai
+		// ybs, konsisten dengan makna status "Pensiun".
+		setAkunAktifByPegawai(db, item.ID, false)
+	}
 	utils.Success(w, "dokumen berhasil diupload", map[string]string{"nama_file": header.Filename})
+}
+
+// setAkunAktifByPegawai mengaktifkan/menonaktifkan akun login (models.User.
+// Aktif) yang terhubung ke seorang pegawai (lewat User.IDPegawai) -- dipakai
+// baik oleh upload/hapus SK Pensiun langsung di sini maupun oleh
+// approvePengajuanPensiun/batalkanPersetujuanPensiun di
+// handlers/pengajuan_pensiun.go. Tidak dianggap error kalau pegawai ini
+// belum punya akun terhubung sama sekali (biarkan diam saja).
+func setAkunAktifByPegawai(db *gorm.DB, idPegawai uint, aktif bool) {
+	db.Model(&models.User{}).Where("id_pegawai = ?", idPegawai).Update("aktif", aktif)
 }
 
 // pensiunStatusID mengambil ID master Status bernilai "Pensiun", membuatnya
@@ -495,6 +513,17 @@ func deleteDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal menghapus dokumen: "+err.Error())
 		return
 	}
+	if jenis == "sk-pensiun" {
+		// Kebalikan dari upload SK Pensiun di atas -- menghapus dokumennya
+		// dianggap membatalkan status pensiun pegawai ini, jadi akunnya
+		// diaktifkan kembali. Status kepegawaiannya SENGAJA tidak ikut
+		// diubah otomatis di sini (tidak ada snapshot "status sebelumnya"
+		// untuk jalur upload langsung ini, berbeda dari alur pengajuan
+		// pensiun yang punya IDStatusSebelum) -- administrator perlu
+		// mengubah Status pegawai ini manual lewat form Edit kalau memang
+		// perlu dikembalikan dari "Pensiun".
+		setAkunAktifByPegawai(db, item.ID, true)
+	}
 	utils.Success(w, "dokumen berhasil dihapus", nil)
 }
 
@@ -622,6 +651,7 @@ type pegawaiPayload struct {
 	IDPangkatGol *uint  `json:"id_pangkat_gol"`
 	TempatTgs    string `json:"tempat_tgs"`
 	TMT          string `json:"tmt"`
+	TglLahir     string `json:"tgl_lahir"`
 	NoHP         string `json:"no_hp"`
 	Email        string `json:"email"`
 	IDStatus     *uint  `json:"id_status"`
@@ -645,6 +675,13 @@ func applyPegawaiPayload(item *models.Pegawai, p pegawaiPayload) error {
 			return err
 		}
 		item.TMT = &t
+	}
+	if p.TglLahir != "" {
+		t, err := utils.ParseDateCell(p.TglLahir)
+		if err != nil {
+			return err
+		}
+		item.TglLahir = &t
 	}
 	return nil
 }

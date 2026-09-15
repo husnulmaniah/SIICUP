@@ -7,6 +7,8 @@ import (
 
 	"cuti-app/config"
 	"cuti-app/utils"
+
+	"gorm.io/gorm"
 )
 
 type Middleware func(http.HandlerFunc) http.Handler
@@ -73,6 +75,43 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 func GetClaims(r *http.Request) (*utils.Claims, bool) {
 	claims, ok := r.Context().Value(claimsKey).(*utils.Claims)
 	return claims, ok
+}
+
+// RequireActiveUser mem-blokir akun yang sudah dinonaktifkan (lihat
+// models.User.Aktif) di request PERTAMA setelah akun itu dinonaktifkan --
+// BUKAN hanya di login. Ini disengaja: begitu pengajuan pensiun seorang
+// pegawai disetujui administrator/admin (lihat approvePengajuanPensiun di
+// handlers/pengajuan_pensiun.go), akunnya harus langsung "tertutup" walau
+// token JWT-nya (berlaku 24 jam, lihat utils.GenerateToken) masih valid --
+// mengecek status login SEKALI saja tidak cukup karena sesi yang sedang
+// berjalan tetap bisa dipakai sampai token itu habis.
+//
+// Dipasang di SETIAP chain middleware setelah Auth (di semua
+// Register*Routes) supaya panggilan API apa pun dari akun nonaktif langsung
+// gagal. Mengembalikan 401 (bukan 403) supaya interceptor axios di frontend
+// (lihat api/http.js) otomatis logout & redirect ke halaman login, sama
+// seperti token kadaluarsa -- bukan macet di halaman yang sedang dibuka
+// dengan pesan error yang terus muncul berulang.
+func RequireActiveUser(db *gorm.DB) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := GetClaims(r)
+			if !ok {
+				utils.Error(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			var aktif bool
+			if err := db.Table("user").Select("aktif").Where("id = ?", claims.UserID).Scan(&aktif).Error; err != nil {
+				utils.Error(w, http.StatusUnauthorized, "sesi anda tidak valid, silakan login kembali")
+				return
+			}
+			if !aktif {
+				utils.Error(w, http.StatusUnauthorized, "akun anda sudah tidak aktif (kemungkinan pegawai berstatus pensiun). Hubungi administrator jika ini keliru.")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // CORS allows the frontend to call the API. If FRONTEND_ORIGINS is set

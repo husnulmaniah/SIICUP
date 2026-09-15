@@ -4,6 +4,19 @@
 // foreign keys). Adding a brand-new master table only means adding one
 // entry here - no new Vue file needed.
 
+// Pilihan Jenis Jabatan (statis, bukan lookup ke tabel referensi lain) --
+// dipakai form select Jabatan di atas & untuk menampilkan label yang enak
+// dibaca ("Pelaksana" dsb.) di kolom tabel & tempat lain yang butuh (mis.
+// Detail Pegawai). Menentukan usia pensiun standar pegawai (lihat menu
+// Pengajuan Pensiun): Pelaksana & Struktural pensiun di usia yang sama,
+// Fungsional di usia yang berbeda (default 58 & 60, bisa diubah admin).
+export const jenisJabatanOptions = [
+  { id: 'pelaksana', label: 'Pelaksana' },
+  { id: 'struktural', label: 'Struktural' },
+  { id: 'fungsional', label: 'Fungsional' },
+]
+export const jenisJabatanLabels = jenisJabatanOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
+
 export const tableConfigs = {
   role: {
     title: 'Role',
@@ -20,8 +33,23 @@ export const tableConfigs = {
     subtitle: 'Kelola data master jabatan pegawai',
     endpoint: '/jabatan',
     roles: ['administrator'],
-    columns: [{ field: 'id', header: 'ID', width: '80px' }, { field: 'jabatan', header: 'Nama Jabatan' }],
-    formFields: [{ field: 'jabatan', label: 'Nama Jabatan', type: 'text', required: true }],
+    columns: [
+      { field: 'id', header: 'ID', width: '80px' },
+      { field: 'jabatan', header: 'Nama Jabatan' },
+      { field: 'jenis_jabatan', header: 'Jenis Jabatan', type: 'lookup', map: jenisJabatanLabels, width: '160px' },
+    ],
+    formFields: [
+      { field: 'jabatan', label: 'Nama Jabatan', type: 'text', required: true },
+      {
+        field: 'jenis_jabatan',
+        label: 'Jenis Jabatan',
+        type: 'select',
+        required: true,
+        staticOptions: jenisJabatanOptions,
+        optionLabel: 'label',
+        hint: 'Menentukan usia pensiun standar jabatan ini (diatur di menu Pengajuan Pensiun): Pelaksana & Struktural, atau Fungsional.',
+      },
+    ],
     searchPlaceholder: 'Cari jabatan...',
   },
 
@@ -149,6 +177,12 @@ export const tableConfigs = {
       { field: 'id_atasan', label: 'Atasan Langsung', type: 'select', ref: 'pegawai', optionLabel: (o) => `${o.nama} (${o.nip})`, optionValue: 'id' },
       { field: 'tempat_tgs', label: 'Tempat Tugas', type: 'text' },
       { field: 'tmt', label: 'TMT', type: 'date' },
+      {
+        field: 'tgl_lahir',
+        label: 'Tanggal Lahir',
+        type: 'date',
+        hint: 'Dipakai untuk menghitung usia & kelayakan pensiun pegawai ini (lihat menu Pengajuan Pensiun).',
+      },
       { field: 'no_hp', label: 'No HP', type: 'text' },
       { field: 'email', label: 'Email', type: 'text' },
     ],

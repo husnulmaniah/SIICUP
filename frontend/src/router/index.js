@@ -10,6 +10,7 @@ import MasterDataView from '../views/MasterDataView.vue'
 import PengaturanFormulirView from '../views/PengaturanFormulirView.vue'
 import ProfilSayaView from '../views/ProfilSayaView.vue'
 import PerubahanDataView from '../views/PerubahanDataView.vue'
+import PengajuanPensiunView from '../views/PengajuanPensiunView.vue'
 import AbsensiView from '../views/AbsensiView.vue'
 import RekapAbsensiView from '../views/RekapAbsensiView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
@@ -34,6 +35,7 @@ const routes = [
       // mencocokkan role, bukan flag tambahan.
       { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin'], allowAdminAbsensi: true } },
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
+      { path: 'pengajuan-pensiun', name: 'pengajuan-pensiun', component: PengajuanPensiunView, meta: { roles: ['administrator', 'admin'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },

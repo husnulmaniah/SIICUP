@@ -13,9 +13,25 @@ type Role struct {
 
 func (Role) TableName() string { return "role" }
 
+// JenisJabatan* mengelompokkan jabatan untuk menentukan usia pensiun
+// otomatis (lihat PengaturanPensiun & usiaPensiunPegawai di
+// handlers/pengajuan_pensiun.go): Pelaksana & Struktural pensiun di usia
+// yang sama (default 58 tahun), Fungsional pensiun di usia lebih tua
+// (default 60 tahun, sesuai jabatan fungsional tertentu seperti guru/dosen).
+const (
+	JenisJabatanPelaksana  = "pelaksana"
+	JenisJabatanStruktural = "struktural"
+	JenisJabatanFungsional = "fungsional"
+)
+
 type Jabatan struct {
 	ID      uint   `json:"id" gorm:"primaryKey"`
 	Jabatan string `json:"jabatan" gorm:"size:100;not null"`
+	// JenisJabatan: salah satu dari JenisJabatanPelaksana/Struktural/
+	// Fungsional di atas -- dipakai untuk menghitung usia pensiun otomatis
+	// pegawai dengan jabatan ini. Default "pelaksana" untuk data lama yang
+	// belum diisi administrator.
+	JenisJabatan string `json:"jenis_jabatan" gorm:"column:jenis_jabatan;size:20;not null;default:'pelaksana'"`
 }
 
 func (Jabatan) TableName() string { return "jabatan" }
@@ -98,7 +114,13 @@ type Pegawai struct {
 	PangkatGol   *PangkatGol `json:"pangkat_gol,omitempty" gorm:"foreignKey:IDPangkatGol;references:ID"`
 	TempatTgs    string      `json:"tempat_tgs" gorm:"column:tempat_tgs;size:150"`
 	TMT          *time.Time  `json:"tmt" gorm:"column:tmt;type:date"`
-	NoHP         string      `json:"no_hp" gorm:"column:no_hp;size:20"`
+	// TglLahir: tanggal lahir pegawai -- dipakai untuk menghitung usia &
+	// menentukan otomatis apakah pegawai ini sudah/akan mencapai usia
+	// pensiun (lihat usiaPensiunPegawai di handlers/pengajuan_pensiun.go,
+	// PengaturanPensiun, dan Jabatan.JenisJabatan). Nullable karena data
+	// pegawai lama mungkin belum diisi administrator.
+	TglLahir *time.Time `json:"tgl_lahir" gorm:"column:tgl_lahir;type:date"`
+	NoHP     string     `json:"no_hp" gorm:"column:no_hp;size:20"`
 	IDStatus     *uint       `json:"id_status" gorm:"column:id_status"`
 	Status       *Status     `json:"status,omitempty" gorm:"foreignKey:IDStatus;references:ID"`
 	IDAtasan     *uint       `json:"id_atasan" gorm:"column:id_atasan"`
@@ -149,7 +171,15 @@ type User struct {
 	// sendiri lewat akun yang sama (tidak perlu akun terpisah). Lihat
 	// RegisterAbsensiRoutes (absensi.go) & utils.Claims.IsAdminAbsensi.
 	IsAdminAbsensi bool      `json:"is_admin_absensi" gorm:"column:is_admin_absensi;default:false"`
-	TglDibuat      time.Time `json:"tgl_dibuat" gorm:"column:tgl_dibuat;autoCreateTime"`
+	// Aktif: false berarti akun ini TERTUTUP -- tidak bisa login (lihat
+	// LoginHandler) dan setiap request API dari akun ini langsung ditolak
+	// (lihat middleware.RequireActiveUser), walau token JWT-nya masih
+	// berlaku. Diset false OTOMATIS begitu pengajuan pensiun pegawai pemilik
+	// akun ini disetujui (lihat approvePengajuanPensiun di
+	// handlers/pengajuan_pensiun.go), dan dikembalikan ke true otomatis kalau
+	// persetujuan itu dibatalkan administrator.
+	Aktif     bool      `json:"aktif" gorm:"column:aktif;not null;default:true"`
+	TglDibuat time.Time `json:"tgl_dibuat" gorm:"column:tgl_dibuat;autoCreateTime"`
 }
 
 func (User) TableName() string { return "user" }
@@ -301,6 +331,57 @@ type PerubahanDataPegawai struct {
 }
 
 func (PerubahanDataPegawai) TableName() string { return "perubahan_data_pegawai" }
+
+// ============================================================
+// PENGAJUAN PENSIUN (retirement request + approval workflow)
+// ============================================================
+
+// PengaturanPensiun adalah baris tunggal (id=1, sama seperti
+// PengaturanAbsensi) berisi usia pensiun standar yang bisa diubah
+// administrator (lihat handlers/pengajuan_pensiun.go) -- dipakai untuk
+// menghitung otomatis apakah seorang pegawai sudah/akan mencapai usia
+// pensiun berdasarkan Jabatan.JenisJabatan-nya.
+type PengaturanPensiun struct {
+	ID                      uint `json:"id" gorm:"primaryKey"`
+	UsiaPelaksanaStruktural int  `json:"usia_pelaksana_struktural" gorm:"column:usia_pelaksana_struktural;not null;default:58"`
+	UsiaFungsional          int  `json:"usia_fungsional" gorm:"column:usia_fungsional;not null;default:60"`
+}
+
+func (PengaturanPensiun) TableName() string { return "pengaturan_pensiun" }
+
+// PengajuanPensiun: pegawai mengajukan pensiun sendiri lewat halaman Profil
+// Saya (mengupload SK/usulan pensiun), administrator/admin lalu
+// menyetujui/menolaknya di menu Pengajuan Pensiun (lihat
+// handlers/pengajuan_pensiun.go). BERBEDA dari upload SK Pensiun langsung
+// oleh administrator di Data Pegawai (lihat uploadDokumenPegawai di
+// handlers/pegawai.go, yang efeknya instan tanpa alur persetujuan karena
+// administrator sendiri yang melakukannya) -- jalur ini WAJIB lewat
+// persetujuan karena diajukan pegawai sendiri.
+//
+// Begitu disetujui: status kepegawaian pegawai diubah jadi "Pensiun", akun
+// login pegawai (models.User.Aktif) dinonaktifkan, dan SK yang diupload di
+// pengajuan ini disalin jadi dokumen SK Pensiun resmi pegawai (mengikuti
+// pola approvePerubahanData). IDStatusSebelum menyimpan id_status pegawai
+// SEBELUM disetujui, supaya kalau administrator membatalkan persetujuan ini
+// (lihat batalkanPersetujuanPensiun), status & akunnya bisa dikembalikan
+// seperti semula.
+type PengajuanPensiun struct {
+	ID              uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai       uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai         *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	IsPensiunDini   bool       `json:"is_pensiun_dini" gorm:"column:is_pensiun_dini;default:false"`
+	Alasan          string     `json:"alasan" gorm:"column:alasan;size:255"`
+	SkNamaFile      string     `json:"sk_nama_file" gorm:"column:sk_nama_file;size:255"`
+	SkFile          []byte     `json:"-" gorm:"column:sk_file;type:bytea"`
+	Status          string     `json:"status" gorm:"size:20;default:pending"`
+	IDStatusSebelum *uint      `json:"id_status_sebelum" gorm:"column:id_status_sebelum"`
+	CatatanAdmin    string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
+	DiputuskanOleh  string     `json:"diputuskan_oleh" gorm:"column:diputuskan_oleh;size:150"`
+	TglKeputusan    *time.Time `json:"tgl_keputusan" gorm:"column:tgl_keputusan"`
+	CreatedAt       time.Time  `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (PengajuanPensiun) TableName() string { return "pengajuan_pensiun" }
 
 // ============================================================
 // ABSENSI (daily attendance: camera + blink-liveness check-in/out)

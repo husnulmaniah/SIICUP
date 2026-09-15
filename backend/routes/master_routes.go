@@ -3,6 +3,7 @@ package routes
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"cuti-app/handlers"
 	"cuti-app/models"
@@ -41,6 +42,26 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 			{Header: "Nama Jabatan", Required: true, Example: "Kepala Bidang",
 				Get: func(i interface{}) string { return i.(models.Jabatan).Jabatan },
 				Set: func(i interface{}, raw string) error { i.(*models.Jabatan).Jabatan = raw; return nil }},
+			{Header: "Jenis Jabatan (pelaksana/struktural/fungsional)", Example: "pelaksana",
+				Get: func(i interface{}) string {
+					jj := i.(models.Jabatan).JenisJabatan
+					if jj == "" {
+						return models.JenisJabatanPelaksana
+					}
+					return jj
+				},
+				Set: func(i interface{}, raw string) error {
+					jj := strings.ToLower(strings.TrimSpace(raw))
+					switch jj {
+					case models.JenisJabatanPelaksana, models.JenisJabatanStruktural, models.JenisJabatanFungsional:
+						i.(*models.Jabatan).JenisJabatan = jj
+					case "":
+						i.(*models.Jabatan).JenisJabatan = models.JenisJabatanPelaksana
+					default:
+						return fmt.Errorf("jenis jabatan harus salah satu dari: pelaksana, struktural, fungsional")
+					}
+					return nil
+				}},
 		},
 	}, "administrator")
 

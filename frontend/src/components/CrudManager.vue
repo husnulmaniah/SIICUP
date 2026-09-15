@@ -103,6 +103,39 @@ function sisaCuti(j) {
   return (j.jumlah_hari ?? 0) - (j.terpakai ?? 0)
 }
 
+// ---- usia & kelayakan pensiun (ditampilkan di dialog Detail Pegawai,
+// dihitung di frontend murni untuk tampilan -- validasi sesungguhnya tetap
+// di backend saat pegawai mengajukan pensiun lewat Profil Saya). ----
+const pengaturanPensiun = ref({ usia_pelaksana_struktural: 58, usia_fungsional: 60 })
+
+async function loadPengaturanPensiun() {
+  try {
+    const { data } = await http.get('/pengaturan-pensiun')
+    pengaturanPensiun.value = data.data
+  } catch (e) {
+    // biarkan pakai default kalau gagal memuat -- hanya tampilan, tidak fatal
+  }
+}
+
+function hitungUsiaDari(tglLahir) {
+  if (!tglLahir) return null
+  const lahir = new Date(tglLahir)
+  const now = new Date()
+  let usia = now.getFullYear() - lahir.getFullYear()
+  if (now.getMonth() < lahir.getMonth() || (now.getMonth() === lahir.getMonth() && now.getDate() < lahir.getDate())) {
+    usia--
+  }
+  return usia < 0 ? 0 : usia
+}
+
+function usiaPensiunUntuk(jenisJabatan) {
+  return jenisJabatan === 'fungsional' ? pengaturanPensiun.value.usia_fungsional : pengaturanPensiun.value.usia_pelaksana_struktural
+}
+
+const detailUsia = computed(() => hitungUsiaDari(detailItem.value?.tgl_lahir))
+const detailUsiaPensiun = computed(() => usiaPensiunUntuk(detailItem.value?.jabatan?.jenis_jabatan))
+const detailSudahMemenuhi = computed(() => detailUsia.value != null && detailUsia.value >= detailUsiaPensiun.value)
+
 async function loadDetailJatahCuti(pegawaiId) {
   detailJatahCutiLoading.value = true
   try {
@@ -311,6 +344,12 @@ async function loadRemoteOptions() {
 }
 
 function optionsFor(field) {
+  // field.staticOptions: dropdown dengan pilihan tetap (bukan lookup ke
+  // tabel referensi lain lewat /ref/*), mis. Jenis Jabatan (Pelaksana/
+  // Struktural/Fungsional). Formatnya tetap [{id, label}, ...] agar cocok
+  // dengan binding optionValue="id" yang sama dipakai untuk field.ref di
+  // bawah, tanpa perlu template Select terpisah.
+  if (field.staticOptions) return field.staticOptions
   return remoteOptions[field.ref] || []
 }
 
@@ -608,6 +647,7 @@ const actionsMenuItems = computed(() => {
 onMounted(() => {
   fetchList()
   loadRemoteOptions()
+  if (isPegawaiTable.value) loadPengaturanPensiun()
 })
 
 watch(
@@ -672,6 +712,7 @@ const canManage = computed(() => true) // route guard already restricts page acc
               <template v-else-if="col.type === 'boolean'">
                 <Tag :value="fieldValue(data, col.field) ? 'Ya' : 'Tidak'" :severity="fieldValue(data, col.field) ? 'success' : 'secondary'" />
               </template>
+              <template v-else-if="col.type === 'lookup'">{{ (col.map || {})[fieldValue(data, col.field)] || fieldValue(data, col.field) || '-' }}</template>
               <template v-else>{{ fieldValue(data, col.field) ?? '-' }}</template>
             </template>
           </Column>
@@ -916,6 +957,24 @@ const canManage = computed(() => true) // route guard already restricts page acc
           <div><span class="detail-label">Pangkat / Golongan</span><div>{{ detailItem.pangkat_gol?.pangkat?.pangkat || '-' }} / {{ detailItem.pangkat_gol?.gol?.gol || '-' }}</div></div>
           <div><span class="detail-label">Tempat Tugas</span><div>{{ detailItem.tempat_tgs || '-' }}</div></div>
           <div><span class="detail-label">TMT</span><div>{{ formatDate(detailItem.tmt) }}</div></div>
+          <div>
+            <span class="detail-label">Tanggal Lahir</span>
+            <div>
+              {{ formatDate(detailItem.tgl_lahir) }}
+              <span v-if="detailUsia != null" style="color: var(--p-text-muted-color)">({{ detailUsia }} tahun)</span>
+            </div>
+          </div>
+          <div>
+            <span class="detail-label">Kelayakan Pensiun</span>
+            <div>
+              <Tag
+                v-if="detailUsia != null"
+                :value="detailSudahMemenuhi ? `Sudah memenuhi usia pensiun (${detailUsiaPensiun})` : `Belum (usia pensiun ${detailUsiaPensiun})`"
+                :severity="detailSudahMemenuhi ? 'warn' : 'success'"
+              />
+              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi Tanggal Lahir untuk menghitung</span>
+            </div>
+          </div>
           <div><span class="detail-label">No HP</span><div>{{ detailItem.no_hp || '-' }}</div></div>
           <div><span class="detail-label">Email</span><div>{{ detailItem.email || '-' }}</div></div>
           <div><span class="detail-label">Status</span><div><Tag :value="detailItem.status?.status || '-'" severity="info" /></div></div>

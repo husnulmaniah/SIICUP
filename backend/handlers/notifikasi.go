@@ -24,7 +24,7 @@ import (
 func RegisterNotifikasiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	manage := middleware.Chain(func(w http.ResponseWriter, r *http.Request) {
 		pendingNotifikasi(w, r, db)
-	}, middleware.Auth, middleware.RequireRole("administrator", "admin"))
+	}, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole("administrator", "admin"))
 	mux.Handle("GET /api/notifikasi/pending", manage)
 }
 
@@ -53,11 +53,17 @@ func pendingNotifikasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		Where("status = ?", models.StatusPending).
 		Order("created_at desc").Limit(maxNotifikasiItems).Find(&perubahan)
 
-	var totalCuti, totalPerubahan int64
+	var pensiun []models.PengajuanPensiun
+	db.Preload("Pegawai").
+		Where("status = ?", models.StatusPending).
+		Order("created_at desc").Limit(maxNotifikasiItems).Find(&pensiun)
+
+	var totalCuti, totalPerubahan, totalPensiun int64
 	db.Model(&models.PengajuanCuti{}).Where("status = ?", models.StatusPending).Count(&totalCuti)
 	db.Model(&models.PerubahanDataPegawai{}).Where("status = ?", models.StatusPending).Count(&totalPerubahan)
+	db.Model(&models.PengajuanPensiun{}).Where("status = ?", models.StatusPending).Count(&totalPensiun)
 
-	items := make([]notifikasiItem, 0, len(cuti)+len(perubahan))
+	items := make([]notifikasiItem, 0, len(cuti)+len(perubahan)+len(pensiun))
 	for _, c := range cuti {
 		nama := "Pegawai"
 		if c.Pegawai != nil {
@@ -91,15 +97,35 @@ func pendingNotifikasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		})
 	}
 
+	for _, p := range pensiun {
+		nama := "Pegawai"
+		if p.Pegawai != nil {
+			nama = p.Pegawai.Nama
+		}
+		keterangan := "Pengajuan pensiun"
+		if p.IsPensiunDini {
+			keterangan = "Pengajuan pensiun dini"
+		}
+		items = append(items, notifikasiItem{
+			Type:       "pengajuan_pensiun",
+			ID:         p.ID,
+			Nama:       nama,
+			Keterangan: keterangan,
+			CreatedAt:  p.CreatedAt,
+			Link:       "/pengajuan-pensiun",
+		})
+	}
+
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	if len(items) > maxNotifikasiItems {
 		items = items[:maxNotifikasiItems]
 	}
 
 	utils.Success(w, "ok", map[string]interface{}{
-		"total":                totalCuti + totalPerubahan,
-		"pengajuan_cuti_count": totalCuti,
-		"perubahan_data_count": totalPerubahan,
-		"items":                items,
+		"total":                   totalCuti + totalPerubahan + totalPensiun,
+		"pengajuan_cuti_count":    totalCuti,
+		"perubahan_data_count":    totalPerubahan,
+		"pengajuan_pensiun_count": totalPensiun,
+		"items":                   items,
 	})
 }

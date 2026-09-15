@@ -36,6 +36,15 @@ func LoginHandler(db *gorm.DB) http.HandlerFunc {
 			return
 		}
 
+		// Akun yang sudah dinonaktifkan (mis. karena pengajuan pensiun
+		// pegawai pemiliknya disetujui, lihat approvePengajuanPensiun di
+		// handlers/pengajuan_pensiun.go) tidak boleh login lagi sama sekali,
+		// walau username/password-nya benar.
+		if !user.Aktif {
+			utils.Error(w, http.StatusForbidden, "akun ini sudah tidak aktif. Hubungi administrator jika ini keliru.")
+			return
+		}
+
 		roleName := ""
 		if user.Role != nil {
 			roleName = user.Role.Role

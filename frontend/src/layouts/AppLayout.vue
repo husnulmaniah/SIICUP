@@ -57,6 +57,18 @@ function bukaNotifikasi(item) {
   router.push(item.link)
 }
 
+function notifIcon(type) {
+  if (type === 'pengajuan_cuti') return 'pi pi-calendar'
+  if (type === 'pengajuan_pensiun') return 'pi pi-briefcase'
+  return 'pi pi-user-edit'
+}
+
+function notifTitle(type) {
+  if (type === 'pengajuan_cuti') return 'Pengajuan Cuti baru'
+  if (type === 'pengajuan_pensiun') return 'Pengajuan Pensiun baru'
+  return 'Perubahan Data Pegawai baru'
+}
+
 function waktuRelatif(iso) {
   if (!iso) return ''
   const diffMs = Date.now() - new Date(iso).getTime()
@@ -120,7 +132,8 @@ const navSections = computed(() => {
       items: [
         { label: 'Data Pegawai', icon: 'pi pi-users', to: '/master/pegawai' },
         { label: 'Perubahan Data Pegawai', icon: 'pi pi-user-edit', to: '/perubahan-data' },
-        { label: 'Jatah Cuti Tahunan', icon: 'pi pi-briefcase', to: '/master/jatah-cuti' },
+        { label: 'Pengajuan Pensiun', icon: 'pi pi-briefcase', to: '/pengajuan-pensiun' },
+        { label: 'Jatah Cuti Tahunan', icon: 'pi pi-wallet', to: '/master/jatah-cuti' },
       ],
     })
     sections.push({
@@ -261,10 +274,10 @@ const menuLainnyaAktif = computed(
           <div v-else-if="!notifData.items.length" class="notif-empty">Tidak ada pengajuan baru.</div>
           <div v-else class="notif-list">
             <a v-for="item in notifData.items" :key="item.type + '-' + item.id" class="notif-item" @click="bukaNotifikasi(item)">
-              <i :class="item.type === 'pengajuan_cuti' ? 'pi pi-calendar' : 'pi pi-user-edit'"></i>
+              <i :class="notifIcon(item.type)"></i>
               <div class="notif-item-body">
                 <div class="notif-item-title">
-                  {{ item.type === 'pengajuan_cuti' ? 'Pengajuan Cuti baru' : 'Perubahan Data Pegawai baru' }}
+                  {{ notifTitle(item.type) }}
                 </div>
                 <div class="notif-item-desc">{{ item.nama }} — {{ item.keterangan }}</div>
                 <div class="notif-item-time">{{ waktuRelatif(item.created_at) }}</div>

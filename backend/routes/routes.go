@@ -14,7 +14,7 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/login", handlers.LoginHandler(db))
-	mux.Handle("GET /api/me", middleware.Chain(handlers.MeHandler(db), middleware.Auth))
+	mux.Handle("GET /api/me", middleware.Chain(handlers.MeHandler(db), middleware.Auth, middleware.RequireActiveUser(db)))
 
 	handlers.RegisterDashboardRoutes(mux, db)
 	handlers.RegisterReferenceRoutes(mux, db)
@@ -25,6 +25,7 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 	handlers.RegisterPengajuanCutiRoutes(mux, db)
 	handlers.RegisterPengaturanSuratRoutes(mux, db)
 	handlers.RegisterPerubahanDataRoutes(mux, db)
+	handlers.RegisterPengajuanPensiunRoutes(mux, db)
 	handlers.RegisterAbsensiRoutes(mux, db)
 	handlers.RegisterNotifikasiRoutes(mux, db)
 

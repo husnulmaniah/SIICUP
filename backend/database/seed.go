@@ -248,3 +248,25 @@ func EnsurePengaturanAbsensi(db *gorm.DB) {
 		log.Println("pengaturan absensi default dibuat (bisa diubah dari menu Pengaturan Absen)")
 	}
 }
+
+// EnsurePengaturanPensiun memastikan selalu ada tepat satu baris pengaturan
+// (ID=1) usia pensiun default (Pelaksana/Struktural 58 tahun, Fungsional 60
+// tahun) -- idempotent, sama seperti EnsurePengaturanAbsensi. Nilainya bisa
+// diubah administrator lewat menu Pengajuan Pensiun -> tab Pengaturan
+// Pensiun (lihat handlers/pengajuan_pensiun.go).
+func EnsurePengaturanPensiun(db *gorm.DB) {
+	var count int64
+	db.Model(&models.PengaturanPensiun{}).Count(&count)
+	if count > 0 {
+		return
+	}
+	if err := db.Create(&models.PengaturanPensiun{
+		ID:                      1,
+		UsiaPelaksanaStruktural: 58,
+		UsiaFungsional:          60,
+	}).Error; err != nil {
+		log.Printf("gagal membuat pengaturan pensiun default: %v", err)
+	} else {
+		log.Println("pengaturan pensiun default dibuat (bisa diubah dari menu Pengajuan Pensiun)")
+	}
+}
