@@ -28,7 +28,8 @@ type pegawaiEditableData struct {
 	IDUnitKerja  *uint  `json:"id_unit_kerja"`
 	IDPangkatGol *uint  `json:"id_pangkat_gol"`
 	TempatTgs    string `json:"tempat_tgs"`
-	TMT          string `json:"tmt"` // format "2006-01-02", boleh kosong
+	TMT          string `json:"tmt"`       // format "2006-01-02", boleh kosong
+	TglLahir     string `json:"tgl_lahir"` // format "2006-01-02", boleh kosong -- dipakai menghitung usia & kelayakan pensiun (lihat pengajuan_pensiun.go)
 	NoHP         string `json:"no_hp"`
 	IDStatus     *uint  `json:"id_status"`
 	Email        string `json:"email"`
@@ -39,6 +40,10 @@ func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
 	if p.TMT != nil {
 		tmt = p.TMT.Format("2006-01-02")
 	}
+	tglLahir := ""
+	if p.TglLahir != nil {
+		tglLahir = p.TglLahir.Format("2006-01-02")
+	}
 	return pegawaiEditableData{
 		Nama:         p.Nama,
 		IDJabatan:    p.IDJabatan,
@@ -46,6 +51,7 @@ func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
 		IDPangkatGol: p.IDPangkatGol,
 		TempatTgs:    p.TempatTgs,
 		TMT:          tmt,
+		TglLahir:     tglLahir,
 		NoHP:         p.NoHP,
 		IDStatus:     p.IDStatus,
 		Email:        p.Email,
@@ -54,7 +60,7 @@ func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
 
 func RegisterPerubahanDataRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
-		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole(roles...))
 	}
 	// anyRole di sini sengaja TIDAK benar-benar "role apa saja" -- hanya 4
 	// role dasar yang ada di sistem (administrator, admin, pegawai, atasan).
@@ -167,6 +173,12 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if baru.TMT != "" {
 		if _, err := utils.ParseDateCell(baru.TMT); err != nil {
 			utils.Error(w, http.StatusBadRequest, "TMT tidak valid")
+			return
+		}
+	}
+	if baru.TglLahir != "" {
+		if _, err := utils.ParseDateCell(baru.TglLahir); err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal lahir tidak valid")
 			return
 		}
 	}
@@ -313,6 +325,16 @@ func approvePerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		updates["tmt"] = tmt
 	} else {
 		updates["tmt"] = nil
+	}
+	if baru.TglLahir != "" {
+		tglLahir, err := utils.ParseDateCell(baru.TglLahir)
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal lahir pada pengajuan tidak valid")
+			return
+		}
+		updates["tgl_lahir"] = tglLahir
+	} else {
+		updates["tgl_lahir"] = nil
 	}
 
 	if err := db.Model(&models.Pegawai{}).Where("id = ?", item.IDPegawai).Updates(updates).Error; err != nil {

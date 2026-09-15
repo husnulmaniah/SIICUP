@@ -110,6 +110,7 @@ function diffRows(row) {
     { key: 'id_pangkat_gol', label: 'Pangkat / Golongan', fmt: pangkatGolLabel },
     { key: 'tempat_tgs', label: 'Tempat Tugas' },
     { key: 'tmt', label: 'TMT', fmt: (v) => (v ? formatDate(v) : '-') },
+    { key: 'tgl_lahir', label: 'Tanggal Lahir', fmt: (v) => (v ? formatDate(v) : '-') },
     { key: 'no_hp', label: 'No HP' },
     { key: 'id_status', label: 'Status Kepegawaian', fmt: statusPegawaiLabel },
     { key: 'email', label: 'Email' },

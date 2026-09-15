@@ -230,8 +230,8 @@ const menuLainnyaAktif = computed(
   <div class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <i class="pi pi-calendar-plus" style="font-size: 1.4rem"></i>
-        <span>SI Cuti Pegawai</span>
+        <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="sidebar-logo" />
+        <span>SIMADU</span>
       </div>
       <nav class="sidebar-nav">
         <template v-for="(section, si) in navSections" :key="si">
@@ -253,8 +253,8 @@ const menuLainnyaAktif = computed(
     <div class="main-area">
       <header class="topbar">
         <div class="topbar-brand">
-          <i class="pi pi-calendar-plus"></i>
-          <span>SI Cuti Pegawai</span>
+          <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="topbar-logo" />
+          <span>SIMADU</span>
         </div>
         <div class="topbar-title">{{ roleLabel }}</div>
 
@@ -384,6 +384,14 @@ const menuLainnyaAktif = computed(
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.sidebar-logo {
+  height: 2.1rem;
+  width: auto;
+  max-width: 2.6rem;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
 .sidebar-nav {
   padding: 0.75rem 0.6rem;
   flex: 1;
@@ -451,8 +459,12 @@ const menuLainnyaAktif = computed(
   font-size: 0.98rem;
 }
 
-.topbar-brand i {
-  color: #0d9488;
+.topbar-logo {
+  height: 1.8rem;
+  width: auto;
+  max-width: 2.2rem;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 
 .topbar-title {

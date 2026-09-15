@@ -40,7 +40,8 @@ async function submit() {
         <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="login-logo" />
         <div>
           <div class="login-instansi">Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara</div>
-          <h1>SI Cuti Pegawai</h1>
+          <h1>SIMADU</h1>
+          <div class="login-kepanjangan">Sistem Informasi Manajemen Administrasi Dinas Utama</div>
         </div>
       </div>
       <p class="login-subtitle">Masuk untuk mengelola pengajuan cuti</p>
@@ -110,6 +111,13 @@ async function submit() {
 .login-brand h1 {
   font-size: 1.15rem;
   margin: 0.1rem 0 0 0;
+}
+
+.login-kepanjangan {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 0.1rem;
+  line-height: 1.3;
 }
 
 .login-subtitle {

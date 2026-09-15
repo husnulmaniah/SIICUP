@@ -335,7 +335,7 @@ func buildRekapAbsensiPDF(
 
 	gambarFooter := func(p *utils.PDFPage, halaman int) {
 		p.SetFont(false, 7.5)
-		p.Text(marginX, 800, "Dicetak dari aplikasi SIICUP pada "+dicetak+" WITA")
+		p.Text(marginX, 800, "Dicetak dari aplikasi SIMADU pada "+dicetak+" WITA")
 		p.TextRight(rightX, 800, fmt.Sprintf("Halaman %d dari %d", halaman, totalHalaman))
 	}
 

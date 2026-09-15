@@ -4,6 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 import { useProfilePhoto } from '../composables/useProfilePhoto'
+import { jenisJabatanLabels } from '../config/tables'
 
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -309,6 +310,7 @@ const form = reactive({
   id_pangkat_gol: null,
   tempat_tgs: '',
   tmt: null,
+  tgl_lahir: null,
   no_hp: '',
   id_status: null,
   email: '',
@@ -326,6 +328,7 @@ function openAjukan() {
   form.id_pangkat_gol = profile.value.id_pangkat_gol || null
   form.tempat_tgs = profile.value.tempat_tgs || ''
   form.tmt = profile.value.tmt ? new Date(profile.value.tmt) : null
+  form.tgl_lahir = profile.value.tgl_lahir ? new Date(profile.value.tgl_lahir) : null
   form.no_hp = profile.value.no_hp || ''
   form.id_status = profile.value.id_status || null
   form.email = profile.value.email || ''
@@ -381,6 +384,7 @@ async function submitAjukan() {
       id_pangkat_gol: form.id_pangkat_gol,
       tempat_tgs: form.tempat_tgs,
       tmt: toDateStr(form.tmt),
+      tgl_lahir: toDateStr(form.tgl_lahir),
       no_hp: form.no_hp,
       id_status: form.id_status,
       email: form.email,
@@ -517,6 +521,10 @@ function formatDate(v) {
           <div><span class="detail-label">NIP</span><div>{{ profile.nip || '-' }}</div></div>
           <div><span class="detail-label">Nama</span><div>{{ profile.nama || '-' }}</div></div>
           <div><span class="detail-label">Jabatan</span><div>{{ profile.jabatan?.jabatan || '-' }}</div></div>
+          <div>
+            <span class="detail-label">Jenis Jabatan</span>
+            <div>{{ jenisJabatanLabels[profile.jabatan?.jenis_jabatan] || '-' }}</div>
+          </div>
           <div><span class="detail-label">Unit Kerja</span><div>{{ profile.unit_kerja?.unit || '-' }}</div></div>
           <div>
             <span class="detail-label">Pangkat / Golongan</span>
@@ -529,6 +537,17 @@ function formatDate(v) {
             <div>
               {{ formatDate(profile.tgl_lahir) }}
               <span v-if="usiaSaya != null" style="color: var(--p-text-muted-color)">({{ usiaSaya }} tahun)</span>
+            </div>
+          </div>
+          <div>
+            <span class="detail-label">Kelayakan Pensiun</span>
+            <div>
+              <Tag
+                v-if="usiaSaya != null"
+                :value="sudahMemenuhiUsiaPensiun ? `Sudah memenuhi usia pensiun (${usiaPensiunSaya})` : `Belum (usia pensiun ${usiaPensiunSaya})`"
+                :severity="sudahMemenuhiUsiaPensiun ? 'warn' : 'success'"
+              />
+              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi Tanggal Lahir untuk menghitung</span>
             </div>
           </div>
           <div><span class="detail-label">No HP</span><div>{{ profile.no_hp || '-' }}</div></div>
@@ -719,6 +738,11 @@ function formatDate(v) {
         <div class="col-12 md:col-6">
           <label class="field-label">TMT</label>
           <DatePicker v-model="form.tmt" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
+        </div>
+        <div class="col-12 md:col-6">
+          <label class="field-label">Tanggal Lahir</label>
+          <DatePicker v-model="form.tgl_lahir" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
+          <small style="color: var(--p-text-muted-color)">Dipakai untuk menghitung usia & kelayakan pensiun anda.</small>
         </div>
         <div class="col-12 md:col-6">
           <label class="field-label">No HP</label>
