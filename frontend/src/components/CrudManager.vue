@@ -3,7 +3,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
-import { toApiDate } from '../utils/date'
+import { toApiDate, hitungKelayakanKenaikan } from '../utils/date'
 
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -135,6 +135,36 @@ function usiaPensiunUntuk(jenisJabatan) {
 const detailUsia = computed(() => hitungUsiaDari(detailItem.value?.tgl_lahir))
 const detailUsiaPensiun = computed(() => usiaPensiunUntuk(detailItem.value?.jabatan?.jenis_jabatan))
 const detailSudahMemenuhi = computed(() => detailUsia.value != null && detailUsia.value >= detailUsiaPensiun.value)
+
+// ---- kelayakan kenaikan gaji berkala & kenaikan pangkat (ditampilkan di
+// dialog Detail Pegawai, dihitung di frontend murni untuk tampilan -- lihat
+// models.PengaturanKenaikanGajiBerkala di backend) ----
+const pengaturanKgb = ref({
+  gaji_berkala_fungsional_tahun: 1,
+  gaji_berkala_pelaksana_struktural_tahun: 2,
+  pangkat_fungsional_tahun: 2,
+  pangkat_pelaksana_struktural_tahun: 4,
+})
+
+async function loadPengaturanKgb() {
+  try {
+    const { data } = await http.get('/pengaturan-kenaikan-gaji-berkala')
+    pengaturanKgb.value = data.data
+  } catch (e) {
+    // biarkan pakai default kalau gagal memuat -- hanya tampilan, tidak fatal
+  }
+}
+
+function intervalGajiBerkalaUntuk(jenisJabatan) {
+  return jenisJabatan === 'fungsional' ? pengaturanKgb.value.gaji_berkala_fungsional_tahun : pengaturanKgb.value.gaji_berkala_pelaksana_struktural_tahun
+}
+function intervalPangkatUntuk(jenisJabatan) {
+  return jenisJabatan === 'fungsional' ? pengaturanKgb.value.pangkat_fungsional_tahun : pengaturanKgb.value.pangkat_pelaksana_struktural_tahun
+}
+const detailIntervalGajiBerkala = computed(() => intervalGajiBerkalaUntuk(detailItem.value?.jabatan?.jenis_jabatan))
+const detailIntervalPangkat = computed(() => intervalPangkatUntuk(detailItem.value?.jabatan?.jenis_jabatan))
+const detailKelayakanGajiBerkala = computed(() => hitungKelayakanKenaikan(detailItem.value?.tgl_kenaikan_gaji_berkala_terakhir, detailIntervalGajiBerkala.value))
+const detailKelayakanPangkat = computed(() => hitungKelayakanKenaikan(detailItem.value?.tgl_kenaikan_pangkat_terakhir, detailIntervalPangkat.value))
 
 async function loadDetailJatahCuti(pegawaiId) {
   detailJatahCutiLoading.value = true
@@ -647,7 +677,10 @@ const actionsMenuItems = computed(() => {
 onMounted(() => {
   fetchList()
   loadRemoteOptions()
-  if (isPegawaiTable.value) loadPengaturanPensiun()
+  if (isPegawaiTable.value) {
+    loadPengaturanPensiun()
+    loadPengaturanKgb()
+  }
 })
 
 watch(
@@ -973,6 +1006,36 @@ const canManage = computed(() => true) // route guard already restricts page acc
                 :severity="detailSudahMemenuhi ? 'warn' : 'success'"
               />
               <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi Tanggal Lahir untuk menghitung</span>
+            </div>
+          </div>
+          <div>
+            <span class="detail-label">Kenaikan Gaji Berkala Terakhir</span>
+            <div>{{ formatDate(detailItem.tgl_kenaikan_gaji_berkala_terakhir) }}</div>
+          </div>
+          <div>
+            <span class="detail-label">Kelayakan Kenaikan Gaji Berkala</span>
+            <div>
+              <Tag
+                v-if="detailKelayakanGajiBerkala.jatuhTempo"
+                :value="detailKelayakanGajiBerkala.sudahWaktunya ? `Sudah waktunya (interval ${detailIntervalGajiBerkala} th)` : `Jatuh tempo ${formatDate(detailKelayakanGajiBerkala.jatuhTempo)}`"
+                :severity="detailKelayakanGajiBerkala.sudahWaktunya ? 'warn' : 'success'"
+              />
+              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Belum diisi</span>
+            </div>
+          </div>
+          <div>
+            <span class="detail-label">Kenaikan Pangkat Terakhir</span>
+            <div>{{ formatDate(detailItem.tgl_kenaikan_pangkat_terakhir) }}</div>
+          </div>
+          <div>
+            <span class="detail-label">Kelayakan Kenaikan Pangkat</span>
+            <div>
+              <Tag
+                v-if="detailKelayakanPangkat.jatuhTempo"
+                :value="detailKelayakanPangkat.sudahWaktunya ? `Sudah waktunya (interval ${detailIntervalPangkat} th)` : `Jatuh tempo ${formatDate(detailKelayakanPangkat.jatuhTempo)}`"
+                :severity="detailKelayakanPangkat.sudahWaktunya ? 'warn' : 'success'"
+              />
+              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Belum diisi</span>
             </div>
           </div>
           <div><span class="detail-label">No HP</span><div>{{ detailItem.no_hp || '-' }}</div></div>

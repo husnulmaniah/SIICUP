@@ -20,3 +20,19 @@ export function toApiDate(d) {
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
+
+// hitungKelayakanKenaikan menghitung kapan kenaikan gaji berkala/kenaikan
+// pangkat BERIKUTNYA jatuh tempo, dari tanggal kenaikan TERAKHIR + interval
+// (dalam tahun, ditentukan jenis jabatan -- lihat
+// PengaturanKenaikanGajiBerkala di backend). Dipakai di Profil Saya
+// (pegawai), Data Pegawai & Perubahan Data Pegawai (administrator/admin)
+// murni untuk TAMPILAN/perkiraan -- tidak ada validasi apapun yang
+// menggantung padanya.
+export function hitungKelayakanKenaikan(tglTerakhir, intervalTahun) {
+  if (!tglTerakhir || !intervalTahun) return { jatuhTempo: null, sudahWaktunya: false }
+  const dasar = new Date(tglTerakhir)
+  if (Number.isNaN(dasar.getTime())) return { jatuhTempo: null, sudahWaktunya: false }
+  const jatuhTempo = new Date(dasar)
+  jatuhTempo.setFullYear(jatuhTempo.getFullYear() + intervalTahun)
+  return { jatuhTempo, sudahWaktunya: new Date() >= jatuhTempo }
+}

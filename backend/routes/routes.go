@@ -26,6 +26,7 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 	handlers.RegisterPengaturanSuratRoutes(mux, db)
 	handlers.RegisterPerubahanDataRoutes(mux, db)
 	handlers.RegisterPengajuanPensiunRoutes(mux, db)
+	handlers.RegisterPengaturanKenaikanGajiBerkalaRoutes(mux, db)
 	handlers.RegisterAbsensiRoutes(mux, db)
 	handlers.RegisterNotifikasiRoutes(mux, db)
 

@@ -30,9 +30,17 @@ type pegawaiEditableData struct {
 	TempatTgs    string `json:"tempat_tgs"`
 	TMT          string `json:"tmt"`       // format "2006-01-02", boleh kosong
 	TglLahir     string `json:"tgl_lahir"` // format "2006-01-02", boleh kosong -- dipakai menghitung usia & kelayakan pensiun (lihat pengajuan_pensiun.go)
-	NoHP         string `json:"no_hp"`
-	IDStatus     *uint  `json:"id_status"`
-	Email        string `json:"email"`
+	// TglKenaikanGajiBerkalaTerakhir / TglKenaikanPangkatTerakhir: format
+	// "2006-01-02", boleh kosong -- SEPENUHNYA opsional, dipakai menghitung
+	// kelayakan kenaikan gaji berkala/pangkat berikutnya (lihat
+	// handlers/kenaikan_gaji_berkala.go). Berkas SK Kenaikan Gaji Berkala
+	// pendukungnya diupload lewat field file terpisah "file_kgb" (lihat
+	// createPerubahanData), bukan di JSON ini.
+	TglKenaikanGajiBerkalaTerakhir string `json:"tgl_kenaikan_gaji_berkala_terakhir"`
+	TglKenaikanPangkatTerakhir     string `json:"tgl_kenaikan_pangkat_terakhir"`
+	NoHP                           string `json:"no_hp"`
+	IDStatus                       *uint  `json:"id_status"`
+	Email                          string `json:"email"`
 }
 
 func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
@@ -44,17 +52,27 @@ func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
 	if p.TglLahir != nil {
 		tglLahir = p.TglLahir.Format("2006-01-02")
 	}
+	tglKgb := ""
+	if p.TglKenaikanGajiBerkalaTerakhir != nil {
+		tglKgb = p.TglKenaikanGajiBerkalaTerakhir.Format("2006-01-02")
+	}
+	tglPangkat := ""
+	if p.TglKenaikanPangkatTerakhir != nil {
+		tglPangkat = p.TglKenaikanPangkatTerakhir.Format("2006-01-02")
+	}
 	return pegawaiEditableData{
-		Nama:         p.Nama,
-		IDJabatan:    p.IDJabatan,
-		IDUnitKerja:  p.IDUnitKerja,
-		IDPangkatGol: p.IDPangkatGol,
-		TempatTgs:    p.TempatTgs,
-		TMT:          tmt,
-		TglLahir:     tglLahir,
-		NoHP:         p.NoHP,
-		IDStatus:     p.IDStatus,
-		Email:        p.Email,
+		Nama:                           p.Nama,
+		IDJabatan:                      p.IDJabatan,
+		IDUnitKerja:                    p.IDUnitKerja,
+		IDPangkatGol:                   p.IDPangkatGol,
+		TempatTgs:                      p.TempatTgs,
+		TMT:                            tmt,
+		TglLahir:                       tglLahir,
+		TglKenaikanGajiBerkalaTerakhir: tglKgb,
+		TglKenaikanPangkatTerakhir:     tglPangkat,
+		NoHP:                           p.NoHP,
+		IDStatus:                       p.IDStatus,
+		Email:                          p.Email,
 	}
 }
 
@@ -79,6 +97,7 @@ func RegisterPerubahanDataRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/perubahan-data/{id}/approve", manage(func(w http.ResponseWriter, r *http.Request) { approvePerubahanData(w, r, db) }))
 	mux.Handle("PUT /api/perubahan-data/{id}/reject", manage(func(w http.ResponseWriter, r *http.Request) { rejectPerubahanData(w, r, db) }))
 	mux.Handle("GET /api/perubahan-data/{id}/dokumen", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenPerubahanData(w, r, db) }))
+	mux.Handle("GET /api/perubahan-data/{id}/dokumen-kgb", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenKgbPerubahanData(w, r, db) }))
 }
 
 func canAccessPerubahanData(claims *utils.Claims, item models.PerubahanDataPegawai) bool {
@@ -182,6 +201,18 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			return
 		}
 	}
+	if baru.TglKenaikanGajiBerkalaTerakhir != "" {
+		if _, err := utils.ParseDateCell(baru.TglKenaikanGajiBerkalaTerakhir); err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal kenaikan gaji berkala terakhir tidak valid")
+			return
+		}
+	}
+	if baru.TglKenaikanPangkatTerakhir != "" {
+		if _, err := utils.ParseDateCell(baru.TglKenaikanPangkatTerakhir); err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal kenaikan pangkat terakhir tidak valid")
+			return
+		}
+	}
 
 	var pegawai models.Pegawai
 	if err := db.First(&pegawai, *claims.IDPegawai).Error; err != nil {
@@ -226,6 +257,33 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		skFileData = fileData
 	}
 
+	// Berkas SK Kenaikan Gaji Berkala: SEPENUHNYA opsional (berbeda dari SK
+	// Terakhir di atas) -- kalau tidak diupload, cukup dilewati saja tanpa
+	// error apapun, dan SK KGB yang sudah tersimpan di data pegawai TIDAK
+	// akan disentuh saat pengajuan ini disetujui (lihat approvePerubahanData).
+	var skKgbNamaFile string
+	var skKgbFileData []byte
+	if fhKgb := formFileHeader(r, "file_kgb"); fhKgb != nil {
+		ext := strings.ToLower(fhKgb.Filename[strings.LastIndex(fhKgb.Filename, "."):])
+		if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+			utils.Error(w, http.StatusBadRequest, "berkas SK Kenaikan Gaji Berkala harus berformat PDF, JPG, atau PNG")
+			return
+		}
+		fk, err := fhKgb.Open()
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK Kenaikan Gaji Berkala")
+			return
+		}
+		fileData, err := io.ReadAll(fk)
+		fk.Close()
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK Kenaikan Gaji Berkala")
+			return
+		}
+		skKgbNamaFile = fhKgb.Filename
+		skKgbFileData = fileData
+	}
+
 	lamaJSON, _ := json.Marshal(pegawaiSnapshot(pegawai))
 	baruJSON, _ := json.Marshal(baru)
 
@@ -235,6 +293,8 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		DataBaru:   string(baruJSON),
 		SkNamaFile: skNamaFile,
 		SkFile:     skFileData,
+		SkKgbNama:  skKgbNamaFile,
+		SkKgbFile:  skKgbFileData,
 		Status:     models.StatusPending,
 	}
 	if err := db.Create(&item).Error; err != nil {
@@ -336,6 +396,35 @@ func approvePerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	} else {
 		updates["tgl_lahir"] = nil
 	}
+	if baru.TglKenaikanGajiBerkalaTerakhir != "" {
+		t, err := utils.ParseDateCell(baru.TglKenaikanGajiBerkalaTerakhir)
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal kenaikan gaji berkala terakhir pada pengajuan tidak valid")
+			return
+		}
+		updates["tgl_kenaikan_gaji_berkala_terakhir"] = t
+	} else {
+		updates["tgl_kenaikan_gaji_berkala_terakhir"] = nil
+	}
+	if baru.TglKenaikanPangkatTerakhir != "" {
+		t, err := utils.ParseDateCell(baru.TglKenaikanPangkatTerakhir)
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal kenaikan pangkat terakhir pada pengajuan tidak valid")
+			return
+		}
+		updates["tgl_kenaikan_pangkat_terakhir"] = t
+	} else {
+		updates["tgl_kenaikan_pangkat_terakhir"] = nil
+	}
+	// SK Kenaikan Gaji Berkala: BERBEDA dari SK Terakhir di atas (yang selalu
+	// diperbarui), kolom ini hanya disentuh kalau pegawai memang mengupload
+	// berkas baru saat mengajukan (lihat createPerubahanData) -- opsional,
+	// jadi kalau tidak diupload, SK KGB yang sudah tersimpan di data pegawai
+	// dibiarkan seperti semula, tidak ikut dihapus/dikosongkan.
+	if item.SkKgbNama != "" && len(item.SkKgbFile) > 0 {
+		updates["sk_kgb_nama"] = item.SkKgbNama
+		updates["sk_kgb_file"] = item.SkKgbFile
+	}
 
 	if err := db.Model(&models.Pegawai{}).Where("id = ?", item.IDPegawai).Updates(updates).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal memperbarui data pegawai: "+err.Error())
@@ -418,4 +507,33 @@ func downloadDokumenPerubahanData(w http.ResponseWriter, r *http.Request, db *go
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", item.SkNamaFile))
 	}
 	w.Write(item.SkFile)
+}
+
+// downloadDokumenKgbPerubahanData mengunduh/menampilkan berkas SK Kenaikan
+// Gaji Berkala yang diupload pegawai bersamaan dengan pengajuan ini --
+// SEPENUHNYA opsional, jadi bisa saja belum ada (lihat createPerubahanData).
+func downloadDokumenKgbPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.PerubahanDataPegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessPerubahanData(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
+		return
+	}
+	if len(item.SkKgbFile) == 0 {
+		utils.Error(w, http.StatusNotFound, "berkas SK Kenaikan Gaji Berkala tidak diupload pada pengajuan ini")
+		return
+	}
+	if r.URL.Query().Get("inline") == "1" {
+		w.Header().Set("Content-Type", dokumenContentType(item.SkKgbNama))
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", item.SkKgbNama))
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", item.SkKgbNama))
+	}
+	w.Write(item.SkKgbFile)
 }

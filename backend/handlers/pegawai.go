@@ -652,10 +652,16 @@ type pegawaiPayload struct {
 	TempatTgs    string `json:"tempat_tgs"`
 	TMT          string `json:"tmt"`
 	TglLahir     string `json:"tgl_lahir"`
-	NoHP         string `json:"no_hp"`
-	Email        string `json:"email"`
-	IDStatus     *uint  `json:"id_status"`
-	IDAtasan     *uint  `json:"id_atasan"`
+	// TglKenaikanGajiBerkalaTerakhir / TglKenaikanPangkatTerakhir: opsional,
+	// sama seperti TglLahir -- boleh diisi langsung oleh administrator di
+	// sini, ATAU diajukan pegawai sendiri lewat Profil Saya -> Ajukan
+	// Perubahan Data (lihat handlers/perubahan_data.go & models.Pegawai).
+	TglKenaikanGajiBerkalaTerakhir string `json:"tgl_kenaikan_gaji_berkala_terakhir"`
+	TglKenaikanPangkatTerakhir     string `json:"tgl_kenaikan_pangkat_terakhir"`
+	NoHP                           string `json:"no_hp"`
+	Email                          string `json:"email"`
+	IDStatus                       *uint  `json:"id_status"`
+	IDAtasan                       *uint  `json:"id_atasan"`
 }
 
 func applyPegawaiPayload(item *models.Pegawai, p pegawaiPayload) error {
@@ -682,6 +688,20 @@ func applyPegawaiPayload(item *models.Pegawai, p pegawaiPayload) error {
 			return err
 		}
 		item.TglLahir = &t
+	}
+	if p.TglKenaikanGajiBerkalaTerakhir != "" {
+		t, err := utils.ParseDateCell(p.TglKenaikanGajiBerkalaTerakhir)
+		if err != nil {
+			return err
+		}
+		item.TglKenaikanGajiBerkalaTerakhir = &t
+	}
+	if p.TglKenaikanPangkatTerakhir != "" {
+		t, err := utils.ParseDateCell(p.TglKenaikanPangkatTerakhir)
+		if err != nil {
+			return err
+		}
+		item.TglKenaikanPangkatTerakhir = &t
 	}
 	return nil
 }

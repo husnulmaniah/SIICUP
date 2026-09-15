@@ -183,6 +183,18 @@ export const tableConfigs = {
         type: 'date',
         hint: 'Dipakai untuk menghitung usia & kelayakan pensiun pegawai ini (lihat menu Pengajuan Pensiun).',
       },
+      {
+        field: 'tgl_kenaikan_gaji_berkala_terakhir',
+        label: 'Kenaikan Gaji Berkala Terakhir',
+        type: 'date',
+        hint: 'Opsional. Dipakai menghitung kapan kenaikan gaji berkala berikutnya jatuh tempo (lihat menu Perubahan Data Pegawai -> Pengaturan Kenaikan Gaji Berkala).',
+      },
+      {
+        field: 'tgl_kenaikan_pangkat_terakhir',
+        label: 'Kenaikan Pangkat Terakhir',
+        type: 'date',
+        hint: 'Opsional. Dipakai menghitung kapan kenaikan pangkat berikutnya jatuh tempo.',
+      },
       { field: 'no_hp', label: 'No HP', type: 'text' },
       { field: 'email', label: 'Email', type: 'text' },
     ],

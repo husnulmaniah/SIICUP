@@ -120,12 +120,23 @@ type Pegawai struct {
 	// PengaturanPensiun, dan Jabatan.JenisJabatan). Nullable karena data
 	// pegawai lama mungkin belum diisi administrator.
 	TglLahir *time.Time `json:"tgl_lahir" gorm:"column:tgl_lahir;type:date"`
-	NoHP     string     `json:"no_hp" gorm:"column:no_hp;size:20"`
-	IDStatus     *uint       `json:"id_status" gorm:"column:id_status"`
-	Status       *Status     `json:"status,omitempty" gorm:"foreignKey:IDStatus;references:ID"`
-	IDAtasan     *uint       `json:"id_atasan" gorm:"column:id_atasan"`
-	Atasan       *Pegawai    `json:"atasan,omitempty" gorm:"foreignKey:IDAtasan;references:ID"`
-	Email        string      `json:"email" gorm:"size:100"`
+	// TglKenaikanGajiBerkalaTerakhir / TglKenaikanPangkatTerakhir: tanggal
+	// kenaikan gaji berkala & kenaikan pangkat TERAKHIR pegawai ini -- opsional
+	// (boleh kosong), dipakai sebagai dasar menghitung kapan kenaikan
+	// berikutnya jatuh tempo berdasarkan interval per Jabatan.JenisJabatan
+	// (lihat models.PengaturanKenaikanGajiBerkala &
+	// handlers/kenaikan_gaji_berkala.go). Bisa diisi langsung oleh
+	// administrator lewat menu Data Pegawai, ATAU diajukan pegawai sendiri
+	// lewat Profil Saya -> Ajukan Perubahan Data (baru berlaku setelah
+	// disetujui, lihat handlers/perubahan_data.go).
+	TglKenaikanGajiBerkalaTerakhir *time.Time `json:"tgl_kenaikan_gaji_berkala_terakhir" gorm:"column:tgl_kenaikan_gaji_berkala_terakhir;type:date"`
+	TglKenaikanPangkatTerakhir     *time.Time `json:"tgl_kenaikan_pangkat_terakhir" gorm:"column:tgl_kenaikan_pangkat_terakhir;type:date"`
+	NoHP                           string     `json:"no_hp" gorm:"column:no_hp;size:20"`
+	IDStatus                       *uint      `json:"id_status" gorm:"column:id_status"`
+	Status                         *Status    `json:"status,omitempty" gorm:"foreignKey:IDStatus;references:ID"`
+	IDAtasan                       *uint      `json:"id_atasan" gorm:"column:id_atasan"`
+	Atasan                         *Pegawai   `json:"atasan,omitempty" gorm:"foreignKey:IDAtasan;references:ID"`
+	Email                          string     `json:"email" gorm:"size:100"`
 
 	// Dokumen kepegawaian (disimpan langsung di database sebagai bytea agar
 	// tidak hilang saat container backend di-redeploy/restart).
@@ -170,7 +181,7 @@ type User struct {
 	// utamanya -- jadi pegawai yang sama tetap bisa absen & mengajukan cuti
 	// sendiri lewat akun yang sama (tidak perlu akun terpisah). Lihat
 	// RegisterAbsensiRoutes (absensi.go) & utils.Claims.IsAdminAbsensi.
-	IsAdminAbsensi bool      `json:"is_admin_absensi" gorm:"column:is_admin_absensi;default:false"`
+	IsAdminAbsensi bool `json:"is_admin_absensi" gorm:"column:is_admin_absensi;default:false"`
 	// Aktif: false berarti akun ini TERTUTUP -- tidak bisa login (lihat
 	// LoginHandler) dan setiap request API dari akun ini langsung ditolak
 	// (lihat middleware.RequireActiveUser), walau token JWT-nya masih
@@ -316,13 +327,20 @@ func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
 // pegawaiEditableData) supaya halaman review admin bisa menampilkan
 // perbandingan sebelum/sesudah.
 type PerubahanDataPegawai struct {
-	ID             uint       `json:"id" gorm:"primaryKey"`
-	IDPegawai      uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
-	Pegawai        *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
-	DataLama       string     `json:"data_lama" gorm:"column:data_lama;type:text"`
-	DataBaru       string     `json:"data_baru" gorm:"column:data_baru;type:text"`
-	SkNamaFile     string     `json:"sk_nama_file" gorm:"column:sk_nama_file;size:255"`
-	SkFile         []byte     `json:"-" gorm:"column:sk_file;type:bytea"`
+	ID         uint     `json:"id" gorm:"primaryKey"`
+	IDPegawai  uint     `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai    *Pegawai `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	DataLama   string   `json:"data_lama" gorm:"column:data_lama;type:text"`
+	DataBaru   string   `json:"data_baru" gorm:"column:data_baru;type:text"`
+	SkNamaFile string   `json:"sk_nama_file" gorm:"column:sk_nama_file;size:255"`
+	SkFile     []byte   `json:"-" gorm:"column:sk_file;type:bytea"`
+	// SkKgbNama/SkKgbFile: berkas SK Kenaikan Gaji Berkala yang diupload
+	// pegawai bersamaan dengan pengajuan ini -- SEPENUHNYA opsional (berbeda
+	// dari SkNamaFile/SkFile di atas yang wajib), jadi boleh kosong. Kalau
+	// diisi, disalin jadi dokumen SK Kenaikan Gaji Berkala resmi pegawai
+	// begitu pengajuan ini disetujui (lihat approvePerubahanData).
+	SkKgbNama      string     `json:"sk_kgb_nama" gorm:"column:sk_kgb_nama;size:255"`
+	SkKgbFile      []byte     `json:"-" gorm:"column:sk_kgb_file;type:bytea"`
 	Status         string     `json:"status" gorm:"size:20;default:pending"`
 	CatatanAdmin   string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
 	DiputuskanOleh string     `json:"diputuskan_oleh" gorm:"column:diputuskan_oleh;size:150"`
@@ -348,6 +366,30 @@ type PengaturanPensiun struct {
 }
 
 func (PengaturanPensiun) TableName() string { return "pengaturan_pensiun" }
+
+// ============================================================
+// PENGATURAN KENAIKAN GAJI BERKALA & KENAIKAN PANGKAT
+// ============================================================
+
+// PengaturanKenaikanGajiBerkala adalah baris tunggal (id=1, sama seperti
+// PengaturanPensiun) berisi interval (dalam tahun) kenaikan gaji berkala &
+// kenaikan pangkat standar, masing-masing dibedakan per
+// Jabatan.JenisJabatan: Fungsional vs Pelaksana/Struktural -- lihat
+// handlers/kenaikan_gaji_berkala.go. Hanya bisa diubah administrator/admin
+// lewat menu Perubahan Data Pegawai -> tab Pengaturan Kenaikan Gaji
+// Berkala. Dipakai murni untuk menghitung & menampilkan kapan kenaikan
+// berikutnya jatuh tempo (berdasarkan Pegawai.TglKenaikanGajiBerkalaTerakhir
+// / TglKenaikanPangkatTerakhir) -- bukan alur pengajuan/persetujuan
+// tersendiri seperti PengajuanPensiun.
+type PengaturanKenaikanGajiBerkala struct {
+	ID                                  uint `json:"id" gorm:"primaryKey"`
+	GajiBerkalaFungsionalTahun          int  `json:"gaji_berkala_fungsional_tahun" gorm:"column:gaji_berkala_fungsional_tahun;not null;default:1"`
+	GajiBerkalaPelaksanaStrukturalTahun int  `json:"gaji_berkala_pelaksana_struktural_tahun" gorm:"column:gaji_berkala_pelaksana_struktural_tahun;not null;default:2"`
+	PangkatFungsionalTahun              int  `json:"pangkat_fungsional_tahun" gorm:"column:pangkat_fungsional_tahun;not null;default:2"`
+	PangkatPelaksanaStrukturalTahun     int  `json:"pangkat_pelaksana_struktural_tahun" gorm:"column:pangkat_pelaksana_struktural_tahun;not null;default:4"`
+}
+
+func (PengaturanKenaikanGajiBerkala) TableName() string { return "pengaturan_kenaikan_gaji_berkala" }
 
 // PengajuanPensiun: pegawai mengajukan pensiun sendiri lewat halaman Profil
 // Saya (mengupload SK/usulan pensiun), administrator/admin lalu

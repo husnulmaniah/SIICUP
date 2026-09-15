@@ -270,3 +270,30 @@ func EnsurePengaturanPensiun(db *gorm.DB) {
 		log.Println("pengaturan pensiun default dibuat (bisa diubah dari menu Pengajuan Pensiun)")
 	}
 }
+
+// EnsurePengaturanKenaikanGajiBerkala memastikan selalu ada tepat satu baris
+// pengaturan (ID=1) interval kenaikan gaji berkala & kenaikan pangkat
+// default (Gaji Berkala: 1 tahun untuk Fungsional, 2 tahun untuk
+// Pelaksana/Struktural; Kenaikan Pangkat: 2 tahun untuk Fungsional, 4 tahun
+// untuk Pelaksana/Struktural) -- idempotent, sama seperti
+// EnsurePengaturanPensiun. Nilainya bisa diubah administrator/admin lewat
+// menu Perubahan Data Pegawai -> tab Pengaturan Kenaikan Gaji Berkala (lihat
+// handlers/kenaikan_gaji_berkala.go).
+func EnsurePengaturanKenaikanGajiBerkala(db *gorm.DB) {
+	var count int64
+	db.Model(&models.PengaturanKenaikanGajiBerkala{}).Count(&count)
+	if count > 0 {
+		return
+	}
+	if err := db.Create(&models.PengaturanKenaikanGajiBerkala{
+		ID:                                  1,
+		GajiBerkalaFungsionalTahun:          1,
+		GajiBerkalaPelaksanaStrukturalTahun: 2,
+		PangkatFungsionalTahun:              2,
+		PangkatPelaksanaStrukturalTahun:     4,
+	}).Error; err != nil {
+		log.Printf("gagal membuat pengaturan kenaikan gaji berkala default: %v", err)
+	} else {
+		log.Println("pengaturan kenaikan gaji berkala default dibuat (bisa diubah dari menu Perubahan Data Pegawai)")
+	}
+}

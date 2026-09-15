@@ -5,6 +5,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 import { useProfilePhoto } from '../composables/useProfilePhoto'
 import { jenisJabatanLabels } from '../config/tables'
+import { hitungKelayakanKenaikan } from '../utils/date'
 
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -173,6 +174,40 @@ const usiaPensiunSaya = computed(() =>
 )
 const sudahMemenuhiUsiaPensiun = computed(() => usiaSaya.value != null && usiaSaya.value >= usiaPensiunSaya.value)
 
+// ============================================================
+// Kelayakan Kenaikan Gaji Berkala & Kenaikan Pangkat -- dihitung murni untuk
+// TAMPILAN dari Pegawai.TglKenaikanGajiBerkalaTerakhir/
+// TglKenaikanPangkatTerakhir (opsional, diisi lewat Ajukan Perubahan Data di
+// bawah atau langsung oleh administrator) + interval standar per jenis
+// jabatan (lihat models.PengaturanKenaikanGajiBerkala di backend). Tidak ada
+// alur pengajuan/persetujuan tersendiri seperti Pensiun -- hanya perkiraan.
+// ============================================================
+const pengaturanKgb = ref({
+  gaji_berkala_fungsional_tahun: 1,
+  gaji_berkala_pelaksana_struktural_tahun: 2,
+  pangkat_fungsional_tahun: 2,
+  pangkat_pelaksana_struktural_tahun: 4,
+})
+
+async function loadPengaturanKgb() {
+  try {
+    const { data } = await http.get('/pengaturan-kenaikan-gaji-berkala')
+    pengaturanKgb.value = data.data
+  } catch (e) {
+    // biarkan pakai default kalau gagal memuat -- hanya tampilan perkiraan
+  }
+}
+
+const isFungsional = computed(() => profile.value?.jabatan?.jenis_jabatan === 'fungsional')
+const intervalGajiBerkalaSaya = computed(() =>
+  isFungsional.value ? pengaturanKgb.value.gaji_berkala_fungsional_tahun : pengaturanKgb.value.gaji_berkala_pelaksana_struktural_tahun,
+)
+const intervalPangkatSaya = computed(() =>
+  isFungsional.value ? pengaturanKgb.value.pangkat_fungsional_tahun : pengaturanKgb.value.pangkat_pelaksana_struktural_tahun,
+)
+const kelayakanGajiBerkalaSaya = computed(() => hitungKelayakanKenaikan(profile.value?.tgl_kenaikan_gaji_berkala_terakhir, intervalGajiBerkalaSaya.value))
+const kelayakanPangkatSaya = computed(() => hitungKelayakanKenaikan(profile.value?.tgl_kenaikan_pangkat_terakhir, intervalPangkatSaya.value))
+
 const pensiunDialogVisible = ref(false)
 const pensiunSaving = ref(false)
 const pensiunFormErrors = ref('')
@@ -282,6 +317,7 @@ onMounted(() => {
   loadRefs()
   loadRiwayatPensiun()
   loadPengaturanPensiun()
+  loadPengaturanKgb()
 })
 
 function jabatanLabel(id) {
@@ -311,14 +347,19 @@ const form = reactive({
   tempat_tgs: '',
   tmt: null,
   tgl_lahir: null,
+  tgl_kenaikan_gaji_berkala_terakhir: null,
+  tgl_kenaikan_pangkat_terakhir: null,
   no_hp: '',
   id_status: null,
   email: '',
 })
 const skFile = ref(null)
 const skFileInputRef = ref(null)
+const skKgbFile = ref(null)
+const skKgbFileInputRef = ref(null)
 
 const hasSkTerakhir = computed(() => !!profile.value?.sk_terakhir_nama)
+const hasSkKgb = computed(() => !!profile.value?.sk_kgb_nama)
 
 function openAjukan() {
   if (!profile.value) return
@@ -329,12 +370,29 @@ function openAjukan() {
   form.tempat_tgs = profile.value.tempat_tgs || ''
   form.tmt = profile.value.tmt ? new Date(profile.value.tmt) : null
   form.tgl_lahir = profile.value.tgl_lahir ? new Date(profile.value.tgl_lahir) : null
+  form.tgl_kenaikan_gaji_berkala_terakhir = profile.value.tgl_kenaikan_gaji_berkala_terakhir ? new Date(profile.value.tgl_kenaikan_gaji_berkala_terakhir) : null
+  form.tgl_kenaikan_pangkat_terakhir = profile.value.tgl_kenaikan_pangkat_terakhir ? new Date(profile.value.tgl_kenaikan_pangkat_terakhir) : null
   form.no_hp = profile.value.no_hp || ''
   form.id_status = profile.value.id_status || null
   form.email = profile.value.email || ''
   skFile.value = null
+  skKgbFile.value = null
   formErrors.value = ''
   dialogVisible.value = true
+}
+
+async function previewSkKgbSaatIni() {
+  if (!profile.value?.id) return
+  try {
+    const res = await http.get(`/pegawai/${profile.value.id}/dokumen/sk-kgb`, { responseType: 'blob' })
+    const ext = (profile.value.sk_kgb_nama || '').split('.').pop().toLowerCase()
+    previewType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    previewTitle.value = 'Berkas SK Kenaikan Gaji Berkala Saat Ini'
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
 }
 
 async function previewSkTerakhirSaatIni() {
@@ -356,6 +414,13 @@ function pickSkFile() {
 }
 function onSkFileChosen(e) {
   skFile.value = e.target.files[0] || null
+}
+
+function pickSkKgbFile() {
+  skKgbFileInputRef.value?.click()
+}
+function onSkKgbFileChosen(e) {
+  skKgbFile.value = e.target.files[0] || null
 }
 
 function toDateStr(d) {
@@ -385,6 +450,8 @@ async function submitAjukan() {
       tempat_tgs: form.tempat_tgs,
       tmt: toDateStr(form.tmt),
       tgl_lahir: toDateStr(form.tgl_lahir),
+      tgl_kenaikan_gaji_berkala_terakhir: toDateStr(form.tgl_kenaikan_gaji_berkala_terakhir),
+      tgl_kenaikan_pangkat_terakhir: toDateStr(form.tgl_kenaikan_pangkat_terakhir),
       no_hp: form.no_hp,
       id_status: form.id_status,
       email: form.email,
@@ -392,6 +459,7 @@ async function submitAjukan() {
     const fd = new FormData()
     fd.append('data', JSON.stringify(payload))
     if (skFile.value) fd.append('file', skFile.value)
+    if (skKgbFile.value) fd.append('file_kgb', skKgbFile.value)
     await http.post('/perubahan-data', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({
       severity: 'success',
@@ -548,6 +616,39 @@ function formatDate(v) {
                 :severity="sudahMemenuhiUsiaPensiun ? 'warn' : 'success'"
               />
               <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi Tanggal Lahir untuk menghitung</span>
+            </div>
+          </div>
+          <div>
+            <span class="detail-label">Kenaikan Gaji Berkala Terakhir</span>
+            <div>
+              {{ formatDate(profile.tgl_kenaikan_gaji_berkala_terakhir) }}
+              <Button v-if="hasSkKgb" label="Lihat SK" text size="small" style="padding: 0 0.3rem" @click="previewSkKgbSaatIni" />
+            </div>
+          </div>
+          <div>
+            <span class="detail-label">Kelayakan Kenaikan Gaji Berkala</span>
+            <div>
+              <Tag
+                v-if="kelayakanGajiBerkalaSaya.jatuhTempo"
+                :value="kelayakanGajiBerkalaSaya.sudahWaktunya ? `Sudah waktunya (interval ${intervalGajiBerkalaSaya} tahun)` : `Jatuh tempo ${formatDate(kelayakanGajiBerkalaSaya.jatuhTempo)}`"
+                :severity="kelayakanGajiBerkalaSaya.sudahWaktunya ? 'warn' : 'success'"
+              />
+              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi tanggal kenaikan terakhir untuk menghitung</span>
+            </div>
+          </div>
+          <div>
+            <span class="detail-label">Kenaikan Pangkat Terakhir</span>
+            <div>{{ formatDate(profile.tgl_kenaikan_pangkat_terakhir) }}</div>
+          </div>
+          <div>
+            <span class="detail-label">Kelayakan Kenaikan Pangkat</span>
+            <div>
+              <Tag
+                v-if="kelayakanPangkatSaya.jatuhTempo"
+                :value="kelayakanPangkatSaya.sudahWaktunya ? `Sudah waktunya (interval ${intervalPangkatSaya} tahun)` : `Jatuh tempo ${formatDate(kelayakanPangkatSaya.jatuhTempo)}`"
+                :severity="kelayakanPangkatSaya.sudahWaktunya ? 'warn' : 'success'"
+              />
+              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi tanggal kenaikan terakhir untuk menghitung</span>
             </div>
           </div>
           <div><span class="detail-label">No HP</span><div>{{ profile.no_hp || '-' }}</div></div>
@@ -751,6 +852,41 @@ function formatDate(v) {
         <div class="col-12 md:col-6">
           <label class="field-label">Email</label>
           <InputText v-model="form.email" style="width: 100%" />
+        </div>
+        <div class="col-12 md:col-6">
+          <label class="field-label">
+            Kenaikan Gaji Berkala Terakhir
+            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+          </label>
+          <DatePicker v-model="form.tgl_kenaikan_gaji_berkala_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
+          <small style="color: var(--p-text-muted-color)">Dipakai menghitung kapan kenaikan gaji berkala berikutnya jatuh tempo.</small>
+        </div>
+        <div class="col-12 md:col-6">
+          <label class="field-label">
+            Kenaikan Pangkat Terakhir
+            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+          </label>
+          <DatePicker v-model="form.tgl_kenaikan_pangkat_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
+          <small style="color: var(--p-text-muted-color)">Dipakai menghitung kapan kenaikan pangkat berikutnya jatuh tempo.</small>
+        </div>
+        <div class="col-12">
+          <label class="field-label">
+            Berkas SK Kenaikan Gaji Berkala
+            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+          </label>
+          <div v-if="hasSkKgb" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem">
+            <Tag severity="info" value="SK Tersimpan" />
+            <span style="font-size: 0.85rem">{{ profile.sk_kgb_nama }}</span>
+            <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkKgbSaatIni" />
+          </div>
+          <input ref="skKgbFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkKgbFileChosen" />
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+            <Button :label="hasSkKgb ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkKgbFile" />
+            <span style="font-size: 0.85rem">{{ skKgbFile?.name || 'Belum ada berkas dipilih' }}</span>
+          </div>
+          <small style="color: var(--p-text-muted-color); display: block; margin-top: 0.3rem">
+            Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan gaji berkala terakhir anda.
+          </small>
         </div>
         <div class="col-12">
           <label class="field-label">

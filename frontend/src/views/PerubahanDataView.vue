@@ -13,6 +13,12 @@ import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import SelectButton from 'primevue/selectbutton'
+import InputNumber from 'primevue/inputnumber'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
+import TabPanels from 'primevue/tabpanels'
+import TabPanel from 'primevue/tabpanel'
 
 const toast = useToast()
 const confirm = useConfirm()
@@ -66,6 +72,7 @@ watch(statusFilter, fetchList)
 onMounted(() => {
   loadRefs()
   fetchList()
+  loadPengaturanKgb()
 })
 
 function jabatanLabel(id) {
@@ -111,6 +118,8 @@ function diffRows(row) {
     { key: 'tempat_tgs', label: 'Tempat Tugas' },
     { key: 'tmt', label: 'TMT', fmt: (v) => (v ? formatDate(v) : '-') },
     { key: 'tgl_lahir', label: 'Tanggal Lahir', fmt: (v) => (v ? formatDate(v) : '-') },
+    { key: 'tgl_kenaikan_gaji_berkala_terakhir', label: 'Kenaikan Gaji Berkala Terakhir', fmt: (v) => (v ? formatDate(v) : '-') },
+    { key: 'tgl_kenaikan_pangkat_terakhir', label: 'Kenaikan Pangkat Terakhir', fmt: (v) => (v ? formatDate(v) : '-') },
     { key: 'no_hp', label: 'No HP' },
     { key: 'id_status', label: 'Status Kepegawaian', fmt: statusPegawaiLabel },
     { key: 'email', label: 'Email' },
@@ -224,6 +233,86 @@ async function downloadSk(row) {
     toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
   }
 }
+
+// ---- lihat / unduh berkas SK Kenaikan Gaji Berkala (opsional, kalau
+// diupload pegawai saat mengajukan -- lihat backend/handlers/perubahan_data.go) ----
+async function previewSkKgb(row) {
+  try {
+    const res = await http.get(`/perubahan-data/${row.id}/dokumen-kgb`, { params: { inline: 1 }, responseType: 'blob' })
+    const ext = (row.sk_kgb_nama || '').split('.').pop().toLowerCase()
+    previewType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+async function downloadSkKgb(row) {
+  try {
+    const res = await http.get(`/perubahan-data/${row.id}/dokumen-kgb`, { responseType: 'blob' })
+    const blobUrl = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = row.sk_kgb_nama || 'sk-kgb'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(blobUrl)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
+  }
+}
+
+// ============================================================
+// Tab "Pengaturan Kenaikan Gaji Berkala" -- interval standar (tahun) untuk
+// kenaikan gaji berkala & kenaikan pangkat per jenis jabatan, bisa diubah
+// administrator/admin. Dipakai frontend (Profil Saya & Data Pegawai) untuk
+// MENGHITUNG & MENAMPILKAN kapan kenaikan berikutnya jatuh tempo -- lihat
+// backend/handlers/kenaikan_gaji_berkala.go. TIDAK ada alur
+// pengajuan/persetujuan tersendiri seperti Pensiun; tanggal kenaikan
+// terakhir & berkas SK-nya diajukan lewat tab "Perubahan Data" di atas
+// (pegawai lewat Profil Saya) atau diisi langsung di menu Data Pegawai.
+// ============================================================
+const pengaturanKgb = reactive({
+  gaji_berkala_fungsional_tahun: 1,
+  gaji_berkala_pelaksana_struktural_tahun: 2,
+  pangkat_fungsional_tahun: 2,
+  pangkat_pelaksana_struktural_tahun: 4,
+})
+const loadingPengaturanKgb = ref(false)
+const savingPengaturanKgb = ref(false)
+
+async function loadPengaturanKgb() {
+  loadingPengaturanKgb.value = true
+  try {
+    const { data } = await http.get('/pengaturan-kenaikan-gaji-berkala')
+    pengaturanKgb.gaji_berkala_fungsional_tahun = data.data.gaji_berkala_fungsional_tahun
+    pengaturanKgb.gaji_berkala_pelaksana_struktural_tahun = data.data.gaji_berkala_pelaksana_struktural_tahun
+    pengaturanKgb.pangkat_fungsional_tahun = data.data.pangkat_fungsional_tahun
+    pengaturanKgb.pangkat_pelaksana_struktural_tahun = data.data.pangkat_pelaksana_struktural_tahun
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat pengaturan', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    loadingPengaturanKgb.value = false
+  }
+}
+
+async function simpanPengaturanKgb() {
+  savingPengaturanKgb.value = true
+  try {
+    await http.put('/pengaturan-kenaikan-gaji-berkala', {
+      gaji_berkala_fungsional_tahun: pengaturanKgb.gaji_berkala_fungsional_tahun,
+      gaji_berkala_pelaksana_struktural_tahun: pengaturanKgb.gaji_berkala_pelaksana_struktural_tahun,
+      pangkat_fungsional_tahun: pengaturanKgb.pangkat_fungsional_tahun,
+      pangkat_pelaksana_struktural_tahun: pengaturanKgb.pangkat_pelaksana_struktural_tahun,
+    })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pengaturan kenaikan gaji berkala disimpan', life: 3000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    savingPengaturanKgb.value = false
+  }
+}
 </script>
 
 <template>
@@ -231,41 +320,90 @@ async function downloadSk(row) {
     <div class="page-title">Perubahan Data Pegawai</div>
     <p class="page-subtitle">Tinjau & setujui/tolak pengajuan perubahan data diri yang dikirim pegawai. Jika disetujui, data pegawai dan akun pegawai terkait diperbarui otomatis.</p>
 
-    <div class="card">
-      <SelectButton
-        v-model="statusFilter"
-        :options="statusFilterOptions"
-        optionLabel="label"
-        optionValue="value"
-        class="tab-filter"
-        style="width: 100%; flex-wrap: wrap"
-      />
+    <Tabs value="perubahan">
+      <TabList>
+        <Tab value="perubahan"><i class="pi pi-user-edit" style="margin-right: 0.4rem"></i> Perubahan Data</Tab>
+        <Tab value="pengaturan"><i class="pi pi-cog" style="margin-right: 0.4rem"></i> Pengaturan Kenaikan Gaji Berkala</Tab>
+      </TabList>
+      <TabPanels>
+        <TabPanel value="perubahan">
+          <div class="card">
+            <SelectButton
+              v-model="statusFilter"
+              :options="statusFilterOptions"
+              optionLabel="label"
+              optionValue="value"
+              class="tab-filter"
+              style="width: 100%; flex-wrap: wrap"
+            />
 
-      <div class="responsive-table-wrap">
-        <DataTable :value="items" :loading="loading" dataKey="id" stripedRows size="small" style="min-width: 640px">
-          <template #empty>
-            <div style="padding: 1.5rem; text-align: center; color: var(--p-text-muted-color)">Tidak ada data</div>
-          </template>
-          <Column field="pegawai.nama" header="Nama Pegawai">
-            <template #body="{ data }">{{ data.pegawai?.nama || '-' }}</template>
-          </Column>
-          <Column field="pegawai.nip" header="NIP" style="width: 170px">
-            <template #body="{ data }">{{ data.pegawai?.nip || '-' }}</template>
-          </Column>
-          <Column header="Tanggal Pengajuan" style="width: 170px">
-            <template #body="{ data }">{{ formatDate(data.created_at) }}</template>
-          </Column>
-          <Column header="Status" style="width: 140px">
-            <template #body="{ data }"><Tag :value="statusLabel(data.status)" :severity="statusSeverity(data.status)" /></template>
-          </Column>
-          <Column header="Aksi" style="width: 110px">
-            <template #body="{ data }">
-              <Button icon="pi pi-eye" size="small" severity="info" rounded text @click="openDetail(data)" />
+            <div class="responsive-table-wrap">
+              <DataTable :value="items" :loading="loading" dataKey="id" stripedRows size="small" style="min-width: 640px">
+                <template #empty>
+                  <div style="padding: 1.5rem; text-align: center; color: var(--p-text-muted-color)">Tidak ada data</div>
+                </template>
+                <Column field="pegawai.nama" header="Nama Pegawai">
+                  <template #body="{ data }">{{ data.pegawai?.nama || '-' }}</template>
+                </Column>
+                <Column field="pegawai.nip" header="NIP" style="width: 170px">
+                  <template #body="{ data }">{{ data.pegawai?.nip || '-' }}</template>
+                </Column>
+                <Column header="Tanggal Pengajuan" style="width: 170px">
+                  <template #body="{ data }">{{ formatDate(data.created_at) }}</template>
+                </Column>
+                <Column header="Status" style="width: 140px">
+                  <template #body="{ data }"><Tag :value="statusLabel(data.status)" :severity="statusSeverity(data.status)" /></template>
+                </Column>
+                <Column header="Aksi" style="width: 110px">
+                  <template #body="{ data }">
+                    <Button icon="pi pi-eye" size="small" severity="info" rounded text @click="openDetail(data)" />
+                  </template>
+                </Column>
+              </DataTable>
+            </div>
+          </div>
+        </TabPanel>
+
+        <TabPanel value="pengaturan">
+          <div class="card">
+            <div v-if="loadingPengaturanKgb" style="display: flex; justify-content: center; padding: 1.5rem">
+              <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
+            </div>
+            <template v-else>
+              <Message severity="info" :closable="false" style="margin-bottom: 1.25rem">
+                Interval standar ini dipakai untuk menghitung & menampilkan kapan kenaikan gaji berkala/pangkat berikutnya jatuh
+                tempo, berdasarkan tanggal kenaikan terakhir tiap pegawai (diisi lewat tab "Perubahan Data" di atas oleh pegawai
+                sendiri, atau langsung oleh administrator di menu Data Pegawai). Jenis Jabatan tiap pegawai diatur di menu Master
+                Data &rarr; Jabatan.
+              </Message>
+              <h4 style="margin: 0 0 0.75rem 0">Kenaikan Gaji Berkala</h4>
+              <div class="pengaturan-grid">
+                <div>
+                  <label class="field-label">Pelaksana &amp; Struktural (tahun sekali)</label>
+                  <InputNumber v-model="pengaturanKgb.gaji_berkala_pelaksana_struktural_tahun" :min="1" :max="10" showButtons style="width: 100%" fluid />
+                </div>
+                <div>
+                  <label class="field-label">Fungsional (tahun sekali)</label>
+                  <InputNumber v-model="pengaturanKgb.gaji_berkala_fungsional_tahun" :min="1" :max="10" showButtons style="width: 100%" fluid />
+                </div>
+              </div>
+              <h4 style="margin: 1.5rem 0 0.75rem 0">Kenaikan Pangkat</h4>
+              <div class="pengaturan-grid">
+                <div>
+                  <label class="field-label">Pelaksana &amp; Struktural (tahun sekali)</label>
+                  <InputNumber v-model="pengaturanKgb.pangkat_pelaksana_struktural_tahun" :min="1" :max="10" showButtons style="width: 100%" fluid />
+                </div>
+                <div>
+                  <label class="field-label">Fungsional (tahun sekali)</label>
+                  <InputNumber v-model="pengaturanKgb.pangkat_fungsional_tahun" :min="1" :max="10" showButtons style="width: 100%" fluid />
+                </div>
+              </div>
+              <Button label="Simpan Pengaturan" icon="pi pi-save" :loading="savingPengaturanKgb" style="margin-top: 1.25rem" @click="simpanPengaturanKgb" />
             </template>
-          </Column>
-        </DataTable>
-      </div>
-    </div>
+          </div>
+        </TabPanel>
+      </TabPanels>
+    </Tabs>
 
     <!-- Detail + review dialog -->
     <Dialog v-model:visible="detailDialog" modal header="Detail Pengajuan Perubahan Data" :style="{ width: '44rem', maxWidth: '95vw' }">
@@ -304,6 +442,15 @@ async function downloadSk(row) {
             <span style="font-size: 0.85rem">{{ detailRow.sk_nama_file || '-' }}</span>
             <Button icon="pi pi-eye" size="small" severity="secondary" outlined label="Lihat" @click="previewSk(detailRow)" />
             <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadSk(detailRow)" />
+          </div>
+        </div>
+
+        <div v-if="detailRow.sk_kgb_nama" style="margin-top: 1rem">
+          <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem">Berkas SK Kenaikan Gaji Berkala (opsional)</div>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+            <span style="font-size: 0.85rem">{{ detailRow.sk_kgb_nama }}</span>
+            <Button icon="pi pi-eye" size="small" severity="secondary" outlined label="Lihat" @click="previewSkKgb(detailRow)" />
+            <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadSkKgb(detailRow)" />
           </div>
         </div>
 
@@ -381,5 +528,17 @@ async function downloadSk(row) {
 .diff-table tr.changed td:nth-child(2) {
   color: #9ca3af;
   text-decoration: line-through;
+}
+
+.pengaturan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 480px) {
+  .pengaturan-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
