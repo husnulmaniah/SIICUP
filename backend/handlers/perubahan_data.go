@@ -76,6 +76,36 @@ func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
 	}
 }
 
+// optionalSkFile membaca file upload OPSIONAL dari field multipart bernama
+// `field` (dipakai untuk SK Kenaikan Gaji Berkala & SK Kenaikan Pangkat di
+// createPerubahanData -- BERBEDA dari berkas "file"/SK Terakhir yang wajib).
+// Kalau field tidak diisi sama sekali, itu BUKAN error -- return
+// ("", nil, true). Kalau formatnya salah atau gagal dibaca, response error
+// langsung ditulis ke w dan ok=false (pemanggil harus langsung `return`).
+func optionalSkFile(w http.ResponseWriter, r *http.Request, field, label string) (namaFile string, fileData []byte, ok bool) {
+	fh := formFileHeader(r, field)
+	if fh == nil {
+		return "", nil, true
+	}
+	ext := strings.ToLower(fh.Filename[strings.LastIndex(fh.Filename, "."):])
+	if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		utils.Error(w, http.StatusBadRequest, "berkas "+label+" harus berformat PDF, JPG, atau PNG")
+		return "", nil, false
+	}
+	f, err := fh.Open()
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas "+label)
+		return "", nil, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas "+label)
+		return "", nil, false
+	}
+	return fh.Filename, data, true
+}
+
 func RegisterPerubahanDataRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
 		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole(roles...))
@@ -98,6 +128,7 @@ func RegisterPerubahanDataRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/perubahan-data/{id}/reject", manage(func(w http.ResponseWriter, r *http.Request) { rejectPerubahanData(w, r, db) }))
 	mux.Handle("GET /api/perubahan-data/{id}/dokumen", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenPerubahanData(w, r, db) }))
 	mux.Handle("GET /api/perubahan-data/{id}/dokumen-kgb", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenKgbPerubahanData(w, r, db) }))
+	mux.Handle("GET /api/perubahan-data/{id}/dokumen-pangkat", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadDokumenPangkatPerubahanData(w, r, db) }))
 }
 
 func canAccessPerubahanData(claims *utils.Claims, item models.PerubahanDataPegawai) bool {
@@ -257,45 +288,34 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		skFileData = fileData
 	}
 
-	// Berkas SK Kenaikan Gaji Berkala: SEPENUHNYA opsional (berbeda dari SK
-	// Terakhir di atas) -- kalau tidak diupload, cukup dilewati saja tanpa
-	// error apapun, dan SK KGB yang sudah tersimpan di data pegawai TIDAK
-	// akan disentuh saat pengajuan ini disetujui (lihat approvePerubahanData).
-	var skKgbNamaFile string
-	var skKgbFileData []byte
-	if fhKgb := formFileHeader(r, "file_kgb"); fhKgb != nil {
-		ext := strings.ToLower(fhKgb.Filename[strings.LastIndex(fhKgb.Filename, "."):])
-		if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-			utils.Error(w, http.StatusBadRequest, "berkas SK Kenaikan Gaji Berkala harus berformat PDF, JPG, atau PNG")
-			return
-		}
-		fk, err := fhKgb.Open()
-		if err != nil {
-			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK Kenaikan Gaji Berkala")
-			return
-		}
-		fileData, err := io.ReadAll(fk)
-		fk.Close()
-		if err != nil {
-			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK Kenaikan Gaji Berkala")
-			return
-		}
-		skKgbNamaFile = fhKgb.Filename
-		skKgbFileData = fileData
+	// Berkas SK Kenaikan Gaji Berkala & SK Kenaikan Pangkat: SEPENUHNYA
+	// opsional (berbeda dari SK Terakhir di atas) -- kalau tidak diupload,
+	// cukup dilewati saja tanpa error apapun, dan SK yang sudah tersimpan di
+	// data pegawai TIDAK akan disentuh saat pengajuan ini disetujui (lihat
+	// approvePerubahanData & optionalSkFile).
+	skKgbNamaFile, skKgbFileData, ok := optionalSkFile(w, r, "file_kgb", "SK Kenaikan Gaji Berkala")
+	if !ok {
+		return
+	}
+	skPangkatNamaFile, skPangkatFileData, ok := optionalSkFile(w, r, "file_pangkat", "SK Kenaikan Pangkat")
+	if !ok {
+		return
 	}
 
 	lamaJSON, _ := json.Marshal(pegawaiSnapshot(pegawai))
 	baruJSON, _ := json.Marshal(baru)
 
 	item := models.PerubahanDataPegawai{
-		IDPegawai:  *claims.IDPegawai,
-		DataLama:   string(lamaJSON),
-		DataBaru:   string(baruJSON),
-		SkNamaFile: skNamaFile,
-		SkFile:     skFileData,
-		SkKgbNama:  skKgbNamaFile,
-		SkKgbFile:  skKgbFileData,
-		Status:     models.StatusPending,
+		IDPegawai:     *claims.IDPegawai,
+		DataLama:      string(lamaJSON),
+		DataBaru:      string(baruJSON),
+		SkNamaFile:    skNamaFile,
+		SkFile:        skFileData,
+		SkKgbNama:     skKgbNamaFile,
+		SkKgbFile:     skKgbFileData,
+		SkPangkatNama: skPangkatNamaFile,
+		SkPangkatFile: skPangkatFileData,
+		Status:        models.StatusPending,
 	}
 	if err := db.Create(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan pengajuan: "+err.Error())
@@ -425,6 +445,12 @@ func approvePerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		updates["sk_kgb_nama"] = item.SkKgbNama
 		updates["sk_kgb_file"] = item.SkKgbFile
 	}
+	// SK Kenaikan Pangkat: sama seperti SK KGB di atas -- hanya disentuh
+	// kalau memang diupload pegawai saat mengajukan.
+	if item.SkPangkatNama != "" && len(item.SkPangkatFile) > 0 {
+		updates["sk_pangkat_nama"] = item.SkPangkatNama
+		updates["sk_pangkat_file"] = item.SkPangkatFile
+	}
 
 	if err := db.Model(&models.Pegawai{}).Where("id = ?", item.IDPegawai).Updates(updates).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal memperbarui data pegawai: "+err.Error())
@@ -536,4 +562,33 @@ func downloadDokumenKgbPerubahanData(w http.ResponseWriter, r *http.Request, db 
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", item.SkKgbNama))
 	}
 	w.Write(item.SkKgbFile)
+}
+
+// downloadDokumenPangkatPerubahanData mengunduh/menampilkan berkas SK
+// Kenaikan Pangkat yang diupload pegawai bersamaan dengan pengajuan ini --
+// SEPENUHNYA opsional, jadi bisa saja belum ada (lihat createPerubahanData).
+func downloadDokumenPangkatPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.PerubahanDataPegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessPerubahanData(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
+		return
+	}
+	if len(item.SkPangkatFile) == 0 {
+		utils.Error(w, http.StatusNotFound, "berkas SK Kenaikan Pangkat tidak diupload pada pengajuan ini")
+		return
+	}
+	if r.URL.Query().Get("inline") == "1" {
+		w.Header().Set("Content-Type", dokumenContentType(item.SkPangkatNama))
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", item.SkPangkatNama))
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", item.SkPangkatNama))
+	}
+	w.Write(item.SkPangkatFile)
 }

@@ -357,9 +357,12 @@ const skFile = ref(null)
 const skFileInputRef = ref(null)
 const skKgbFile = ref(null)
 const skKgbFileInputRef = ref(null)
+const skPangkatFile = ref(null)
+const skPangkatFileInputRef = ref(null)
 
 const hasSkTerakhir = computed(() => !!profile.value?.sk_terakhir_nama)
 const hasSkKgb = computed(() => !!profile.value?.sk_kgb_nama)
+const hasSkPangkat = computed(() => !!profile.value?.sk_pangkat_nama)
 
 function openAjukan() {
   if (!profile.value) return
@@ -377,6 +380,7 @@ function openAjukan() {
   form.email = profile.value.email || ''
   skFile.value = null
   skKgbFile.value = null
+  skPangkatFile.value = null
   formErrors.value = ''
   dialogVisible.value = true
 }
@@ -389,6 +393,20 @@ async function previewSkKgbSaatIni() {
     previewType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
     previewUrl.value = window.URL.createObjectURL(res.data)
     previewTitle.value = 'Berkas SK Kenaikan Gaji Berkala Saat Ini'
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
+async function previewSkPangkatSaatIni() {
+  if (!profile.value?.id) return
+  try {
+    const res = await http.get(`/pegawai/${profile.value.id}/dokumen/sk-pangkat`, { responseType: 'blob' })
+    const ext = (profile.value.sk_pangkat_nama || '').split('.').pop().toLowerCase()
+    previewType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    previewTitle.value = 'Berkas SK Kenaikan Pangkat Saat Ini'
     previewDialog.value = true
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
@@ -421,6 +439,13 @@ function pickSkKgbFile() {
 }
 function onSkKgbFileChosen(e) {
   skKgbFile.value = e.target.files[0] || null
+}
+
+function pickSkPangkatFile() {
+  skPangkatFileInputRef.value?.click()
+}
+function onSkPangkatFileChosen(e) {
+  skPangkatFile.value = e.target.files[0] || null
 }
 
 function toDateStr(d) {
@@ -460,6 +485,7 @@ async function submitAjukan() {
     fd.append('data', JSON.stringify(payload))
     if (skFile.value) fd.append('file', skFile.value)
     if (skKgbFile.value) fd.append('file_kgb', skKgbFile.value)
+    if (skPangkatFile.value) fd.append('file_pangkat', skPangkatFile.value)
     await http.post('/perubahan-data', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({
       severity: 'success',
@@ -638,7 +664,10 @@ function formatDate(v) {
           </div>
           <div>
             <span class="detail-label">Kenaikan Pangkat Terakhir</span>
-            <div>{{ formatDate(profile.tgl_kenaikan_pangkat_terakhir) }}</div>
+            <div>
+              {{ formatDate(profile.tgl_kenaikan_pangkat_terakhir) }}
+              <Button v-if="hasSkPangkat" label="Lihat SK" text size="small" style="padding: 0 0.3rem" @click="previewSkPangkatSaatIni" />
+            </div>
           </div>
           <div>
             <span class="detail-label">Kelayakan Kenaikan Pangkat</span>
@@ -802,7 +831,7 @@ function formatDate(v) {
       <Message severity="info" :closable="false" style="margin-bottom: 1rem">
         NIP tidak bisa diubah lewat form ini. Perubahan yang anda ajukan baru berlaku setelah disetujui administrator/admin.
       </Message>
-      <div class="grid formgrid">
+      <div class="grid formgrid ajukan-form-grid">
         <div class="col-12">
           <label class="field-label">Nama <span style="color: #ef4444">*</span></label>
           <InputText v-model="form.nama" style="width: 100%" />
@@ -843,7 +872,7 @@ function formatDate(v) {
         <div class="col-12 md:col-6">
           <label class="field-label">Tanggal Lahir</label>
           <DatePicker v-model="form.tgl_lahir" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
-          <small style="color: var(--p-text-muted-color)">Dipakai untuk menghitung usia & kelayakan pensiun anda.</small>
+          <small class="field-hint">Dipakai untuk menghitung usia &amp; kelayakan pensiun anda.</small>
         </div>
         <div class="col-12 md:col-6">
           <label class="field-label">No HP</label>
@@ -859,7 +888,7 @@ function formatDate(v) {
             <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
           </label>
           <DatePicker v-model="form.tgl_kenaikan_gaji_berkala_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
-          <small style="color: var(--p-text-muted-color)">Dipakai menghitung kapan kenaikan gaji berkala berikutnya jatuh tempo.</small>
+          <small class="field-hint">Dipakai menghitung kapan kenaikan gaji berkala berikutnya jatuh tempo.</small>
         </div>
         <div class="col-12 md:col-6">
           <label class="field-label">
@@ -867,26 +896,49 @@ function formatDate(v) {
             <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
           </label>
           <DatePicker v-model="form.tgl_kenaikan_pangkat_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
-          <small style="color: var(--p-text-muted-color)">Dipakai menghitung kapan kenaikan pangkat berikutnya jatuh tempo.</small>
+          <small class="field-hint">Dipakai menghitung kapan kenaikan pangkat berikutnya jatuh tempo.</small>
         </div>
         <div class="col-12">
           <label class="field-label">
             Berkas SK Kenaikan Gaji Berkala
             <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
           </label>
-          <div v-if="hasSkKgb" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem">
-            <Tag severity="info" value="SK Tersimpan" />
-            <span style="font-size: 0.85rem">{{ profile.sk_kgb_nama }}</span>
-            <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkKgbSaatIni" />
+          <div class="doc-upload-box">
+            <div v-if="hasSkKgb" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem">
+              <Tag severity="info" value="SK Tersimpan" />
+              <span style="font-size: 0.85rem">{{ profile.sk_kgb_nama }}</span>
+              <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkKgbSaatIni" />
+            </div>
+            <input ref="skKgbFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkKgbFileChosen" />
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+              <Button :label="hasSkKgb ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkKgbFile" />
+              <span style="font-size: 0.85rem">{{ skKgbFile?.name || 'Belum ada berkas dipilih' }}</span>
+            </div>
+            <small class="field-hint">
+              Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan gaji berkala terakhir anda.
+            </small>
           </div>
-          <input ref="skKgbFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkKgbFileChosen" />
-          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
-            <Button :label="hasSkKgb ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkKgbFile" />
-            <span style="font-size: 0.85rem">{{ skKgbFile?.name || 'Belum ada berkas dipilih' }}</span>
+        </div>
+        <div class="col-12">
+          <label class="field-label">
+            Berkas SK Kenaikan Pangkat
+            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+          </label>
+          <div class="doc-upload-box">
+            <div v-if="hasSkPangkat" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem">
+              <Tag severity="info" value="SK Tersimpan" />
+              <span style="font-size: 0.85rem">{{ profile.sk_pangkat_nama }}</span>
+              <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkPangkatSaatIni" />
+            </div>
+            <input ref="skPangkatFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkPangkatFileChosen" />
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+              <Button :label="hasSkPangkat ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkPangkatFile" />
+              <span style="font-size: 0.85rem">{{ skPangkatFile?.name || 'Belum ada berkas dipilih' }}</span>
+            </div>
+            <small class="field-hint">
+              Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan pangkat terakhir anda.
+            </small>
           </div>
-          <small style="color: var(--p-text-muted-color); display: block; margin-top: 0.3rem">
-            Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan gaji berkala terakhir anda.
-          </small>
         </div>
         <div class="col-12">
           <label class="field-label">
@@ -894,20 +946,22 @@ function formatDate(v) {
             <span v-if="!hasSkTerakhir" style="color: #ef4444">*</span>
             <span v-else style="font-weight: 400; color: var(--p-text-muted-color)">(opsional jika tidak diganti)</span>
           </label>
-          <div v-if="hasSkTerakhir" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem">
-            <Tag severity="info" value="SK Tersimpan" />
-            <span style="font-size: 0.85rem">{{ profile.sk_terakhir_nama }}</span>
-            <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkTerakhirSaatIni" />
+          <div class="doc-upload-box">
+            <div v-if="hasSkTerakhir" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem">
+              <Tag severity="info" value="SK Tersimpan" />
+              <span style="font-size: 0.85rem">{{ profile.sk_terakhir_nama }}</span>
+              <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkTerakhirSaatIni" />
+            </div>
+            <input ref="skFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkFileChosen" />
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+              <Button :label="hasSkTerakhir ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkFile" />
+              <span style="font-size: 0.85rem">{{ skFile?.name || 'Belum ada berkas dipilih' }}</span>
+            </div>
+            <small class="field-hint">
+              <template v-if="hasSkTerakhir">Jika SK terakhir sudah sesuai dan tidak ingin diganti, berkas ini tidak perlu diupload ulang. Upload berkas baru hanya jika ingin mengganti SK.</template>
+              <template v-else>Format PDF, JPG, atau PNG. Berkas ini menjadi dasar &amp; bukti perubahan data yang diajukan.</template>
+            </small>
           </div>
-          <input ref="skFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkFileChosen" />
-          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
-            <Button :label="hasSkTerakhir ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkFile" />
-            <span style="font-size: 0.85rem">{{ skFile?.name || 'Belum ada berkas dipilih' }}</span>
-          </div>
-          <small style="color: var(--p-text-muted-color); display: block; margin-top: 0.3rem">
-            <template v-if="hasSkTerakhir">Jika SK terakhir sudah sesuai dan tidak ingin diganti, berkas ini tidak perlu diupload ulang. Upload berkas baru hanya jika ingin mengganti SK.</template>
-            <template v-else>Format PDF, JPG, atau PNG. Berkas ini menjadi dasar & bukti perubahan data yang diajukan.</template>
-          </small>
         </div>
       </div>
       <template #footer>
@@ -937,6 +991,30 @@ function formatDate(v) {
   font-size: 0.85rem;
   font-weight: 600;
   margin-bottom: 0.35rem;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: #ef4444;
+  line-height: 1.4;
+}
+
+.ajukan-form-grid {
+  row-gap: 1.1rem;
+}
+
+.ajukan-form-grid > div {
+  margin-bottom: 0.15rem;
+}
+
+.doc-upload-box {
+  background: var(--p-surface-50, #f8fafc);
+  border: 1px solid var(--p-surface-200, #e2e8f0);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
 }
 
 .foto-profil-row {

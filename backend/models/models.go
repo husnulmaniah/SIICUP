@@ -144,6 +144,8 @@ type Pegawai struct {
 	SkTerakhirFile []byte `json:"-" gorm:"column:sk_terakhir_file;type:bytea"`
 	SkKgbNama      string `json:"sk_kgb_nama" gorm:"column:sk_kgb_nama;size:255"`
 	SkKgbFile      []byte `json:"-" gorm:"column:sk_kgb_file;type:bytea"`
+	SkPangkatNama  string `json:"sk_pangkat_nama" gorm:"column:sk_pangkat_nama;size:255"`
+	SkPangkatFile  []byte `json:"-" gorm:"column:sk_pangkat_file;type:bytea"`
 	SkPensiunNama  string `json:"sk_pensiun_nama" gorm:"column:sk_pensiun_nama;size:255"`
 	SkPensiunFile  []byte `json:"-" gorm:"column:sk_pensiun_file;type:bytea"`
 
@@ -339,8 +341,13 @@ type PerubahanDataPegawai struct {
 	// dari SkNamaFile/SkFile di atas yang wajib), jadi boleh kosong. Kalau
 	// diisi, disalin jadi dokumen SK Kenaikan Gaji Berkala resmi pegawai
 	// begitu pengajuan ini disetujui (lihat approvePerubahanData).
-	SkKgbNama      string     `json:"sk_kgb_nama" gorm:"column:sk_kgb_nama;size:255"`
-	SkKgbFile      []byte     `json:"-" gorm:"column:sk_kgb_file;type:bytea"`
+	SkKgbNama string `json:"sk_kgb_nama" gorm:"column:sk_kgb_nama;size:255"`
+	SkKgbFile []byte `json:"-" gorm:"column:sk_kgb_file;type:bytea"`
+	// SkPangkatNama/SkPangkatFile: berkas SK Kenaikan Pangkat, SEPENUHNYA
+	// opsional sama seperti SkKgbNama/SkKgbFile di atas -- lihat
+	// approvePerubahanData.
+	SkPangkatNama  string     `json:"sk_pangkat_nama" gorm:"column:sk_pangkat_nama;size:255"`
+	SkPangkatFile  []byte     `json:"-" gorm:"column:sk_pangkat_file;type:bytea"`
 	Status         string     `json:"status" gorm:"size:20;default:pending"`
 	CatatanAdmin   string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
 	DiputuskanOleh string     `json:"diputuskan_oleh" gorm:"column:diputuskan_oleh;size:150"`

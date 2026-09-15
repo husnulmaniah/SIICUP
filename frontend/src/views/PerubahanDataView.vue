@@ -263,6 +263,35 @@ async function downloadSkKgb(row) {
   }
 }
 
+// ---- lihat / unduh berkas SK Kenaikan Pangkat (opsional, kalau
+// diupload pegawai saat mengajukan -- lihat backend/handlers/perubahan_data.go) ----
+async function previewSkPangkat(row) {
+  try {
+    const res = await http.get(`/perubahan-data/${row.id}/dokumen-pangkat`, { params: { inline: 1 }, responseType: 'blob' })
+    const ext = (row.sk_pangkat_nama || '').split('.').pop().toLowerCase()
+    previewType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
+    previewUrl.value = window.URL.createObjectURL(res.data)
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+async function downloadSkPangkat(row) {
+  try {
+    const res = await http.get(`/perubahan-data/${row.id}/dokumen-pangkat`, { responseType: 'blob' })
+    const blobUrl = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = row.sk_pangkat_nama || 'sk-pangkat'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(blobUrl)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
+  }
+}
+
 // ============================================================
 // Tab "Pengaturan Kenaikan Gaji Berkala" -- interval standar (tahun) untuk
 // kenaikan gaji berkala & kenaikan pangkat per jenis jabatan, bisa diubah
@@ -451,6 +480,15 @@ async function simpanPengaturanKgb() {
             <span style="font-size: 0.85rem">{{ detailRow.sk_kgb_nama }}</span>
             <Button icon="pi pi-eye" size="small" severity="secondary" outlined label="Lihat" @click="previewSkKgb(detailRow)" />
             <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadSkKgb(detailRow)" />
+          </div>
+        </div>
+
+        <div v-if="detailRow.sk_pangkat_nama" style="margin-top: 1rem">
+          <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem">Berkas SK Kenaikan Pangkat (opsional)</div>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+            <span style="font-size: 0.85rem">{{ detailRow.sk_pangkat_nama }}</span>
+            <Button icon="pi pi-eye" size="small" severity="secondary" outlined label="Lihat" @click="previewSkPangkat(detailRow)" />
+            <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadSkPangkat(detailRow)" />
           </div>
         </div>
 

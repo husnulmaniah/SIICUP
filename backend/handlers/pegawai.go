@@ -23,7 +23,7 @@ import (
 // must be excluded from ordinary list/detail queries so we don't drag large
 // binary blobs along with every request; they're only fetched by the
 // dedicated download endpoint below.
-var dokumenFileFields = []string{"SkTerakhirFile", "SkKgbFile", "SkPensiunFile", "FotoProfilFile"}
+var dokumenFileFields = []string{"SkTerakhirFile", "SkKgbFile", "SkPangkatFile", "SkPensiunFile", "FotoProfilFile"}
 
 var pegawaiPreloads = []string{"Jabatan", "UnitKerja", "PangkatGol.Pangkat", "PangkatGol.Gol", "Status", "Atasan"}
 
@@ -218,7 +218,7 @@ func RegisterPegawaiRoutes(mux *http.ServeMux, db *gorm.DB) {
 // Berkala, and SK Pensiun.
 func validDokumenJenis(jenis string) bool {
 	switch jenis {
-	case "sk-terakhir", "sk-kgb", "sk-pensiun":
+	case "sk-terakhir", "sk-kgb", "sk-pangkat", "sk-pensiun":
 		return true
 	}
 	return false
@@ -259,6 +259,8 @@ func downloadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB)
 		filename, data = item.SkTerakhirNama, item.SkTerakhirFile
 	case "sk-kgb":
 		filename, data = item.SkKgbNama, item.SkKgbFile
+	case "sk-pangkat":
+		filename, data = item.SkPangkatNama, item.SkPangkatFile
 	case "sk-pensiun":
 		filename, data = item.SkPensiunNama, item.SkPensiunFile
 	}
@@ -313,6 +315,9 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	case "sk-kgb":
 		updates["sk_kgb_nama"] = header.Filename
 		updates["sk_kgb_file"] = data
+	case "sk-pangkat":
+		updates["sk_pangkat_nama"] = header.Filename
+		updates["sk_pangkat_file"] = data
 	case "sk-pensiun":
 		updates["sk_pensiun_nama"] = header.Filename
 		updates["sk_pensiun_file"] = data
@@ -505,6 +510,9 @@ func deleteDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	case "sk-kgb":
 		updates["sk_kgb_nama"] = ""
 		updates["sk_kgb_file"] = nil
+	case "sk-pangkat":
+		updates["sk_pangkat_nama"] = ""
+		updates["sk_pangkat_file"] = nil
 	case "sk-pensiun":
 		updates["sk_pensiun_nama"] = ""
 		updates["sk_pensiun_file"] = nil

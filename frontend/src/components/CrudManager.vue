@@ -81,6 +81,7 @@ const docUploading = ref(false)
 const dokumenSlots = [
   { jenis: 'sk-terakhir', field: 'sk_terakhir_nama', label: 'SK Terakhir' },
   { jenis: 'sk-kgb', field: 'sk_kgb_nama', label: 'SK Kenaikan Gaji Berkala' },
+  { jenis: 'sk-pangkat', field: 'sk_pangkat_nama', label: 'SK Kenaikan Pangkat' },
   // SK Pensiun SENGAJA selalu ditampilkan (tidak digembok di belakang status
   // "Pensiun" seperti sebelumnya) -- justru upload berkas inilah yang
   // memicu status pegawai berubah otomatis jadi "Pensiun" di backend (lihat
