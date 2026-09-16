@@ -229,11 +229,9 @@ export const tableConfigs = {
       {
         field: 'kode',
         label: 'Kode',
-        type: 'select',
-        staticOptions: jenisSuratKodeOptions,
-        optionLabel: 'label',
+        type: 'text',
         required: true,
-        hint: 'Menentukan cara jenis surat ini dihitung & ditampilkan di rekap/PDF absen: DD (Dinas Dalam), I (Izin), atau S (Sakit).',
+        hint: 'Ketik salah satu: DD (Dinas Dalam), I (Izin), atau S (Sakit). Menentukan cara jenis surat ini dihitung & ditampilkan di rekap/PDF absen.',
       },
     ],
     searchPlaceholder: 'Cari jenis surat...',
