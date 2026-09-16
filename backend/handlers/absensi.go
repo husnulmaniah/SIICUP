@@ -955,6 +955,14 @@ type riwayatAbsenResponse struct {
 	// klien (lihat auth store yang cuma menyimpan hasil login, belum tentu
 	// memuat UnitKerja pegawai).
 	IsSekolah bool `json:"is_sekolah"`
+	// TotalHariKerja: total hari kerja SELURUH bulan yang diminta (bukan
+	// cuma sampai hari ini seperti tanggal_terlewat) mengikuti pola pegawai
+	// -- Minggu selalu libur, Sabtu libur juga kecuali pegawai sekolah (6
+	// hari kerja), dan tanggal_merah tidak dihitung sama sekali (lihat
+	// workingDaysWithHolidaySet). Dikirim supaya pegawai bisa melihat
+	// berapa hari kerja yang seharusnya ada di bulan ini sebagai acuan,
+	// bukan cuma daftar tanggal yang sudah terlewat.
+	TotalHariKerja int `json:"total_hari_kerja"`
 }
 
 // riwayatAbsenSaya mengembalikan riwayat absen pegawai yang login untuk satu
@@ -1051,6 +1059,10 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			}
 		}
 	}
+	// dihitung untuk SELURUH bulan (start..end, bukan dibatasi limit/hari
+	// ini) supaya angkanya tetap utuh sebagai "target" hari kerja bulan
+	// tersebut, sama untuk bulan berjalan maupun bulan yang sudah lewat.
+	totalHariKerja := len(workingDaysInRange(db, start, end, sixDayWeek))
 
 	utils.Success(w, "ok", riwayatAbsenResponse{
 		Bulan:           int(bulan),
@@ -1059,6 +1071,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		TanggalTerlewat: terlewat,
 		TanggalTercover: tercover,
 		IsSekolah:       isSekolahPegawai(pegawai),
+		TotalHariKerja:  totalHariKerja,
 	})
 }
 

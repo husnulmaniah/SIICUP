@@ -940,6 +940,11 @@ async function downloadDokumen(item) {
           <h3>Riwayat Absen</h3>
           <DatePicker v-model="periodDate" view="month" dateFormat="MM yy" showIcon style="width: 180px" />
         </div>
+        <p v-if="riwayat?.total_hari_kerja" class="total-hari-kerja-info">
+          Jumlah hari kerja bulan ini: <strong>{{ riwayat.total_hari_kerja }} hari</strong>
+          <span v-if="isSekolahSaya"> (Senin&ndash;Sabtu, Minggu &amp; tanggal merah tidak dihitung)</span>
+          <span v-else> (Senin&ndash;Jumat, Sabtu-Minggu &amp; tanggal merah tidak dihitung)</span>
+        </p>
         <DataTable :value="riwayat.absensi" :loading="loadingRiwayat" size="small" stripedRows responsiveLayout="scroll">
           <Column field="tanggal" header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
@@ -1393,6 +1398,11 @@ async function downloadDokumen(item) {
 .section-header h3,
 .section > h3 {
   margin: 0 0 0.5rem;
+}
+.total-hari-kerja-info {
+  margin: -0.25rem 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
 }
 .terlewat-list {
   display: flex;
