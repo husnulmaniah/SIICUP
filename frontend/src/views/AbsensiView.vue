@@ -946,6 +946,9 @@ async function downloadDokumen(item) {
           <span v-else> (Senin&ndash;Jumat, Sabtu-Minggu &amp; tanggal merah tidak dihitung)</span>
         </p>
         <DataTable :value="riwayat.absensi" :loading="loadingRiwayat" size="small" stripedRows responsiveLayout="scroll">
+          <Column header="No" style="width: 3rem">
+            <template #body="{ index }">{{ index + 1 }}</template>
+          </Column>
           <Column field="tanggal" header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
           </Column>
@@ -1044,8 +1047,11 @@ async function downloadDokumen(item) {
           tersebut, supaya suratnya dapat diinput.
         </Message>
         <div class="terlewat-list">
-          <div v-for="tgl in riwayat.tanggal_terlewat" :key="tgl" class="terlewat-item">
-            <span>{{ formatTanggal(tgl) }}</span>
+          <div v-for="(tgl, idx) in riwayat.tanggal_terlewat" :key="tgl" class="terlewat-item">
+            <span class="terlewat-info">
+              <span class="terlewat-no">{{ idx + 1 }}.</span>
+              <span>{{ formatTanggal(tgl) }}</span>
+            </span>
             <Tag severity="warn" value="Tidak melakukan absensi" />
           </div>
         </div>
@@ -1420,6 +1426,15 @@ async function downloadDokumen(item) {
   background: #fffbeb;
   border-radius: 8px;
   padding: 0.5rem 0.9rem;
+}
+.terlewat-info {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.terlewat-no {
+  color: var(--p-text-muted-color, #64748b);
+  min-width: 1.5rem;
 }
 .camera-box {
   display: flex;
