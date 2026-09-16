@@ -63,6 +63,79 @@ const importModeOptions = [
 
 const remoteOptions = reactive({})
 
+// ---- form field type 'coords' (titik koordinat + radius, mis. Unit Kerja)
+// -- mengikuti pola "Tempel Koordinat / Link Google Maps" & "Ambil Lokasi
+// Saat Ini" yang sama dipakai di Pengaturan Absen (RekapAbsensiView.vue),
+// supaya administrator bisa cepat mengisi banyak titik koordinat sekolah
+// tanpa harus berada langsung di lokasi tersebut. ----
+const coordsPasteText = reactive({})
+const locatingCoords = ref(false)
+
+// parseKoordinatMaps mengekstrak (lat, lng) dari teks yang ditempel dari
+// Google Maps -- pola dicoba dari yang paling presisi ke paling umum (lihat
+// komentar yang sama di RekapAbsensiView.vue).
+function parseKoordinatMaps(text) {
+  const s = (text || '').trim()
+  if (!s) return null
+  const cobaPola = (regex) => {
+    const m = s.match(regex)
+    if (!m) return null
+    const lat = Number(m[1])
+    const lng = Number(m[2])
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return null
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
+    return { lat, lng }
+  }
+  return (
+    cobaPola(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/) ||
+    cobaPola(/[?&]q=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/) ||
+    cobaPola(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/) ||
+    cobaPola(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/)
+  )
+}
+
+function terapkanCoordsPaste(f) {
+  const hasil = parseKoordinatMaps(coordsPasteText[f.field])
+  if (!hasil) {
+    toast.add({
+      severity: 'error',
+      summary: 'Format tidak dikenali',
+      detail: 'Tempel koordinat (contoh: "-1.976688, 121.335284") atau link Google Maps yang mengandung koordinat, lalu klik Terapkan.',
+      life: 6000,
+    })
+    return
+  }
+  form[f.latField] = Number(hasil.lat.toFixed(6))
+  form[f.lngField] = Number(hasil.lng.toFixed(6))
+  coordsPasteText[f.field] = ''
+}
+
+function gunakanLokasiSaatIni(f) {
+  if (!navigator.geolocation) {
+    toast.add({ severity: 'warn', summary: 'Tidak didukung', detail: 'Perangkat/browser ini tidak mendukung deteksi lokasi', life: 4000 })
+    return
+  }
+  locatingCoords.value = true
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      form[f.latField] = Number(pos.coords.latitude.toFixed(6))
+      form[f.lngField] = Number(pos.coords.longitude.toFixed(6))
+      locatingCoords.value = false
+      toast.add({ severity: 'success', summary: 'Lokasi ditemukan', detail: `Akurasi ±${Math.round(pos.coords.accuracy)}m -- jangan lupa klik Simpan`, life: 4000 })
+    },
+    () => {
+      locatingCoords.value = false
+      toast.add({ severity: 'error', summary: 'Gagal mendeteksi lokasi', detail: 'Izinkan akses lokasi pada browser ini', life: 4000 })
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+  )
+}
+
+function hapusKoordinat(f) {
+  form[f.latField] = null
+  form[f.lngField] = null
+}
+
 // ---- detail dialog (khusus tabel Data Pegawai) ----
 const isPegawaiTable = computed(() => props.config.endpoint === '/pegawai')
 
@@ -421,6 +494,16 @@ watch(search, () => {
 function resetForm() {
   Object.keys(form).forEach((k) => delete form[k])
   for (const f of props.config.formFields) {
+    if (f.type === 'coords') {
+      form[f.latField] = null
+      form[f.lngField] = null
+      if (f.radiusField) form[f.radiusField] = null
+      continue
+    }
+    if (f.type === 'jamKerja') {
+      for (const key of Object.values(f.jamFields)) form[key] = ''
+      continue
+    }
     form[f.field] = f.type === 'number' ? null : f.type === 'checkbox' ? false : ''
   }
 }
@@ -437,6 +520,16 @@ function openEdit(row) {
   formErrors.value = ''
   resetForm()
   for (const f of props.config.formFields) {
+    if (f.type === 'coords') {
+      form[f.latField] = row[f.latField] ?? null
+      form[f.lngField] = row[f.lngField] ?? null
+      if (f.radiusField) form[f.radiusField] = row[f.radiusField] ?? null
+      continue
+    }
+    if (f.type === 'jamKerja') {
+      for (const key of Object.values(f.jamFields)) form[key] = row[key] ?? ''
+      continue
+    }
     let v = row[f.field]
     if (f.type === 'date' && v) v = new Date(v)
     if (f.type === 'checkbox') {
@@ -452,6 +545,19 @@ function openEdit(row) {
 function serializeForm() {
   const payload = {}
   for (const f of props.config.formFields) {
+    if (f.type === 'coords') {
+      payload[f.latField] = form[f.latField] ?? null
+      payload[f.lngField] = form[f.lngField] ?? null
+      if (f.radiusField) payload[f.radiusField] = form[f.radiusField] ?? null
+      continue
+    }
+    if (f.type === 'jamKerja') {
+      for (const key of Object.values(f.jamFields)) {
+        const v = (form[key] || '').trim()
+        payload[key] = v || null
+      }
+      continue
+    }
     let v = form[f.field]
     if (f.type === 'date' && v instanceof Date) {
       v = toApiDate(v)
@@ -467,6 +573,30 @@ function serializeForm() {
   return payload
 }
 
+const jamKerjaPattern = /^([01]\d|2[0-3]):[0-5]\d$/
+// validasiJamKerja memeriksa satu grup field 'jamKerja': kelima jam harus
+// diisi SEKALIGUS (atau dikosongkan semua) supaya konsisten dengan
+// jamAbsenUntukPegawai di backend (yang hanya memakai jam khusus unit kerja
+// kalau KELIMA field terisi) -- kembalikan pesan error, atau string kosong
+// kalau valid.
+function validasiJamKerja(f) {
+  const keys = Object.values(f.jamFields)
+  const vals = keys.map((k) => (form[k] || '').trim())
+  const filled = vals.filter((v) => v !== '')
+  if (filled.length === 0) return ''
+  if (filled.length < keys.length) {
+    return `${f.label}: isi kelima jam sekaligus, atau kosongkan semuanya untuk memakai jam default sekolah/dinas.`
+  }
+  if (!vals.every((v) => jamKerjaPattern.test(v))) {
+    return `${f.label}: format jam tidak valid, gunakan HH:MM (contoh 06:30).`
+  }
+  return ''
+}
+
+function hapusJamKerja(f) {
+  for (const key of Object.values(f.jamFields)) form[key] = ''
+}
+
 async function saveForm() {
   const missing = (props.config.formFields || []).filter((f) => {
     if (!f.required && !(f.requiredOnCreate && !isEditing.value)) return false
@@ -476,6 +606,14 @@ async function saveForm() {
   if (missing.length) {
     formErrors.value = `Wajib diisi: ${missing.map((f) => f.label).join(', ')}`
     return
+  }
+  for (const f of props.config.formFields) {
+    if (f.type !== 'jamKerja') continue
+    const err = validasiJamKerja(f)
+    if (err) {
+      formErrors.value = err
+      return
+    }
   }
   formErrors.value = ''
   savingRow.value = true
@@ -747,6 +885,22 @@ const canManage = computed(() => true) // route guard already restricts page acc
                 <Tag :value="fieldValue(data, col.field) ? 'Ya' : 'Tidak'" :severity="fieldValue(data, col.field) ? 'success' : 'secondary'" />
               </template>
               <template v-else-if="col.type === 'lookup'">{{ (col.map || {})[fieldValue(data, col.field)] || fieldValue(data, col.field) || '-' }}</template>
+              <template v-else-if="col.type === 'coords'">
+                <Tag
+                  v-if="fieldValue(data, col.latField) != null && fieldValue(data, col.lngField) != null"
+                  value="Sudah diatur"
+                  severity="success"
+                />
+                <Tag v-else value="Belum diatur" severity="secondary" />
+              </template>
+              <template v-else-if="col.type === 'jamKerja'">
+                <Tag
+                  v-if="Object.values(col.jamFields).every((k) => fieldValue(data, k))"
+                  value="Sudah diatur"
+                  severity="success"
+                />
+                <Tag v-else value="Default sekolah/dinas" severity="secondary" />
+              </template>
               <template v-else>{{ fieldValue(data, col.field) ?? '-' }}</template>
             </template>
           </Column>
@@ -791,7 +945,62 @@ const canManage = computed(() => true) // route guard already restricts page acc
             style="width: 100%"
             placeholder="Pilih..."
           />
-          <small v-if="f.hint" style="color: var(--p-text-muted-color)">{{ f.hint }}</small>
+          <div v-else-if="f.type === 'coords'">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem">
+              <InputText
+                v-model="coordsPasteText[f.field]"
+                placeholder='Tempel koordinat (mis. -1.976688, 121.335284) atau link Google Maps'
+                style="flex: 1 1 220px"
+                @keyup.enter="terapkanCoordsPaste(f)"
+              />
+              <Button label="Terapkan" icon="pi pi-map" size="small" @click="terapkanCoordsPaste(f)" />
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem">
+              <InputNumber v-model="form[f.latField]" placeholder="Lintang (lat)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
+              <InputNumber v-model="form[f.lngField]" placeholder="Bujur (lng)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
+              <InputNumber v-if="f.radiusField" v-model="form[f.radiusField]" placeholder="Radius (meter)" suffix=" m" :min="1" style="width: 100%" />
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem">
+              <Button label="Gunakan Lokasi Saat Ini" icon="pi pi-map-marker" size="small" outlined :loading="locatingCoords" @click="gunakanLokasiSaatIni(f)" />
+              <Button v-if="form[f.latField] != null" label="Hapus Titik Koordinat" icon="pi pi-times" size="small" text severity="danger" @click="hapusKoordinat(f)" />
+            </div>
+          </div>
+          <div v-else-if="f.type === 'jamKerja'">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.5rem">
+              <div>
+                <label style="display: block; font-size: 0.78rem; margin-bottom: 0.2rem">Jam Mulai Absen Pagi</label>
+                <InputText v-model="form[f.jamFields.mulaiPagi]" placeholder="06:30" style="width: 100%" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.78rem; margin-bottom: 0.2rem">Jam Batas Absen Pagi (terlambat)</label>
+                <InputText v-model="form[f.jamFields.batasPagi]" placeholder="07:00" style="width: 100%" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.78rem; margin-bottom: 0.2rem">Jam Tutup Absen Masuk</label>
+                <InputText v-model="form[f.jamFields.tutupPagi]" placeholder="08:00" style="width: 100%" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.78rem; margin-bottom: 0.2rem">Jam Mulai Absen Pulang</label>
+                <InputText v-model="form[f.jamFields.mulaiPulang]" placeholder="12:30" style="width: 100%" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.78rem; margin-bottom: 0.2rem">Jam Tutup Absen Pulang</label>
+                <InputText v-model="form[f.jamFields.tutupPulang]" placeholder="15:00" style="width: 100%" />
+              </div>
+            </div>
+            <div style="margin-top: 0.5rem">
+              <Button
+                v-if="Object.values(f.jamFields).some((k) => form[k])"
+                label="Hapus Jam Khusus"
+                icon="pi pi-times"
+                size="small"
+                text
+                severity="danger"
+                @click="hapusJamKerja(f)"
+              />
+            </div>
+          </div>
+          <small v-if="f.hint" style="color: var(--p-text-muted-color); display: block; margin-top: 0.35rem">{{ f.hint }}</small>
         </div>
       </div>
       <template #footer>

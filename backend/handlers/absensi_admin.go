@@ -21,17 +21,23 @@ import (
 // (lihat RegisterAbsensiRoutes di absensi.go), tidak atasan.
 
 type pengaturanAbsensiPayload struct {
-	Aktif              bool     `json:"aktif"`
-	JamMulaiPagi       string   `json:"jam_mulai_pagi"`
-	JamBatasPagi       string   `json:"jam_batas_pagi"`
-	JamTutupPagi       string   `json:"jam_tutup_pagi"`
-	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
-	JamTutupPulang     string   `json:"jam_tutup_pulang"`
-	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
-	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
-	KantorLat          *float64 `json:"kantor_lat"`
-	KantorLng          *float64 `json:"kantor_lng"`
-	RadiusMeter        int      `json:"radius_meter"`
+	Aktif                 bool     `json:"aktif"`
+	JamMulaiPagi          string   `json:"jam_mulai_pagi"`
+	JamBatasPagi          string   `json:"jam_batas_pagi"`
+	JamTutupPagi          string   `json:"jam_tutup_pagi"`
+	JamMulaiPulang        string   `json:"jam_mulai_pulang"`
+	JamTutupPulang        string   `json:"jam_tutup_pulang"`
+	JamMulaiPagiSekolah   string   `json:"jam_mulai_pagi_sekolah"`
+	JamBatasPagiSekolah   string   `json:"jam_batas_pagi_sekolah"`
+	JamTutupPagiSekolah   string   `json:"jam_tutup_pagi_sekolah"`
+	JamMulaiPulangSekolah string   `json:"jam_mulai_pulang_sekolah"`
+	JamTutupPulangSekolah string   `json:"jam_tutup_pulang_sekolah"`
+	TempatTugasAllowed    []string `json:"tempat_tugas_allowed"`
+	JabatanAllowedIDs     []uint   `json:"jabatan_allowed_ids"`
+	KecamatanAllowedIDs   []uint   `json:"kecamatan_allowed_ids"`
+	KantorLat             *float64 `json:"kantor_lat"`
+	KantorLng             *float64 `json:"kantor_lng"`
+	RadiusMeter           int      `json:"radius_meter"`
 }
 
 func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -41,11 +47,16 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		return
 	}
 	for label, v := range map[string]string{
-		"jam mulai absen pagi":   p.JamMulaiPagi,
-		"jam batas absen pagi":   p.JamBatasPagi,
-		"jam tutup absen pagi":   p.JamTutupPagi,
-		"jam mulai absen pulang": p.JamMulaiPulang,
-		"jam tutup absen pulang": p.JamTutupPulang,
+		"jam mulai absen pagi":             p.JamMulaiPagi,
+		"jam batas absen pagi":             p.JamBatasPagi,
+		"jam tutup absen pagi":             p.JamTutupPagi,
+		"jam mulai absen pulang":           p.JamMulaiPulang,
+		"jam tutup absen pulang":           p.JamTutupPulang,
+		"jam mulai absen pagi (sekolah)":   p.JamMulaiPagiSekolah,
+		"jam batas absen pagi (sekolah)":   p.JamBatasPagiSekolah,
+		"jam tutup absen pagi (sekolah)":   p.JamTutupPagiSekolah,
+		"jam mulai absen pulang (sekolah)": p.JamMulaiPulangSekolah,
+		"jam tutup absen pulang (sekolah)": p.JamTutupPulangSekolah,
 	} {
 		if _, ok := parseJamToMinutes(v); !ok {
 			utils.Error(w, http.StatusBadRequest, label+" tidak valid, gunakan format HH:MM")
@@ -69,6 +80,24 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		utils.Error(w, http.StatusBadRequest, "jam tutup absen pulang (batas absen pulang otomatis ditutup) harus lebih besar dari jam mulai absen pulang")
 		return
 	}
+
+	mulaiMinS, _ := parseJamToMinutes(p.JamMulaiPagiSekolah)
+	batasMinS, _ := parseJamToMinutes(p.JamBatasPagiSekolah)
+	tutupMinS, _ := parseJamToMinutes(p.JamTutupPagiSekolah)
+	mulaiPulangMinS, _ := parseJamToMinutes(p.JamMulaiPulangSekolah)
+	tutupPulangMinS, _ := parseJamToMinutes(p.JamTutupPulangSekolah)
+	if batasMinS <= mulaiMinS {
+		utils.Error(w, http.StatusBadRequest, "jam batas absen pagi (sekolah) harus lebih besar dari jam mulai absen pagi (sekolah)")
+		return
+	}
+	if tutupMinS <= batasMinS {
+		utils.Error(w, http.StatusBadRequest, "jam tutup absen pagi (sekolah) harus lebih besar dari jam batas absen pagi (sekolah)")
+		return
+	}
+	if tutupPulangMinS <= mulaiPulangMinS {
+		utils.Error(w, http.StatusBadRequest, "jam tutup absen pulang (sekolah) harus lebih besar dari jam mulai absen pulang (sekolah)")
+		return
+	}
 	if (p.KantorLat == nil) != (p.KantorLng == nil) {
 		utils.Error(w, http.StatusBadRequest, "titik koordinat kantor harus diisi lat & lng sekaligus")
 		return
@@ -87,6 +116,7 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	// string kosong == "belum diatur") tetap konsisten.
 	tempatJSON, _ := json.Marshal(nonNilStrings(p.TempatTugasAllowed))
 	jabatanJSON, _ := json.Marshal(nonNilUints(p.JabatanAllowedIDs))
+	kecamatanJSON, _ := json.Marshal(nonNilUints(p.KecamatanAllowedIDs))
 
 	var item models.PengaturanAbsensi
 	if err := db.First(&item, 1).Error; err != nil {
@@ -98,8 +128,14 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	item.JamTutupPagi = p.JamTutupPagi
 	item.JamMulaiPulang = p.JamMulaiPulang
 	item.JamTutupPulang = p.JamTutupPulang
+	item.JamMulaiPagiSekolah = p.JamMulaiPagiSekolah
+	item.JamBatasPagiSekolah = p.JamBatasPagiSekolah
+	item.JamTutupPagiSekolah = p.JamTutupPagiSekolah
+	item.JamMulaiPulangSekolah = p.JamMulaiPulangSekolah
+	item.JamTutupPulangSekolah = p.JamTutupPulangSekolah
 	item.TempatTugasAllowed = string(tempatJSON)
 	item.JabatanAllowedIDs = string(jabatanJSON)
+	item.KecamatanAllowedIDs = string(kecamatanJSON)
 	item.KantorLat = p.KantorLat
 	item.KantorLng = p.KantorLng
 	item.RadiusMeter = p.RadiusMeter

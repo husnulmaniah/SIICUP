@@ -46,8 +46,14 @@ const pengaturan = reactive({
   jam_tutup_pagi: '',
   jam_mulai_pulang: '',
   jam_tutup_pulang: '',
+  jam_mulai_pagi_sekolah: '',
+  jam_batas_pagi_sekolah: '',
+  jam_tutup_pagi_sekolah: '',
+  jam_mulai_pulang_sekolah: '',
+  jam_tutup_pulang_sekolah: '',
   tempat_tugas_allowed: [],
   jabatan_allowed_ids: [],
+  kecamatan_allowed_ids: [],
   kantor_lat: null,
   kantor_lng: null,
   radius_meter: 20,
@@ -150,6 +156,7 @@ function terapkanTempelKoordinat() {
 
 const tempatTugasOptions = ref([])
 const jabatanOptions = ref([])
+const kecamatanOptions = ref([])
 
 async function loadPengaturan() {
   loadingPengaturan.value = true
@@ -181,6 +188,15 @@ async function loadJabatanOptions() {
   }
 }
 
+async function loadKecamatanOptions() {
+  try {
+    const { data } = await http.get('/ref/kecamatan')
+    kecamatanOptions.value = (data.data || []).map((k) => ({ label: k.nama, value: k.id }))
+  } catch {
+    kecamatanOptions.value = []
+  }
+}
+
 const jamPattern = /^([01]\d|2[0-3]):[0-5]\d$/
 function jamValid(v) {
   return jamPattern.test(v || '')
@@ -191,7 +207,12 @@ const pengaturanValid = computed(
     jamValid(pengaturan.jam_batas_pagi) &&
     jamValid(pengaturan.jam_tutup_pagi) &&
     jamValid(pengaturan.jam_mulai_pulang) &&
-    jamValid(pengaturan.jam_tutup_pulang),
+    jamValid(pengaturan.jam_tutup_pulang) &&
+    jamValid(pengaturan.jam_mulai_pagi_sekolah) &&
+    jamValid(pengaturan.jam_batas_pagi_sekolah) &&
+    jamValid(pengaturan.jam_tutup_pagi_sekolah) &&
+    jamValid(pengaturan.jam_mulai_pulang_sekolah) &&
+    jamValid(pengaturan.jam_tutup_pulang_sekolah),
 )
 
 // -- Perkiraan jangkauan absen efektif --
@@ -358,7 +379,7 @@ onMounted(async () => {
   // Riwayat Absen untuk menentukan kapan jendela absen pulang sudah
   // otomatis DITUTUP (lihat absenPulangSudahTutup), bukan cuma dipakai
   // kartu Pengaturan.
-  const tugasAdminOnly = auth.isAdministrator ? [loadTempatTugasOptions(), loadJabatanOptions()] : []
+  const tugasAdminOnly = auth.isAdministrator ? [loadTempatTugasOptions(), loadJabatanOptions(), loadKecamatanOptions()] : []
   await Promise.all([loadPegawaiOptions(), loadPengaturan(), ...tugasAdminOnly])
   await Promise.all([loadRekap(), loadDokumenAdmin()])
 })
@@ -811,7 +832,7 @@ function kodeDokumen(jenis) {
         <div class="pengaturan-cols">
           <div class="pengaturan-col">
             <div class="pengaturan-group">
-              <div class="group-title">Jendela Waktu Absen</div>
+              <div class="group-title">Jendela Waktu Absen - Dinas/Kantor</div>
               <div class="jam-grid">
                 <div>
                   <label class="field-label">Jam Mulai Absen Pagi</label>
@@ -835,12 +856,48 @@ function kodeDokumen(jenis) {
                 </div>
               </div>
               <Message severity="info" :closable="false" style="margin-top: 0.5rem">
-                Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu. Absen pulang juga otomatis ditutup begitu lewat jam tutup absen pulang, walaupun pegawai sudah absen masuk dan belum sempat absen pulang.
+                Berlaku untuk pegawai yang tempat tugasnya BUKAN sekolah (dinas/kantor). Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu. Absen pulang juga otomatis ditutup begitu lewat jam tutup absen pulang, walaupun pegawai sudah absen masuk dan belum sempat absen pulang.
               </Message>
             </div>
 
             <div class="pengaturan-group">
-              <div class="group-title">Titik Koordinat Kantor &amp; Radius Absen</div>
+              <div class="group-title">Jendela Waktu Absen - Sekolah</div>
+              <div class="jam-grid">
+                <div>
+                  <label class="field-label">Jam Mulai Absen Pagi</label>
+                  <InputText v-model="pengaturan.jam_mulai_pagi_sekolah" placeholder="06:30" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Batas Absen Pagi (setelah ini terlambat)</label>
+                  <InputText v-model="pengaturan.jam_batas_pagi_sekolah" placeholder="07:00" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Tutup Absen Masuk (setelah ini otomatis ditutup)</label>
+                  <InputText v-model="pengaturan.jam_tutup_pagi_sekolah" placeholder="08:00" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Mulai Absen Pulang</label>
+                  <InputText v-model="pengaturan.jam_mulai_pulang_sekolah" placeholder="12:30" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Tutup Absen Pulang (setelah ini otomatis ditutup)</label>
+                  <InputText v-model="pengaturan.jam_tutup_pulang_sekolah" placeholder="15:00" style="width: 100%" />
+                </div>
+              </div>
+              <Message severity="info" :closable="false" style="margin-top: 0.5rem">
+                Berlaku untuk pegawai yang tempat tugasnya mengandung kata "sekolah" (guru/staf sekolah) -- jam
+                kerjanya otomatis dipakai menggantikan set Dinas/Kantor di atas untuk pegawai tersebut, mengikuti
+                aturan yang sama dengan penentuan 5/6 hari kerja & syarat dokumen cuti di menu lain.
+              </Message>
+            </div>
+
+            <div class="pengaturan-group">
+              <div class="group-title">Titik Koordinat Kantor &amp; Radius Absen (Default)</div>
+              <Message severity="info" :closable="false" style="margin-bottom: 0.75rem">
+                Titik ini dipakai sebagai DEFAULT/CADANGAN untuk pegawai yang unit kerja/sekolahnya belum diberi titik
+                koordinat sendiri. Untuk instansi dengan banyak sekolah di beberapa kecamatan, atur titik koordinat
+                khusus per sekolah lewat menu Master Data -> Unit Kerja (titik di sana jadi prioritas utama).
+              </Message>
 
               <label class="field-label">Tempel Koordinat / Link Google Maps</label>
               <div class="kantor-tempel">
@@ -921,10 +978,28 @@ function kodeDokumen(jenis) {
                 />
                 <small class="text-muted">Kosongkan untuk mengizinkan semua jabatan.</small>
               </div>
+              <div>
+                <label class="field-label">Kecamatan yang Boleh Absen</label>
+                <MultiSelect
+                  v-model="pengaturan.kecamatan_allowed_ids"
+                  :options="kecamatanOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  filter
+                  display="chip"
+                  placeholder="Semua kecamatan (belum dibatasi)"
+                  style="width: 100%"
+                />
+                <small class="text-muted">
+                  Dicocokkan lewat kecamatan unit kerja/sekolah pegawai (Master Data -> Unit Kerja). Kosongkan untuk
+                  mengizinkan semua kecamatan. Pegawai yang unit kerjanya belum diberi kecamatan otomatis tidak lolos
+                  begitu filter ini diisi.
+                </small>
+              </div>
               <Message severity="info" :closable="false">
-                Pegawai yang tempat tugas &amp; jabatannya tidak cocok dengan filter di atas akan melihat pesan "menu
-                ini bukan untuk Anda" saat membuka menu Absen. Kosongkan kedua filter untuk membuka menu Absen bagi
-                semua pegawai.
+                Pegawai yang tempat tugas, jabatan, atau kecamatannya tidak cocok dengan filter di atas akan melihat
+                pesan "menu ini bukan untuk Anda" saat membuka menu Absen. Kosongkan ketiga filter untuk membuka menu
+                Absen bagi semua pegawai.
               </Message>
             </div>
           </div>

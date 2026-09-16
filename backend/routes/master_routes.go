@@ -3,6 +3,8 @@ package routes
 import (
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"cuti-app/handlers"
@@ -11,6 +13,45 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// jamHHMMPattern memvalidasi format "HH:MM" untuk kolom Excel jam kerja
+// khusus unit kerja/sekolah (lihat jamUnitKerjaColumn) -- format yang sama
+// dipakai handlers.parseJamToMinutes untuk field jam sejenis pada
+// PengaturanAbsensi, tapi fungsi itu tidak diekspor dari package handlers
+// sehingga validasi format di sini ditulis ulang secara sederhana.
+var jamHHMMPattern = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
+
+// jamUnitKerjaColumn membuat satu kolom Excel untuk salah satu dari kelima
+// field jam kerja KHUSUS unit kerja/sekolah pada models.UnitKerja (lihat
+// komentar pada struct itu) -- field yang mana ditentukan lewat fieldPtr
+// (mengembalikan alamat field **string bersangkutan pada instance
+// UnitKerja). Kosong berarti unit kerja ini belum diberi jam khusus untuk
+// field itu (jatuh kembali ke default sekolah/dinas "global").
+func jamUnitKerjaColumn(header, example string, fieldPtr func(*models.UnitKerja) **string) utils.ExcelColumn {
+	return utils.ExcelColumn{
+		Header:  header,
+		Example: example,
+		Get: func(i interface{}) string {
+			uk := i.(models.UnitKerja)
+			p := *fieldPtr(&uk)
+			if p != nil {
+				return *p
+			}
+			return ""
+		},
+		Set: func(i interface{}, raw string) error {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				return nil
+			}
+			if !jamHHMMPattern.MatchString(raw) {
+				return fmt.Errorf("%s harus berformat HH:MM (contoh %s)", header, example)
+			}
+			*fieldPtr(i.(*models.UnitKerja)) = &raw
+			return nil
+		},
+	}
+}
 
 // RegisterMasterRoutes wires up all simple master/lookup tables through the
 // generic CRUD + excel engine. Only "tgl_merah" (Tanggal Merah / hari libur,
@@ -65,14 +106,114 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 		},
 	}, "administrator")
 
-	// ---- unit_kerja ----
+	// ---- kecamatan ----
+	handlers.RegisterCrud(mux, db, "/api/kecamatan", handlers.CrudConfig[models.Kecamatan]{
+		FileBaseName: "kecamatan",
+		SearchFields: []string{"nama"},
+		Columns: []utils.ExcelColumn{
+			{Header: "Nama Kecamatan", Required: true, Example: "Bungku Utara",
+				Get: func(i interface{}) string { return i.(models.Kecamatan).Nama },
+				Set: func(i interface{}, raw string) error { i.(*models.Kecamatan).Nama = raw; return nil }},
+		},
+	}, "administrator")
+
+	// ---- unit_kerja (unit kerja/sekolah -- boleh dikelompokkan per
+	// kecamatan & diberi titik koordinat + radius absen sendiri-sendiri,
+	// lihat komentar pada models.UnitKerja) ----
 	handlers.RegisterCrud(mux, db, "/api/unit-kerja", handlers.CrudConfig[models.UnitKerja]{
 		FileBaseName: "unit_kerja",
 		SearchFields: []string{"unit"},
+		Preloads:     []string{"Kecamatan"},
 		Columns: []utils.ExcelColumn{
 			{Header: "Unit Kerja", Required: true, Example: "Bidang Pelayanan",
 				Get: func(i interface{}) string { return i.(models.UnitKerja).Unit },
 				Set: func(i interface{}, raw string) error { i.(*models.UnitKerja).Unit = raw; return nil }},
+			{Header: "Kecamatan", Example: "Bungku Utara",
+				Get: func(i interface{}) string {
+					uk := i.(models.UnitKerja)
+					if uk.Kecamatan != nil {
+						return uk.Kecamatan.Nama
+					}
+					return ""
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						return nil
+					}
+					var k models.Kecamatan
+					if err := db.Where("nama ILIKE ?", raw).First(&k).Error; err != nil {
+						return fmt.Errorf("kecamatan '%s' belum terdaftar, tambahkan dulu di menu Kecamatan", raw)
+					}
+					id := k.ID
+					i.(*models.UnitKerja).IDKecamatan = &id
+					return nil
+				}},
+			{Header: "Latitude", Example: "-1.976688",
+				Get: func(i interface{}) string {
+					uk := i.(models.UnitKerja)
+					if uk.Lat != nil {
+						return fmt.Sprintf("%f", *uk.Lat)
+					}
+					return ""
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						return nil
+					}
+					v, err := strconv.ParseFloat(raw, 64)
+					if err != nil || v < -90 || v > 90 {
+						return fmt.Errorf("latitude harus berupa angka antara -90 dan 90")
+					}
+					i.(*models.UnitKerja).Lat = &v
+					return nil
+				}},
+			{Header: "Longitude", Example: "121.335284",
+				Get: func(i interface{}) string {
+					uk := i.(models.UnitKerja)
+					if uk.Lng != nil {
+						return fmt.Sprintf("%f", *uk.Lng)
+					}
+					return ""
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						return nil
+					}
+					v, err := strconv.ParseFloat(raw, 64)
+					if err != nil || v < -180 || v > 180 {
+						return fmt.Errorf("longitude harus berupa angka antara -180 dan 180")
+					}
+					i.(*models.UnitKerja).Lng = &v
+					return nil
+				}},
+			{Header: "Radius Absen (meter)", Example: "50",
+				Get: func(i interface{}) string {
+					uk := i.(models.UnitKerja)
+					if uk.RadiusMeter != nil {
+						return fmt.Sprintf("%d", *uk.RadiusMeter)
+					}
+					return ""
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						return nil
+					}
+					v, err := utils.ParseIntCell(raw)
+					if err != nil || v <= 0 {
+						return fmt.Errorf("radius absen harus berupa angka lebih dari 0")
+					}
+					i.(*models.UnitKerja).RadiusMeter = &v
+					return nil
+				}},
+			jamUnitKerjaColumn("Jam Mulai Absen Pagi", "06:30", func(uk *models.UnitKerja) **string { return &uk.JamMulaiPagi }),
+			jamUnitKerjaColumn("Jam Batas Absen Pagi (terlambat)", "07:00", func(uk *models.UnitKerja) **string { return &uk.JamBatasPagi }),
+			jamUnitKerjaColumn("Jam Tutup Absen Masuk", "08:00", func(uk *models.UnitKerja) **string { return &uk.JamTutupPagi }),
+			jamUnitKerjaColumn("Jam Mulai Absen Pulang", "12:30", func(uk *models.UnitKerja) **string { return &uk.JamMulaiPulang }),
+			jamUnitKerjaColumn("Jam Tutup Absen Pulang", "15:00", func(uk *models.UnitKerja) **string { return &uk.JamTutupPulang }),
 		},
 	}, "administrator")
 

@@ -15,7 +15,7 @@ import (
 // of who owns full CRUD rights over the underlying master table.
 func RegisterReferenceRoutes(mux *http.ServeMux, db *gorm.DB) {
 	any := func(h http.HandlerFunc) http.Handler {
-		return middleware.Chain(h, middleware.Auth, middleware.RequireRole())
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole())
 	}
 
 	mux.Handle("GET /api/ref/jenis-cuti", any(func(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +35,12 @@ func RegisterReferenceRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}))
 	mux.Handle("GET /api/ref/unit-kerja", any(func(w http.ResponseWriter, r *http.Request) {
 		var items []models.UnitKerja
-		db.Order("unit asc").Find(&items)
+		db.Preload("Kecamatan").Order("unit asc").Find(&items)
+		utils.Success(w, "ok", items)
+	}))
+	mux.Handle("GET /api/ref/kecamatan", any(func(w http.ResponseWriter, r *http.Request) {
+		var items []models.Kecamatan
+		db.Order("nama asc").Find(&items)
 		utils.Success(w, "ok", items)
 	}))
 	mux.Handle("GET /api/ref/status", any(func(w http.ResponseWriter, r *http.Request) {

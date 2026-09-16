@@ -102,6 +102,74 @@ func parseJamToMinutes(s string) (int, bool) {
 	return h*60 + m, true
 }
 
+// jamAbsenSet adalah satu set jendela waktu absen (mulai pagi s.d tutup
+// pulang) -- lihat jamAbsenUntukTempatTgs.
+type jamAbsenSet struct {
+	MulaiPagi   string
+	BatasPagi   string
+	TutupPagi   string
+	MulaiPulang string
+	TutupPulang string
+}
+
+// jamAbsenUntukTempatTgs memilih set jendela waktu absen yang berlaku untuk
+// seorang pegawai berdasarkan tempat tugasnya: pegawai sekolah (tempat_tgs
+// mengandung kata "sekolah" -- lihat isSekolahFromTempatTgs di
+// handlers/pengajuan_cuti.go, dipakai juga untuk menentukan 5/6 hari kerja &
+// syarat dokumen cuti) memakai jam kerja sekolah yang biasanya lebih pagi &
+// lebih singkat dari jam kerja dinas/kantor. Dipakai di absenMasuk/absenPulang
+// (untuk validasi) dan getPengaturanAbsensiHandler (untuk ditampilkan ke
+// pegawai yang bersangkutan lewat AbsensiView.vue) -- lihat komentar pada
+// models.PengaturanAbsensi.
+func jamAbsenUntukTempatTgs(setting models.PengaturanAbsensi, tempatTgs string) jamAbsenSet {
+	if isSekolahFromTempatTgs(tempatTgs) {
+		return jamAbsenSet{
+			MulaiPagi:   setting.JamMulaiPagiSekolah,
+			BatasPagi:   setting.JamBatasPagiSekolah,
+			TutupPagi:   setting.JamTutupPagiSekolah,
+			MulaiPulang: setting.JamMulaiPulangSekolah,
+			TutupPulang: setting.JamTutupPulangSekolah,
+		}
+	}
+	return jamAbsenSet{
+		MulaiPagi:   setting.JamMulaiPagi,
+		BatasPagi:   setting.JamBatasPagi,
+		TutupPagi:   setting.JamTutupPagi,
+		MulaiPulang: setting.JamMulaiPulang,
+		TutupPulang: setting.JamTutupPulang,
+	}
+}
+
+// jamAbsenUntukPegawai memilih set jendela waktu absen yang berlaku untuk
+// seorang pegawai, dengan urutan prioritas: (1) jam kerja KHUSUS unit kerja/
+// sekolah pegawai (UnitKerja.JamMulaiPagi dkk, hanya dipakai kalau KELIMA
+// field itu diisi lengkap -- lihat komentar pada models.UnitKerja), lalu
+// (2) fallback ke set Sekolah/Dinas "global" di PengaturanAbsensi berdasarkan
+// Tempat Tugas pegawai (lihat jamAbsenUntukTempatTgs). Dengan ini tiap
+// sekolah bisa mengatur jam masuk/terlambat/pulang/tutup sendiri-sendiri
+// lewat menu Master Data -> Unit Kerja, sekaligus tetap kompatibel dengan
+// unit kerja yang belum diberi jam khusus (jatuh kembali ke default
+// sekolah/dinas seperti sebelumnya). Dipakai di absenMasuk/absenPulang
+// (untuk validasi) dan getPengaturanAbsensiHandler (untuk ditampilkan ke
+// pegawai yang bersangkutan lewat AbsensiView.vue).
+func jamAbsenUntukPegawai(setting models.PengaturanAbsensi, pegawai models.Pegawai) jamAbsenSet {
+	if uk := pegawai.UnitKerja; uk != nil &&
+		uk.JamMulaiPagi != nil && *uk.JamMulaiPagi != "" &&
+		uk.JamBatasPagi != nil && *uk.JamBatasPagi != "" &&
+		uk.JamTutupPagi != nil && *uk.JamTutupPagi != "" &&
+		uk.JamMulaiPulang != nil && *uk.JamMulaiPulang != "" &&
+		uk.JamTutupPulang != nil && *uk.JamTutupPulang != "" {
+		return jamAbsenSet{
+			MulaiPagi:   *uk.JamMulaiPagi,
+			BatasPagi:   *uk.JamBatasPagi,
+			TutupPagi:   *uk.JamTutupPagi,
+			MulaiPulang: *uk.JamMulaiPulang,
+			TutupPulang: *uk.JamTutupPulang,
+		}
+	}
+	return jamAbsenUntukTempatTgs(setting, pegawai.TempatTgs)
+}
+
 func parseFloatForm(r *http.Request, key string) *float64 {
 	raw := strings.TrimSpace(r.FormValue(key))
 	if raw == "" {
@@ -166,34 +234,49 @@ const toleransiAkurasiMaksimal = 50.0
 const toleransiAkurasiMinimum = 30.0
 
 // absensiCekRadius memvalidasi titik koordinat (lat,lng) hasil GPS pegawai
-// terhadap titik koordinat kantor yang diatur administrator. Kalau
-// KantorLat/KantorLng belum diatur (nil), geofence dianggap belum aktif dan
-// absen tetap diperbolehkan tanpa validasi jarak (default terbuka, sama
-// seperti filter tempat tugas/jabatan). Kalau geofence aktif tapi lat/lng
-// pegawai tidak terdeteksi (GPS ditolak/gagal), absen ditolak karena jarak
-// tidak bisa dipastikan.
+// terhadap titik koordinat acuan absen. Kalau unitKerja (unit kerja/sekolah
+// pegawai yang bersangkutan) sudah diberi titik koordinat sendiri (lihat
+// UnitKerja.Lat/Lng/RadiusMeter), titik itulah yang jadi PRIORITAS UTAMA --
+// ini yang memungkinkan absen dilakukan di banyak sekolah/kecamatan sekaligus
+// dengan titik masing-masing, bukan cuma satu titik kantor tunggal. Kalau
+// unitKerja nil atau belum diberi titik koordinat, jatuh kembali (fallback)
+// ke titik kantor tunggal setting.KantorLat/KantorLng/RadiusMeter (kompatibel
+// dengan instansi yang hanya punya satu titik kantor). Kalau KEDUANYA belum
+// diatur, geofence dianggap belum aktif dan absen tetap diperbolehkan tanpa
+// validasi jarak (default terbuka, sama seperti filter tempat tugas/jabatan/
+// kecamatan). Kalau geofence aktif tapi lat/lng pegawai tidak terdeteksi (GPS
+// ditolak/gagal), absen ditolak karena jarak tidak bisa dipastikan.
 //
 // akurasi adalah nilai accuracy (meter) dari Geolocation API browser --
 // radius kemungkinan posisi ASLI pegawai di sekitar titik (lat,lng) yang
 // dilaporkan. GPS ponsel, terutama di dalam gedung, sering meleset 50-150m
 // meski pegawai tidak bergerak sama sekali. Supaya pegawai yang benar-benar
-// berada di kantor tidak ditolak berulang kali hanya karena noise GPS,
-// jarak yang dibandingkan dengan radius kantor dikurangi toleransi sebesar
+// berada di kantor/sekolah tidak ditolak berulang kali hanya karena noise
+// GPS, jarak yang dibandingkan dengan radius dikurangi toleransi sebesar
 // akurasi tersebut, dengan batas bawah toleransiAkurasiMinimum meter (lihat
 // komentarnya) dan batas atas toleransiAkurasiMaksimal meter supaya geofence
-// tetap berarti untuk lokasi yang jelas-jelas jauh dari kantor).
-func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng, akurasi *float64) (ok bool, pesan string) {
-	if setting.KantorLat == nil || setting.KantorLng == nil {
+// tetap berarti untuk lokasi yang jelas-jelas jauh dari titik acuan).
+func absensiCekRadius(setting models.PengaturanAbsensi, unitKerja *models.UnitKerja, lat, lng, akurasi *float64) (ok bool, pesan string) {
+	targetLat, targetLng := setting.KantorLat, setting.KantorLng
+	radius := setting.RadiusMeter
+	sumberTitik := "kantor"
+	if unitKerja != nil && unitKerja.Lat != nil && unitKerja.Lng != nil {
+		targetLat, targetLng = unitKerja.Lat, unitKerja.Lng
+		if unitKerja.RadiusMeter != nil && *unitKerja.RadiusMeter > 0 {
+			radius = *unitKerja.RadiusMeter
+		}
+		sumberTitik = "unit kerja " + unitKerja.Unit
+	}
+	if targetLat == nil || targetLng == nil {
 		return true, ""
 	}
-	radius := setting.RadiusMeter
 	if radius <= 0 {
 		radius = 20
 	}
 	if lat == nil || lng == nil {
 		return false, "lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi pada perangkat/browser Anda dan izinkan akses lokasi, lalu coba lagi."
 	}
-	jarak := distanceMeters(*setting.KantorLat, *setting.KantorLng, *lat, *lng)
+	jarak := distanceMeters(*targetLat, *targetLng, *lat, *lng)
 
 	// toleransi minimal toleransiAkurasiMinimum berlaku SELALU (lihat
 	// komentarnya) -- kalau accuracy yang dilaporkan lebih besar dari itu,
@@ -209,15 +292,15 @@ func absensiCekRadius(setting models.PengaturanAbsensi, lat, lng, akurasi *float
 		if akurasi != nil && *akurasi > 0 {
 			infoAkurasi = fmt.Sprintf(" (akurasi GPS perangkat Anda saat ini sekitar %.0f meter)", *akurasi)
 		}
-		return false, fmt.Sprintf("Anda berada di luar radius kantor (jarak sekitar %.0f meter, maksimal %d meter dari titik kantor)%s. Absen tidak dapat dilakukan dari lokasi ini.", jarak, radius, infoAkurasi)
+		return false, fmt.Sprintf("Anda berada di luar radius %s (jarak sekitar %.0f meter, maksimal %d meter dari titik acuan)%s. Absen tidak dapat dilakukan dari lokasi ini.", sumberTitik, jarak, radius, infoAkurasi)
 	}
 	return true, ""
 }
 
-// absensiAllowedTempatTugas/absensiAllowedJabatanIDs mem-parse kolom JSON
-// text PengaturanAbsensi.TempatTugasAllowed/JabatanAllowedIDs -- lihat
-// komentar pada model untuk format & artinya (daftar kosong = filter itu
-// tidak diberlakukan).
+// absensiAllowedTempatTugas/absensiAllowedJabatanIDs/absensiAllowedKecamatanIDs
+// mem-parse kolom JSON text PengaturanAbsensi.TempatTugasAllowed/
+// JabatanAllowedIDs/KecamatanAllowedIDs -- lihat komentar pada model untuk
+// format & artinya (daftar kosong = filter itu tidak diberlakukan).
 func absensiAllowedTempatTugas(item models.PengaturanAbsensi) []string {
 	if strings.TrimSpace(item.TempatTugasAllowed) == "" {
 		return nil
@@ -236,11 +319,24 @@ func absensiAllowedJabatanIDs(item models.PengaturanAbsensi) []uint {
 	return out
 }
 
+func absensiAllowedKecamatanIDs(item models.PengaturanAbsensi) []uint {
+	if strings.TrimSpace(item.KecamatanAllowedIDs) == "" {
+		return nil
+	}
+	var out []uint
+	_ = json.Unmarshal([]byte(item.KecamatanAllowedIDs), &out)
+	return out
+}
+
 // absensiEligible menentukan apakah seorang pegawai boleh memakai menu
-// Absen berdasarkan filter tempat tugas & jabatan yang diatur administrator.
-// Kalau KEDUA filter kosong (belum pernah diatur), menu Absen terbuka untuk
-// semua pegawai -- filter baru berlaku begitu administrator mengisi salah
-// satu/kedua daftarnya lewat halaman Rekap Absen.
+// Absen berdasarkan filter tempat tugas, jabatan, & kecamatan (unit kerja/
+// sekolah pegawai) yang diatur administrator. Kalau SEMUA filter kosong
+// (belum pernah diatur), menu Absen terbuka untuk semua pegawai -- filter
+// baru berlaku begitu administrator mengisi salah satu/lebih daftarnya lewat
+// halaman Rekap Absen. pegawai HARUS sudah di-preload dengan UnitKerja kalau
+// ingin filter kecamatan berfungsi (lihat pemanggil di absenMasuk/
+// absenPulang/getPengaturanAbsensiHandler) -- kalau tidak, pegawai.UnitKerja
+// nil dan pegawai otomatis tidak lolos begitu filter kecamatan diisi.
 func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai) bool {
 	if allowed := absensiAllowedTempatTugas(setting); len(allowed) > 0 {
 		match := false
@@ -269,6 +365,21 @@ func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai) b
 			return false
 		}
 	}
+	if allowed := absensiAllowedKecamatanIDs(setting); len(allowed) > 0 {
+		if pegawai.UnitKerja == nil || pegawai.UnitKerja.IDKecamatan == nil {
+			return false
+		}
+		match := false
+		for _, id := range allowed {
+			if id == *pegawai.UnitKerja.IDKecamatan {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
 	return true
 }
 
@@ -278,20 +389,36 @@ func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai) b
 // untuk pegawai/atasan yang login (true untuk administrator/admin/pegawai
 // yang belum diketahui kelayakannya, supaya default aman dan endpoint ini
 // tidak mengubah perilaku untuk role yang tidak relevan dengan filter ini).
+//
+// JamMulaiPagi..JamTutupPulang (tanpa akhiran "Sekolah") SELALU berisi set
+// Dinas/Kantor mentah dari database KECUALI kalau getPengaturanAbsensiHandler
+// menimpanya dengan set Sekolah untuk pegawai/atasan yang tempat tugasnya
+// sekolah (lihat jamAbsenUntukTempatTgs) -- ini yang dipakai AbsensiView.vue
+// (pegawai) sehingga TIDAK perlu tahu ada dua set sama sekali, cukup pakai
+// field yang sudah "resolved" untuk dirinya. Field ...Sekolah selalu berisi
+// set Sekolah APA ADANYA (tidak pernah ditimpa) -- ini yang dipakai form
+// Pengaturan Absen administrator untuk menampilkan & mengubah KEDUA set
+// sekaligus.
 type pengaturanAbsensiOut struct {
-	ID                 uint     `json:"id"`
-	Aktif              bool     `json:"aktif"`
-	JamMulaiPagi       string   `json:"jam_mulai_pagi"`
-	JamBatasPagi       string   `json:"jam_batas_pagi"`
-	JamTutupPagi       string   `json:"jam_tutup_pagi"`
-	JamMulaiPulang     string   `json:"jam_mulai_pulang"`
-	JamTutupPulang     string   `json:"jam_tutup_pulang"`
-	TempatTugasAllowed []string `json:"tempat_tugas_allowed"`
-	JabatanAllowedIDs  []uint   `json:"jabatan_allowed_ids"`
-	KantorLat          *float64 `json:"kantor_lat"`
-	KantorLng          *float64 `json:"kantor_lng"`
-	RadiusMeter        int      `json:"radius_meter"`
-	Eligible           bool     `json:"eligible"`
+	ID                    uint     `json:"id"`
+	Aktif                 bool     `json:"aktif"`
+	JamMulaiPagi          string   `json:"jam_mulai_pagi"`
+	JamBatasPagi          string   `json:"jam_batas_pagi"`
+	JamTutupPagi          string   `json:"jam_tutup_pagi"`
+	JamMulaiPulang        string   `json:"jam_mulai_pulang"`
+	JamTutupPulang        string   `json:"jam_tutup_pulang"`
+	JamMulaiPagiSekolah   string   `json:"jam_mulai_pagi_sekolah"`
+	JamBatasPagiSekolah   string   `json:"jam_batas_pagi_sekolah"`
+	JamTutupPagiSekolah   string   `json:"jam_tutup_pagi_sekolah"`
+	JamMulaiPulangSekolah string   `json:"jam_mulai_pulang_sekolah"`
+	JamTutupPulangSekolah string   `json:"jam_tutup_pulang_sekolah"`
+	TempatTugasAllowed    []string `json:"tempat_tugas_allowed"`
+	JabatanAllowedIDs     []uint   `json:"jabatan_allowed_ids"`
+	KecamatanAllowedIDs   []uint   `json:"kecamatan_allowed_ids"`
+	KantorLat             *float64 `json:"kantor_lat"`
+	KantorLng             *float64 `json:"kantor_lng"`
+	RadiusMeter           int      `json:"radius_meter"`
+	Eligible              bool     `json:"eligible"`
 }
 
 func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut {
@@ -303,24 +430,34 @@ func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut 
 	if jabatan == nil {
 		jabatan = []uint{}
 	}
+	kecamatan := absensiAllowedKecamatanIDs(item)
+	if kecamatan == nil {
+		kecamatan = []uint{}
+	}
 	radius := item.RadiusMeter
 	if radius <= 0 {
 		radius = 20
 	}
 	return pengaturanAbsensiOut{
-		ID:                 item.ID,
-		Aktif:              item.Aktif,
-		JamMulaiPagi:       item.JamMulaiPagi,
-		JamBatasPagi:       item.JamBatasPagi,
-		JamTutupPagi:       item.JamTutupPagi,
-		JamMulaiPulang:     item.JamMulaiPulang,
-		JamTutupPulang:     item.JamTutupPulang,
-		TempatTugasAllowed: tempat,
-		JabatanAllowedIDs:  jabatan,
-		KantorLat:          item.KantorLat,
-		KantorLng:          item.KantorLng,
-		RadiusMeter:        radius,
-		Eligible:           true,
+		ID:                    item.ID,
+		Aktif:                 item.Aktif,
+		JamMulaiPagi:          item.JamMulaiPagi,
+		JamBatasPagi:          item.JamBatasPagi,
+		JamTutupPagi:          item.JamTutupPagi,
+		JamMulaiPulang:        item.JamMulaiPulang,
+		JamTutupPulang:        item.JamTutupPulang,
+		JamMulaiPagiSekolah:   item.JamMulaiPagiSekolah,
+		JamBatasPagiSekolah:   item.JamBatasPagiSekolah,
+		JamTutupPagiSekolah:   item.JamTutupPagiSekolah,
+		JamMulaiPulangSekolah: item.JamMulaiPulangSekolah,
+		JamTutupPulangSekolah: item.JamTutupPulangSekolah,
+		TempatTugasAllowed:    tempat,
+		JabatanAllowedIDs:     jabatan,
+		KecamatanAllowedIDs:   kecamatan,
+		KantorLat:             item.KantorLat,
+		KantorLng:             item.KantorLng,
+		RadiusMeter:           radius,
+		Eligible:              true,
 	}
 }
 
@@ -350,7 +487,7 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 				return
 			}
 			h(w, r)
-		}, middleware.Auth)
+		}, middleware.Auth, middleware.RequireActiveUser(db))
 	}
 	// administratorOnly: khusus untuk mengubah Pengaturan Absen (jendela
 	// waktu, filter siapa yang boleh absen, titik koordinat kantor) --
@@ -403,8 +540,20 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 	out := toPengaturanAbsensiOut(item)
 	if claims, ok := middleware.GetClaims(r); ok && claims.IDPegawai != nil {
 		var pegawai models.Pegawai
-		if err := db.First(&pegawai, *claims.IDPegawai).Error; err == nil {
+		if err := db.Preload("UnitKerja").First(&pegawai, *claims.IDPegawai).Error; err == nil {
 			out.Eligible = absensiEligible(item, pegawai)
+			// Kalau pegawai yang bersangkutan bertugas di sekolah, timpa field
+			// jam_* (tanpa akhiran "_sekolah") dengan jam kerja sekolah supaya
+			// AbsensiView.vue (yang hanya membaca field jam_* biasa) otomatis
+			// menampilkan & memvalidasi jam kerja yang sesuai untuknya, tanpa
+			// perlu tahu soal pembagian dinas/sekolah sama sekali -- lihat
+			// jamAbsenUntukTempatTgs dan komentar pada models.PengaturanAbsensi.
+			jam := jamAbsenUntukPegawai(item, pegawai)
+			out.JamMulaiPagi = jam.MulaiPagi
+			out.JamBatasPagi = jam.BatasPagi
+			out.JamTutupPagi = jam.TutupPagi
+			out.JamMulaiPulang = jam.MulaiPulang
+			out.JamTutupPulang = jam.TutupPulang
 		}
 	}
 	utils.Success(w, "ok", out)
@@ -489,7 +638,7 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	var pegawaiSelf models.Pegawai
-	if err := db.First(&pegawaiSelf, *claims.IDPegawai).Error; err != nil {
+	if err := db.Preload("UnitKerja").First(&pegawaiSelf, *claims.IDPegawai).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
 		return
 	}
@@ -497,13 +646,16 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
 		return
 	}
+	// jam kerja yang berlaku untuk pegawai ini (dinas/kantor vs sekolah) --
+	// lihat jamAbsenUntukTempatTgs.
+	jam := jamAbsenUntukPegawai(setting, pegawaiSelf)
 
 	now := absensiNow()
 	today := absensiToday()
 	nowMin := now.Hour()*60 + now.Minute()
 
-	if mulaiMin, ok := parseJamToMinutes(setting.JamMulaiPagi); ok && nowMin < mulaiMin {
-		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("belum waktunya absen masuk, dibuka mulai jam %s", setting.JamMulaiPagi))
+	if mulaiMin, ok := parseJamToMinutes(jam.MulaiPagi); ok && nowMin < mulaiMin {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("belum waktunya absen masuk, dibuka mulai jam %s", jam.MulaiPagi))
 		return
 	}
 
@@ -520,8 +672,8 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// models.PengaturanAbsensi). Karena absen pulang mensyaratkan sudah ada
 	// absen masuk (lihat absenPulang), menutup absen masuk otomatis juga
 	// menutup absen pulang untuk hari itu.
-	if tutupMin, ok := parseJamToMinutes(setting.JamTutupPagi); ok && nowMin > tutupMin {
-		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("batas waktu absen masuk sudah lewat (ditutup otomatis mulai jam %s), absen masuk untuk hari ini tidak lagi tersedia", setting.JamTutupPagi))
+	if tutupMin, ok := parseJamToMinutes(jam.TutupPagi); ok && nowMin > tutupMin {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("batas waktu absen masuk sudah lewat (ditutup otomatis mulai jam %s), absen masuk untuk hari ini tidak lagi tersedia", jam.TutupPagi))
 		return
 	}
 
@@ -558,14 +710,14 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	dinasDalam := r.FormValue("dinas_dalam") == "true"
 
 	if !dinasDalam {
-		if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
+		if ok, pesan := absensiCekRadius(setting, pegawaiSelf.UnitKerja, lat, lng, akurasi); !ok {
 			utils.Error(w, http.StatusForbidden, pesan)
 			return
 		}
 	}
 
 	terlambat := 0
-	if batasMin, ok := parseJamToMinutes(setting.JamBatasPagi); ok && nowMin > batasMin {
+	if batasMin, ok := parseJamToMinutes(jam.BatasPagi); ok && nowMin > batasMin {
 		terlambat = nowMin - batasMin
 	}
 
@@ -638,7 +790,7 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	var pegawaiSelf models.Pegawai
-	if err := db.First(&pegawaiSelf, *claims.IDPegawai).Error; err != nil {
+	if err := db.Preload("UnitKerja").First(&pegawaiSelf, *claims.IDPegawai).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
 		return
 	}
@@ -646,13 +798,16 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
 		return
 	}
+	// jam kerja yang berlaku untuk pegawai ini (dinas/kantor vs sekolah) --
+	// lihat jamAbsenUntukTempatTgs.
+	jam := jamAbsenUntukPegawai(setting, pegawaiSelf)
 
 	now := absensiNow()
 	today := absensiToday()
 	nowMin := now.Hour()*60 + now.Minute()
 
-	if mulaiMin, ok := parseJamToMinutes(setting.JamMulaiPulang); ok && nowMin < mulaiMin {
-		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("belum waktunya absen pulang, dibuka mulai jam %s", setting.JamMulaiPulang))
+	if mulaiMin, ok := parseJamToMinutes(jam.MulaiPulang); ok && nowMin < mulaiMin {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("belum waktunya absen pulang, dibuka mulai jam %s", jam.MulaiPulang))
 		return
 	}
 
@@ -670,8 +825,8 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// batas waktu keras: lewat JamTutupPulang, absen pulang otomatis DITUTUP
 	// untuk hari itu -- walaupun pegawai sudah absen masuk dan belum sempat
 	// absen pulang (lihat komentar pada models.PengaturanAbsensi).
-	if tutupMin, ok := parseJamToMinutes(setting.JamTutupPulang); ok && nowMin > tutupMin {
-		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("batas waktu absen pulang sudah lewat (ditutup otomatis mulai jam %s), absen pulang untuk hari ini tidak lagi tersedia", setting.JamTutupPulang))
+	if tutupMin, ok := parseJamToMinutes(jam.TutupPulang); ok && nowMin > tutupMin {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf("batas waktu absen pulang sudah lewat (ditutup otomatis mulai jam %s), absen pulang untuk hari ini tidak lagi tersedia", jam.TutupPulang))
 		return
 	}
 
@@ -704,7 +859,7 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	dinasDalam := r.FormValue("dinas_dalam") == "true"
 
 	if !dinasDalam {
-		if ok, pesan := absensiCekRadius(setting, lat, lng, akurasi); !ok {
+		if ok, pesan := absensiCekRadius(setting, pegawaiSelf.UnitKerja, lat, lng, akurasi); !ok {
 			utils.Error(w, http.StatusForbidden, pesan)
 			return
 		}

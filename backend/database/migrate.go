@@ -13,6 +13,7 @@ func Migrate(db *gorm.DB) {
 	err := db.AutoMigrate(
 		&models.Role{},
 		&models.Jabatan{},
+		&models.Kecamatan{},
 		&models.UnitKerja{},
 		&models.Status{},
 		&models.Pangkat{},

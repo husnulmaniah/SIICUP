@@ -148,6 +148,7 @@ const navSections = computed(() => {
         ...(auth.isAdministrator
           ? [
               { label: 'Jabatan', icon: 'pi pi-id-card', to: '/master/jabatan' },
+              { label: 'Kecamatan', icon: 'pi pi-map', to: '/master/kecamatan' },
               { label: 'Unit Kerja', icon: 'pi pi-sitemap', to: '/master/unit-kerja' },
               { label: 'Status Pegawai', icon: 'pi pi-tag', to: '/master/status' },
               { label: 'Pangkat', icon: 'pi pi-star', to: '/master/pangkat' },

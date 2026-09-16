@@ -36,9 +36,57 @@ type Jabatan struct {
 
 func (Jabatan) TableName() string { return "jabatan" }
 
-type UnitKerja struct {
+// Kecamatan: daftar kecamatan tempat unit kerja/sekolah berada -- dipakai
+// mengelompokkan UnitKerja (lihat di bawah) supaya administrator bisa
+// mengelola & memilih titik koordinat absen per kecamatan/sekolah, alih-alih
+// hanya satu titik kantor tunggal (PengaturanAbsensi.KantorLat/KantorLng).
+// Lihat juga PengaturanAbsensi.KecamatanAllowedIDs untuk memilih kecamatan
+// mana saja yang menu Absen-nya diaktifkan.
+type Kecamatan struct {
 	ID   uint   `json:"id" gorm:"primaryKey"`
-	Unit string `json:"unit" gorm:"size:150;not null"`
+	Nama string `json:"nama" gorm:"size:150;not null"`
+}
+
+func (Kecamatan) TableName() string { return "kecamatan" }
+
+// UnitKerja merepresentasikan unit kerja/sekolah tempat pegawai bertugas.
+//   - IDKecamatan/Kecamatan: kecamatan tempat unit kerja/sekolah ini berada
+//     (opsional -- nullable untuk data lama yang belum diisi administrator).
+//   - Lat/Lng/RadiusMeter: titik koordinat & radius absen KHUSUS untuk unit
+//     kerja/sekolah ini. Kalau diisi, absen pegawai yang id_unit_kerja-nya
+//     menunjuk ke sini divalidasi terhadap titik ini (lihat absensiCekRadius
+//     di handlers/absensi.go), BUKAN titik kantor tunggal di
+//     PengaturanAbsensi -- sehingga instansi dengan banyak sekolah di
+//     beberapa kecamatan bisa punya titik koordinat sendiri-sendiri per
+//     sekolah. RadiusMeter nullable/kosong berarti memakai RadiusMeter
+//     global di PengaturanAbsensi. Kalau Lat/Lng unit kerja ini kosong,
+//     absen pegawainya jatuh kembali (fallback) ke titik kantor tunggal di
+//     PengaturanAbsensi seperti sebelumnya (kompatibel dengan data lama).
+//   - JamMulaiPagi/JamBatasPagi/JamTutupPagi/JamMulaiPulang/JamTutupPulang:
+//     jendela waktu absen (format "HH:MM", sama seperti field sejenis pada
+//     PengaturanAbsensi) KHUSUS untuk unit kerja/sekolah ini. Kalau KELIMA
+//     field ini diisi lengkap, jam kerja unit kerja/sekolah ini dipakai
+//     sebagai PRIORITAS UTAMA untuk pegawai yang id_unit_kerja-nya menunjuk
+//     ke sini (lihat jamAbsenUntukPegawai di handlers/absensi.go) -- artinya
+//     tiap sekolah bisa punya jam masuk/terlambat/pulang/tutup sendiri-
+//     sendiri, tidak harus disamakan semua. Kalau salah satu saja dari
+//     kelima field ini kosong, jam kerja unit kerja ini dianggap BELUM
+//     diatur & pegawainya jatuh kembali (fallback) ke set Sekolah/Dinas
+//     "global" di PengaturanAbsensi berdasarkan Tempat Tugas pegawai seperti
+//     sebelumnya (kompatibel dengan data lama) -- lihat jamAbsenUntukTempatTgs.
+type UnitKerja struct {
+	ID             uint       `json:"id" gorm:"primaryKey"`
+	Unit           string     `json:"unit" gorm:"size:150;not null"`
+	IDKecamatan    *uint      `json:"id_kecamatan" gorm:"column:id_kecamatan"`
+	Kecamatan      *Kecamatan `json:"kecamatan,omitempty" gorm:"foreignKey:IDKecamatan;references:ID"`
+	Lat            *float64   `json:"lat" gorm:"column:lat"`
+	Lng            *float64   `json:"lng" gorm:"column:lng"`
+	RadiusMeter    *int       `json:"radius_meter" gorm:"column:radius_meter"`
+	JamMulaiPagi   *string    `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5"`
+	JamBatasPagi   *string    `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5"`
+	JamTutupPagi   *string    `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5"`
+	JamMulaiPulang *string    `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5"`
+	JamTutupPulang *string    `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5"`
 }
 
 func (UnitKerja) TableName() string { return "unit_kerja" }
@@ -548,7 +596,9 @@ func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
 //
 //   - Aktif: administrator bisa menonaktifkan seluruh menu Absen (mis. kalau
 //     sudah tidak dipakai) tanpa menghapus data riwayat yang sudah ada.
-//   - JamMulaiPagi..JamBatasPagi..JamTutupPagi: tiga jam absen masuk.
+//   - JamMulaiPagi..JamBatasPagi..JamTutupPagi: tiga jam absen masuk UNTUK
+//     PEGAWAI DINAS/KANTOR (bukan sekolah -- lihat JamMulaiPagiSekolah dst di
+//     bawah untuk jam absen pegawai sekolah, yang jam kerjanya memang beda).
 //     Sebelum JamMulaiPagi absen masuk ditolak (belum waktunya). Antara
 //     JamMulaiPagi s.d JamBatasPagi dianggap TEPAT WAKTU. Antara JamBatasPagi
 //     s.d JamTutupPagi masih diterima tapi dihitung TERLAMBAT sejumlah menit
@@ -557,39 +607,69 @@ func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
 //     absenMasuk di handlers/absensi.go). Ini juga berarti absen pulang tidak
 //     akan tersedia untuk hari itu (lihat absenPulang -- absen pulang
 //     mensyaratkan sudah ada absen masuk).
-//   - JamMulaiPulang..JamTutupPulang: absen pulang baru dibuka (tombolnya
-//     aktif) mulai JamMulaiPulang -- sebelum itu pegawai belum bisa absen
-//     pulang. Setelah JamTutupPulang absen pulang otomatis DITUTUP -- ditolak
-//     sama sekali walaupun pegawai sudah absen masuk dan belum sempat absen
-//     pulang hari itu (lihat absenPulang di handlers/absensi.go).
-//   - TempatTugasAllowed/JabatanAllowedIDs: filter siapa yang boleh memakai
-//     menu Absen, disimpan sebagai teks JSON ("[\"Kantor Pusat\"]" / "[3,5]")
-//     mengikuti pola DataLama/DataBaru di PerubahanDataPegawai -- diparsing
-//     lewat absensiAllowedTempatTugas/absensiAllowedJabatanIDs di
-//     handlers/absensi.go. Daftar KOSONG pada salah satu berarti filter itu
-//     tidak diberlakukan (semua tempat tugas/jabatan lolos filter itu); kalau
-//     KEDUA daftar kosong maka menu Absen terbuka untuk semua pegawai (default
-//     sebelum administrator mengatur apa pun) -- lihat absensiEligible.
-//   - KantorLat/KantorLng/RadiusMeter: satu titik koordinat kantor (berlaku
-//     untuk seluruh pegawai, bukan per tempat tugas) dipakai untuk membatasi
-//     absen hanya boleh dilakukan dalam radius tersebut dari kantor -- lihat
-//     distanceMeters di handlers/absensi.go. KantorLat/KantorLng NULL berarti
-//     geofence belum diatur (default sebelum administrator mengisi) sehingga
-//     absen tetap boleh dilakukan tanpa validasi jarak, mengikuti pola
-//     default-terbuka yang sama seperti filter tempat tugas/jabatan di atas.
+//   - JamMulaiPulang..JamTutupPulang: absen pulang (DINAS/KANTOR) baru
+//     dibuka (tombolnya aktif) mulai JamMulaiPulang -- sebelum itu pegawai
+//     belum bisa absen pulang. Setelah JamTutupPulang absen pulang otomatis
+//     DITUTUP -- ditolak sama sekali walaupun pegawai sudah absen masuk dan
+//     belum sempat absen pulang hari itu (lihat absenPulang di
+//     handlers/absensi.go).
+//   - JamMulaiPagiSekolah..JamTutupPulangSekolah: SET KEDUA, jam kerja penuh
+//     (mulai pagi s.d tutup pulang) khusus pegawai yang bertugas di SEKOLAH
+//     (tempat_tgs mengandung kata "sekolah" -- lihat isSekolahFromTempatTgs
+//     di handlers/pengajuan_cuti.go, dipakai juga untuk menentukan 5/6 hari
+//     kerja & syarat dokumen cuti). Artinya & urutannya identik dengan set
+//     Dinas/Kantor di atas, hanya berlaku untuk pegawai sekolah -- lihat
+//     jamAbsenUntukTempatTgs di handlers/absensi.go yang memilih set mana
+//     dipakai per pegawai secara otomatis berdasarkan tempat tugasnya. Ini
+//     dipakai sebagai FALLBACK kalau unit kerja/sekolah pegawai belum diberi
+//     jam kerja sendiri -- lihat UnitKerja.JamMulaiPagi dkk & fungsi
+//     jamAbsenUntukPegawai (yang memilih antara jam khusus unit kerja ini
+//     atau jatuh kembali ke set Sekolah/Dinas di sini).
+//   - TempatTugasAllowed/JabatanAllowedIDs/KecamatanAllowedIDs: filter siapa
+//     yang boleh memakai menu Absen, disimpan sebagai teks JSON
+//     ("[\"Kantor Pusat\"]" / "[3,5]") mengikuti pola DataLama/DataBaru di
+//     PerubahanDataPegawai -- diparsing lewat
+//     absensiAllowedTempatTugas/absensiAllowedJabatanIDs/
+//     absensiAllowedKecamatanIDs di handlers/absensi.go. KecamatanAllowedIDs
+//     dicocokkan lewat UnitKerja.IDKecamatan milik unit kerja/sekolah pegawai
+//     (pegawai tanpa unit kerja, atau unit kerja tanpa kecamatan, otomatis
+//     TIDAK lolos filter ini begitu filter ini diisi). Daftar KOSONG pada
+//     salah satu filter berarti filter itu tidak diberlakukan (semua
+//     tempat tugas/jabatan/kecamatan lolos filter itu); kalau SEMUA daftar
+//     kosong maka menu Absen terbuka untuk semua pegawai (default sebelum
+//     administrator mengatur apa pun) -- lihat absensiEligible.
+//   - KantorLat/KantorLng/RadiusMeter: titik koordinat & radius absen
+//     DEFAULT/FALLBACK yang berlaku untuk pegawai yang unit kerjanya belum
+//     /tidak diberi titik koordinat sendiri (lihat UnitKerja.Lat/Lng/
+//     RadiusMeter, yang kalau diisi jadi prioritas utama per sekolah) --
+//     lihat distanceMeters & absensiCekRadius di handlers/absensi.go.
+//     KantorLat/KantorLng NULL DAN unit kerja pegawai juga tidak punya
+//     titik koordinat berarti geofence belum diatur sehingga absen tetap
+//     boleh dilakukan tanpa validasi jarak, mengikuti pola default-terbuka
+//     yang sama seperti filter tempat tugas/jabatan/kecamatan di atas.
 type PengaturanAbsensi struct {
-	ID                 uint     `json:"id" gorm:"primaryKey"`
-	Aktif              bool     `json:"aktif" gorm:"column:aktif;default:true"`
-	JamMulaiPagi       string   `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5;default:'06:00'"`
-	JamBatasPagi       string   `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5;default:'07:30'"`
-	JamTutupPagi       string   `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5;default:'09:00'"`
-	JamMulaiPulang     string   `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
-	JamTutupPulang     string   `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5;default:'20:00'"`
-	TempatTugasAllowed string   `json:"-" gorm:"column:tempat_tugas_allowed;type:text"`
-	JabatanAllowedIDs  string   `json:"-" gorm:"column:jabatan_allowed_ids;type:text"`
-	KantorLat          *float64 `json:"-" gorm:"column:kantor_lat"`
-	KantorLng          *float64 `json:"-" gorm:"column:kantor_lng"`
-	RadiusMeter        int      `json:"-" gorm:"column:radius_meter;default:20"`
+	ID             uint   `json:"id" gorm:"primaryKey"`
+	Aktif          bool   `json:"aktif" gorm:"column:aktif;default:true"`
+	JamMulaiPagi   string `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5;default:'06:00'"`
+	JamBatasPagi   string `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5;default:'07:30'"`
+	JamTutupPagi   string `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5;default:'09:00'"`
+	JamMulaiPulang string `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
+	JamTutupPulang string `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5;default:'20:00'"`
+	// Set kedua jam absen khusus pegawai sekolah -- lihat komentar
+	// JamMulaiPagiSekolah di atas struct. Default sengaja dibuat berbeda dari
+	// set Dinas/Kantor (mengikuti pola jam sekolah pada umumnya), tapi tetap
+	// harus disesuaikan administrator lewat menu Rekap Absen -> Pengaturan.
+	JamMulaiPagiSekolah   string   `json:"jam_mulai_pagi_sekolah" gorm:"column:jam_mulai_pagi_sekolah;size:5;default:'06:30'"`
+	JamBatasPagiSekolah   string   `json:"jam_batas_pagi_sekolah" gorm:"column:jam_batas_pagi_sekolah;size:5;default:'07:00'"`
+	JamTutupPagiSekolah   string   `json:"jam_tutup_pagi_sekolah" gorm:"column:jam_tutup_pagi_sekolah;size:5;default:'08:00'"`
+	JamMulaiPulangSekolah string   `json:"jam_mulai_pulang_sekolah" gorm:"column:jam_mulai_pulang_sekolah;size:5;default:'12:30'"`
+	JamTutupPulangSekolah string   `json:"jam_tutup_pulang_sekolah" gorm:"column:jam_tutup_pulang_sekolah;size:5;default:'15:00'"`
+	TempatTugasAllowed    string   `json:"-" gorm:"column:tempat_tugas_allowed;type:text"`
+	JabatanAllowedIDs     string   `json:"-" gorm:"column:jabatan_allowed_ids;type:text"`
+	KecamatanAllowedIDs   string   `json:"-" gorm:"column:kecamatan_allowed_ids;type:text"`
+	KantorLat             *float64 `json:"-" gorm:"column:kantor_lat"`
+	KantorLng             *float64 `json:"-" gorm:"column:kantor_lng"`
+	RadiusMeter           int      `json:"-" gorm:"column:radius_meter;default:20"`
 }
 
 func (PengaturanAbsensi) TableName() string { return "pengaturan_absensi" }
