@@ -63,6 +63,28 @@ const importModeOptions = [
 
 const remoteOptions = reactive({})
 
+// ---- filter dropdown tambahan di atas tabel (mis. Jenis Jabatan/Jabatan/
+// Kecamatan/Unit Kerja pada Data Pegawai) -- lihat config.filters di
+// tables.js. Berbeda dari kotak "Cari..." (search, cocok ke nama/NIP dkk
+// lewat query q), filter-filter ini dikirim sebagai query param terpisah
+// (id_jabatan, jenis_jabatan, dst.) dan bisa dikombinasikan sekaligus. ----
+const filterValues = reactive({})
+for (const f of props.config.filters || []) {
+  filterValues[f.field] = null
+}
+const hasActiveFilter = computed(() =>
+  (props.config.filters || []).some((f) => filterValues[f.field] !== null && filterValues[f.field] !== undefined && filterValues[f.field] !== ''),
+)
+function onFilterChange() {
+  page.value = 1
+  fetchList()
+}
+function clearFilters() {
+  for (const f of props.config.filters || []) filterValues[f.field] = null
+  page.value = 1
+  fetchList()
+}
+
 // ---- form field type 'coords' (titik koordinat + radius, mis. Unit Kerja)
 // -- mengikuti pola "Tempel Koordinat / Link Google Maps" & "Ambil Lokasi
 // Saat Ini" yang sama dipakai di Pengaturan Absen (RekapAbsensiView.vue),
@@ -435,7 +457,12 @@ function optionLabelOf(field, option) {
 }
 
 async function loadRemoteOptions() {
-  const refs = [...new Set((props.config.formFields || []).filter((f) => f.ref).map((f) => f.ref))]
+  const refs = [
+    ...new Set([
+      ...(props.config.formFields || []).filter((f) => f.ref).map((f) => f.ref),
+      ...(props.config.filters || []).filter((f) => f.ref).map((f) => f.ref),
+    ]),
+  ]
   for (const ref of refs) {
     if (remoteOptions[ref]) continue
     try {
@@ -457,11 +484,46 @@ function optionsFor(field) {
   return remoteOptions[field.ref] || []
 }
 
+// ---- sinkronisasi otomatis field 'select' yang punya "syncFrom" (mis.
+// 'tempat_tgs' pada form Data Pegawai otomatis ikut kategori "Tempat Kerja"
+// dari Unit Kerja yang dipilih -- lihat tableConfigs.pegawai di tables.js).
+// Begitu field sumbernya (syncFrom.field, mis. id_unit_kerja) berubah, cari
+// record yang cocok di remoteOptions[syncFrom.ref] (atau syncFrom.
+// staticOptions kalau bukan lookup ref), lalu isi field ini dengan hasil
+// syncFrom.pick(record) -- HANYA kalau hasilnya ada isinya (record sumber
+// belum dikategorikan -> dibiarkan, admin pilih manual). Dipasang sebagai
+// satu watcher 'deep' pada seluruh objek form (bukan per-field) supaya tetap
+// bekerja walau config/formFields berganti tanpa remount komponen (lihat
+// watch(props.config) di bawah, dipakai saat CrudManager yang sama dipakai
+// bergantian untuk beberapa tabel).
+watch(
+  form,
+  () => {
+    for (const f of props.config.formFields || []) {
+      if (!f.syncFrom) continue
+      const dep = f.syncFrom
+      const depVal = form[dep.field]
+      if (depVal === undefined || depVal === null || depVal === '') continue
+      const list = dep.ref ? remoteOptions[dep.ref] || [] : dep.staticOptions || []
+      const record = list.find((o) => o.id === depVal)
+      if (!record) continue
+      const picked = dep.pick(record)
+      if (picked && form[f.field] !== picked) form[f.field] = picked
+    }
+  },
+  { deep: true },
+)
+
 async function fetchList() {
   loading.value = true
   try {
+    const filterParams = {}
+    for (const f of props.config.filters || []) {
+      const v = filterValues[f.field]
+      if (v !== null && v !== undefined && v !== '') filterParams[f.field] = v
+    }
     const { data } = await http.get(props.config.endpoint, {
-      params: { page: page.value, pageSize: pageSize.value, q: search.value || undefined },
+      params: { page: page.value, pageSize: pageSize.value, q: search.value || undefined, ...filterParams },
     })
     items.value = data.data || []
     total.value = data.meta?.total ?? items.value.length
@@ -854,6 +916,24 @@ const canManage = computed(() => true) // route guard already restricts page acc
           <Button icon="pi pi-chevron-down" iconPos="right" label="Menu" class="overlay-menu-trigger" @click="toggleActionsMenu" aria-haspopup="true" />
           <Menu ref="actionsMenuRef" :model="actionsMenuItems" popup class="overlay-actions-menu" />
         </div>
+      </div>
+
+      <div v-if="config.filters && config.filters.length" class="toolbar-actions" style="flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; align-items: flex-end">
+        <div v-for="f in config.filters" :key="f.field" style="min-width: 160px; flex: 1 1 180px">
+          <label style="display: block; font-size: 0.78rem; font-weight: 600; margin-bottom: 0.25rem; color: var(--p-text-muted-color)">{{ f.label }}</label>
+          <Select
+            v-model="filterValues[f.field]"
+            :options="optionsFor(f)"
+            :optionLabel="(o) => optionLabelOf(f, o)"
+            optionValue="id"
+            filter
+            showClear
+            placeholder="Semua"
+            style="width: 100%"
+            @change="onFilterChange"
+          />
+        </div>
+        <Button v-if="hasActiveFilter" label="Bersihkan Filter" icon="pi pi-filter-slash" size="small" text severity="secondary" @click="clearFilters" />
       </div>
 
       <div class="responsive-table-wrap">

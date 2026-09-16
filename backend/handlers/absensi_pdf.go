@@ -117,7 +117,7 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 	// Hari kerja mengikuti pola pegawai (sekolah 6 hari, kantor dinas 5 hari)
 	// dan melewati tanggal merah -- sama seperti perhitungan rekap di layar.
 	holidaySet := holidaySetInRange(db, start, limit)
-	hariKerja := workingDaysWithHolidaySet(start, limit, sixDayWeekForTempatTgs(pegawai.TempatTgs), holidaySet)
+	hariKerja := workingDaysWithHolidaySet(start, limit, sixDayWeekForPegawai(pegawai), holidaySet)
 
 	var baris []barisRekapPDF
 	var ringkasan ringkasanRekapPDF
@@ -359,7 +359,7 @@ func buildRekapAbsensiPDF(
 			valueX := marginX + 110
 			y := 172.0
 			pola := "5 Hari Kerja (Senin - Jumat)"
-			if sixDayWeekForTempatTgs(pegawai.TempatTgs) {
+			if sixDayWeekForPegawai(pegawai) {
 				pola = "6 Hari Kerja (Senin - Sabtu)"
 			}
 			jabatan := "-"

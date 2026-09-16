@@ -103,7 +103,7 @@ func parseJamToMinutes(s string) (int, bool) {
 }
 
 // jamAbsenSet adalah satu set jendela waktu absen (mulai pagi s.d tutup
-// pulang) -- lihat jamAbsenUntukTempatTgs.
+// pulang) -- lihat jamAbsenUntukPegawai.
 type jamAbsenSet struct {
 	MulaiPagi   string
 	BatasPagi   string
@@ -112,40 +112,15 @@ type jamAbsenSet struct {
 	TutupPulang string
 }
 
-// jamAbsenUntukTempatTgs memilih set jendela waktu absen yang berlaku untuk
-// seorang pegawai berdasarkan tempat tugasnya: pegawai sekolah (tempat_tgs
-// mengandung kata "sekolah" -- lihat isSekolahFromTempatTgs di
-// handlers/pengajuan_cuti.go, dipakai juga untuk menentukan 5/6 hari kerja &
-// syarat dokumen cuti) memakai jam kerja sekolah yang biasanya lebih pagi &
-// lebih singkat dari jam kerja dinas/kantor. Dipakai di absenMasuk/absenPulang
-// (untuk validasi) dan getPengaturanAbsensiHandler (untuk ditampilkan ke
-// pegawai yang bersangkutan lewat AbsensiView.vue) -- lihat komentar pada
-// models.PengaturanAbsensi.
-func jamAbsenUntukTempatTgs(setting models.PengaturanAbsensi, tempatTgs string) jamAbsenSet {
-	if isSekolahFromTempatTgs(tempatTgs) {
-		return jamAbsenSet{
-			MulaiPagi:   setting.JamMulaiPagiSekolah,
-			BatasPagi:   setting.JamBatasPagiSekolah,
-			TutupPagi:   setting.JamTutupPagiSekolah,
-			MulaiPulang: setting.JamMulaiPulangSekolah,
-			TutupPulang: setting.JamTutupPulangSekolah,
-		}
-	}
-	return jamAbsenSet{
-		MulaiPagi:   setting.JamMulaiPagi,
-		BatasPagi:   setting.JamBatasPagi,
-		TutupPagi:   setting.JamTutupPagi,
-		MulaiPulang: setting.JamMulaiPulang,
-		TutupPulang: setting.JamTutupPulang,
-	}
-}
-
 // jamAbsenUntukPegawai memilih set jendela waktu absen yang berlaku untuk
 // seorang pegawai, dengan urutan prioritas: (1) jam kerja KHUSUS unit kerja/
 // sekolah pegawai (UnitKerja.JamMulaiPagi dkk, hanya dipakai kalau KELIMA
 // field itu diisi lengkap -- lihat komentar pada models.UnitKerja), lalu
-// (2) fallback ke set Sekolah/Dinas "global" di PengaturanAbsensi berdasarkan
-// Tempat Tugas pegawai (lihat jamAbsenUntukTempatTgs). Dengan ini tiap
+// (2) fallback ke set Sekolah "global" di PengaturanAbsensi kalau pegawai ini
+// berstatus sekolah (lihat isSekolahPegawai di handlers/pengajuan_cuti.go --
+// PRIORITAS UTAMA-nya kategori Tempat Kerja pada Unit Kerja pegawai, fallback
+// ke tebakan dari kata "sekolah" pada Tempat Tugas untuk data lama), atau
+// (3) set Dinas/Kantor "global" untuk pegawai lainnya. Dengan ini tiap
 // sekolah bisa mengatur jam masuk/terlambat/pulang/tutup sendiri-sendiri
 // lewat menu Master Data -> Unit Kerja, sekaligus tetap kompatibel dengan
 // unit kerja yang belum diberi jam khusus (jatuh kembali ke default
@@ -167,7 +142,22 @@ func jamAbsenUntukPegawai(setting models.PengaturanAbsensi, pegawai models.Pegaw
 			TutupPulang: *uk.JamTutupPulang,
 		}
 	}
-	return jamAbsenUntukTempatTgs(setting, pegawai.TempatTgs)
+	if isSekolahPegawai(pegawai) {
+		return jamAbsenSet{
+			MulaiPagi:   setting.JamMulaiPagiSekolah,
+			BatasPagi:   setting.JamBatasPagiSekolah,
+			TutupPagi:   setting.JamTutupPagiSekolah,
+			MulaiPulang: setting.JamMulaiPulangSekolah,
+			TutupPulang: setting.JamTutupPulangSekolah,
+		}
+	}
+	return jamAbsenSet{
+		MulaiPagi:   setting.JamMulaiPagi,
+		BatasPagi:   setting.JamBatasPagi,
+		TutupPagi:   setting.JamTutupPagi,
+		MulaiPulang: setting.JamMulaiPulang,
+		TutupPulang: setting.JamTutupPulang,
+	}
 }
 
 func parseFloatForm(r *http.Request, key string) *float64 {
@@ -256,16 +246,32 @@ const toleransiAkurasiMinimum = 30.0
 // akurasi tersebut, dengan batas bawah toleransiAkurasiMinimum meter (lihat
 // komentarnya) dan batas atas toleransiAkurasiMaksimal meter supaya geofence
 // tetap berarti untuk lokasi yang jelas-jelas jauh dari titik acuan).
+//
+// Fallback ke titik kantor tunggal (setting.KantorLat/KantorLng) HANYA
+// berlaku untuk unit kerja berkategori Dinas/Kantor (UnitKerja.TempatKerja ==
+// "dinas") atau yang belum dikategorikan sama sekali (kompatibel dengan data
+// lama) -- inilah yang membuat unit kerja Dinas otomatis memakai titik
+// kantor pusat yang sudah ditetapkan di Pengaturan Absen, tanpa perlu admin
+// mengisi titik koordinat satu-satu untuk setiap unit dinas. Unit kerja
+// berkategori Sekolah TIDAK ikut fallback ini -- kalau titik koordinat
+// sekolah itu sendiri belum diisi, geofence untuk pegawai di sekolah tsb
+// dianggap belum aktif (absen tetap diperbolehkan tanpa validasi jarak,
+// bukan malah memvalidasi terhadap titik kantor dinas yang jelas salah
+// lokasi) sampai admin mengisi titik koordinat sekolah itu di menu Unit
+// Kerja.
 func absensiCekRadius(setting models.PengaturanAbsensi, unitKerja *models.UnitKerja, lat, lng, akurasi *float64) (ok bool, pesan string) {
-	targetLat, targetLng := setting.KantorLat, setting.KantorLng
+	var targetLat, targetLng *float64
 	radius := setting.RadiusMeter
 	sumberTitik := "kantor"
-	if unitKerja != nil && unitKerja.Lat != nil && unitKerja.Lng != nil {
+	switch {
+	case unitKerja != nil && unitKerja.Lat != nil && unitKerja.Lng != nil:
 		targetLat, targetLng = unitKerja.Lat, unitKerja.Lng
 		if unitKerja.RadiusMeter != nil && *unitKerja.RadiusMeter > 0 {
 			radius = *unitKerja.RadiusMeter
 		}
 		sumberTitik = "unit kerja " + unitKerja.Unit
+	case unitKerja == nil || unitKerja.TempatKerja == nil || *unitKerja.TempatKerja != models.TempatKerjaSekolah:
+		targetLat, targetLng = setting.KantorLat, setting.KantorLng
 	}
 	if targetLat == nil || targetLng == nil {
 		return true, ""
@@ -393,7 +399,7 @@ func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai) b
 // JamMulaiPagi..JamTutupPulang (tanpa akhiran "Sekolah") SELALU berisi set
 // Dinas/Kantor mentah dari database KECUALI kalau getPengaturanAbsensiHandler
 // menimpanya dengan set Sekolah untuk pegawai/atasan yang tempat tugasnya
-// sekolah (lihat jamAbsenUntukTempatTgs) -- ini yang dipakai AbsensiView.vue
+// sekolah (lihat jamAbsenUntukPegawai) -- ini yang dipakai AbsensiView.vue
 // (pegawai) sehingga TIDAK perlu tahu ada dua set sama sekali, cukup pakai
 // field yang sudah "resolved" untuk dirinya. Field ...Sekolah selalu berisi
 // set Sekolah APA ADANYA (tidak pernah ditimpa) -- ini yang dipakai form
@@ -547,7 +553,7 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 			// AbsensiView.vue (yang hanya membaca field jam_* biasa) otomatis
 			// menampilkan & memvalidasi jam kerja yang sesuai untuknya, tanpa
 			// perlu tahu soal pembagian dinas/sekolah sama sekali -- lihat
-			// jamAbsenUntukTempatTgs dan komentar pada models.PengaturanAbsensi.
+			// jamAbsenUntukPegawai dan komentar pada models.PengaturanAbsensi.
 			jam := jamAbsenUntukPegawai(item, pegawai)
 			out.JamMulaiPagi = jam.MulaiPagi
 			out.JamBatasPagi = jam.BatasPagi
@@ -647,7 +653,7 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	// jam kerja yang berlaku untuk pegawai ini (dinas/kantor vs sekolah) --
-	// lihat jamAbsenUntukTempatTgs.
+	// lihat jamAbsenUntukPegawai.
 	jam := jamAbsenUntukPegawai(setting, pegawaiSelf)
 
 	now := absensiNow()
@@ -799,7 +805,7 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	// jam kerja yang berlaku untuk pegawai ini (dinas/kantor vs sekolah) --
-	// lihat jamAbsenUntukTempatTgs.
+	// lihat jamAbsenUntukPegawai.
 	jam := jamAbsenUntukPegawai(setting, pegawaiSelf)
 
 	now := absensiNow()
@@ -956,7 +962,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	var pegawai models.Pegawai
-	if err := db.First(&pegawai, *claims.IDPegawai).Error; err != nil {
+	if err := db.Preload("UnitKerja").First(&pegawai, *claims.IDPegawai).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "data pegawai tidak ditemukan")
 		return
 	}
@@ -1004,7 +1010,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		tercover = append(tercover, tercoverEntryFromDokumen(d))
 	}
 
-	sixDayWeek := sixDayWeekForTempatTgs(pegawai.TempatTgs)
+	sixDayWeek := sixDayWeekForPegawai(pegawai)
 	terlewat := []string{}
 	if !start.After(limit) {
 		for _, d := range workingDaysInRange(db, start, limit, sixDayWeek) {

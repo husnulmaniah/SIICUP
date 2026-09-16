@@ -18,7 +18,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var pengajuanPreloads = []string{"Pegawai", "JenisCuti", "PolaHariKerja", "AtasanApprove"}
+// "Pegawai.UnitKerja" (di samping "Pegawai" itu sendiri) sengaja ditambahkan
+// supaya isSekolahPegawai (dipakai syncJumlahHariWithHolidays di bawah) bisa
+// membaca UnitKerja.TempatKerja pegawai tanpa query tambahan.
+var pengajuanPreloads = []string{"Pegawai", "Pegawai.UnitKerja", "JenisCuti", "PolaHariKerja", "AtasanApprove"}
 
 // preloadPengajuan applies the standard set of relation preloads for
 // PengajuanCuti, including the Dokumen relation with its (potentially large)
@@ -56,23 +59,48 @@ type dokumenRequirement struct {
 }
 
 // isSekolahFromTempatTgs decides whether a pegawai's tempat tugas is a
-// sekolah (school) as opposed to dinas/kantor -- used both to pick the
-// 5-day/6-day work week (sixDayWeekForTempatTgs) and to decide whether the
-// "Surat Rekomendasi Kepala Sekolah" document applies to them (that
-// recommendation only makes sense when the pegawai actually has a Kepala
-// Sekolah, i.e. is posted at a school; pegawai posted directly at the Dinas
-// don't have one and so are never asked to upload it).
+// sekolah (school) as opposed to dinas/kantor by guessing from the free-text
+// Tempat Tugas field. This is the FALLBACK path -- see isSekolahPegawai below,
+// which is the function actually called everywhere now; this one is only
+// still reached for a pegawai whose unit kerja hasn't been given an explicit
+// Tempat Kerja category yet (models.UnitKerja.TempatKerja), which keeps old
+// data working exactly as before.
 func isSekolahFromTempatTgs(tempatTgs string) bool {
 	return strings.Contains(strings.ToLower(tempatTgs), "sekolah")
 }
 
-// sixDayWeekForTempatTgs decides whether a pegawai works a 6-day week (Senin-Sabtu)
-// or the default 5-day week (Senin-Jumat), based on their tempat tugas: staff
-// posted at a school ("sekolah") work 6 days a week, everyone else (dinas/
-// kantor/etc) works 5 days a week. This replaces manual pola-hari-kerja
-// selection -- the work pattern is now derived automatically per pegawai.
-func sixDayWeekForTempatTgs(tempatTgs string) bool {
-	return isSekolahFromTempatTgs(tempatTgs)
+// isSekolahPegawai decides whether a pegawai counts as "sekolah" (as opposed
+// to dinas/kantor), with priority: (1) the EXPLICIT category the
+// administrator set on the pegawai's unit kerja/sekolah
+// (models.UnitKerja.TempatKerja, via menu Master Data -> Unit Kerja) when
+// that's been filled in -- this is the authoritative source, since it's a
+// deliberate choice rather than a guess; (2) falling back to guessing from
+// the pegawai's free-text Tempat Tugas field (isSekolahFromTempatTgs) for a
+// pegawai whose unit kerja has no Tempat Kerja set, or who isn't linked to
+// any unit kerja at all -- keeping old data compatible without requiring
+// administrator to fill in Tempat Kerja for every unit kerja right away.
+//
+// This is used to pick the 5-day/6-day work week (sixDayWeekForPegawai), the
+// absen jam kerja window (jamAbsenUntukPegawai in absensi.go), and whether
+// the "Surat Rekomendasi Kepala Sekolah" document applies (that
+// recommendation only makes sense when the pegawai actually has a Kepala
+// Sekolah, i.e. is posted at a school; pegawai posted directly at the Dinas
+// don't have one and so are never asked to upload it).
+func isSekolahPegawai(pegawai models.Pegawai) bool {
+	if uk := pegawai.UnitKerja; uk != nil && uk.TempatKerja != nil && *uk.TempatKerja != "" {
+		return *uk.TempatKerja == models.TempatKerjaSekolah
+	}
+	return isSekolahFromTempatTgs(pegawai.TempatTgs)
+}
+
+// sixDayWeekForPegawai decides whether a pegawai works a 6-day week
+// (Senin-Sabtu) or the default 5-day week (Senin-Jumat), based on their
+// dinas/sekolah status (isSekolahPegawai): pegawai sekolah work 6 days a
+// week, everyone else (dinas/kantor/etc) works 5 days a week. This replaces
+// manual pola-hari-kerja selection -- the work pattern is now derived
+// automatically per pegawai.
+func sixDayWeekForPegawai(pegawai models.Pegawai) bool {
+	return isSekolahPegawai(pegawai)
 }
 
 // dokumenRequirementsForJenis returns the checklist of supporting documents
@@ -146,29 +174,49 @@ func parseUintForm(r *http.Request, key string) uint {
 	return uint(v)
 }
 
+// isFullCalendarLeave decides whether a jenis_cuti is counted in FULL
+// CALENDAR DAYS -- every date from tgl_mulai to tgl_selesai, termasuk hari
+// Sabtu/Minggu dan tanggal merah -- instead of hari kerja saja. Sesuai aturan
+// kepegawaian, cuti sakit dan cuti melahirkan dihitung penuh per kalender
+// (tidak dikurangi akhir pekan/libur), berbeda dari cuti tahunan dan jenis
+// cuti lain yang cuma menghitung hari kerja.
+func isFullCalendarLeave(jenisNama string) bool {
+	j := strings.ToLower(jenisNama)
+	return strings.Contains(j, "sakit") || strings.Contains(j, "melahirkan")
+}
+
 // calculateWorkingDays counts the days between start and end (inclusive) that
-// count as working days: Sundays are always excluded, Saturdays are excluded
-// unless sixDayWeek is true (pegawai bertugas di sekolah), and any date
-// listed in tgl_merah (public holidays) is always excluded.
-func calculateWorkingDays(db *gorm.DB, start, end time.Time, sixDayWeek bool) int {
-	var holidays []models.TglMerah
-	db.Where("tgl BETWEEN ? AND ?", start, end).Find(&holidays)
+// should count against a pengajuan cuti's JumlahHari. For cuti sakit/
+// melahirkan (isFullCalendarLeave true) EVERY date is counted, including
+// Sabtu/Minggu/tanggal merah. For every other jenis cuti, only hari kerja are
+// counted: Sundays are always excluded, Saturdays are excluded unless
+// sixDayWeek is true (pegawai bertugas di sekolah), and any date listed in
+// tgl_merah (public holidays) is always excluded.
+func calculateWorkingDays(db *gorm.DB, start, end time.Time, sixDayWeek bool, jenisNama string) int {
+	fullCalendar := isFullCalendarLeave(jenisNama)
+
 	holidaySet := map[string]bool{}
-	for _, h := range holidays {
-		holidaySet[h.Tgl.Format("2006-01-02")] = true
+	if !fullCalendar {
+		var holidays []models.TglMerah
+		db.Where("tgl BETWEEN ? AND ?", start, end).Find(&holidays)
+		for _, h := range holidays {
+			holidaySet[h.Tgl.Format("2006-01-02")] = true
+		}
 	}
 
 	count := 0
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		wd := d.Weekday()
-		if wd == time.Sunday {
-			continue
-		}
-		if wd == time.Saturday && !sixDayWeek {
-			continue
-		}
-		if holidaySet[d.Format("2006-01-02")] {
-			continue
+		if !fullCalendar {
+			wd := d.Weekday()
+			if wd == time.Sunday {
+				continue
+			}
+			if wd == time.Saturday && !sixDayWeek {
+				continue
+			}
+			if holidaySet[d.Format("2006-01-02")] {
+				continue
+			}
 		}
 		count++
 	}
@@ -198,8 +246,12 @@ func syncJumlahHariWithHolidays(db *gorm.DB, item *models.PengajuanCuti) {
 	if item.Pegawai == nil || (item.Status != models.StatusPending && item.Status != models.StatusDisetuju) {
 		return
 	}
-	sixDayWeek := sixDayWeekForTempatTgs(item.Pegawai.TempatTgs)
-	newJumlahHari := calculateWorkingDays(db, item.TglMulai, item.TglSelesai, sixDayWeek)
+	sixDayWeek := sixDayWeekForPegawai(*item.Pegawai)
+	jenisNama := ""
+	if item.JenisCuti != nil {
+		jenisNama = item.JenisCuti.Jenis
+	}
+	newJumlahHari := calculateWorkingDays(db, item.TglMulai, item.TglSelesai, sixDayWeek, jenisNama)
 	if newJumlahHari == item.JumlahHari {
 		return
 	}
@@ -255,7 +307,7 @@ func adjustQuotaUsage(db *gorm.DB, pegawaiID uint, tahun int, defaultJumlah int,
 
 func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
-		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole(roles...))
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 	// anyRole di sini sengaja TIDAK benar-benar "role apa saja" -- hanya 4
@@ -498,7 +550,7 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	var pegawai models.Pegawai
-	if err := db.First(&pegawai, p.IDPegawai).Error; err != nil {
+	if err := db.Preload("UnitKerja").First(&pegawai, p.IDPegawai).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
 		return
 	}
@@ -519,7 +571,7 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	var pending []pendingDoc
 	var problems []string
-	for _, req := range dokumenRequirementsForJenis(jenis.Jenis, isSekolahFromTempatTgs(pegawai.TempatTgs)) {
+	for _, req := range dokumenRequirementsForJenis(jenis.Jenis, isSekolahPegawai(pegawai)) {
 		fh := formFileHeader(r, "dokumen_"+req.Key)
 		if fh == nil {
 			if req.Required && selfSubmit {
@@ -550,8 +602,8 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
-	sixDayWeek := sixDayWeekForTempatTgs(pegawai.TempatTgs)
-	jumlahHari := calculateWorkingDays(db, start, end, sixDayWeek)
+	sixDayWeek := sixDayWeekForPegawai(pegawai)
+	jumlahHari := calculateWorkingDays(db, start, end, sixDayWeek, jenis.Jenis)
 	if jumlahHari <= 0 {
 		utils.Error(w, http.StatusBadRequest, "rentang tanggal yang dipilih tidak memiliki hari kerja")
 		return
@@ -713,9 +765,11 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	var pegawai models.Pegawai
-	db.First(&pegawai, item.IDPegawai)
-	sixDayWeek := sixDayWeekForTempatTgs(pegawai.TempatTgs)
-	item.JumlahHari = calculateWorkingDays(db, start, end, sixDayWeek)
+	db.Preload("UnitKerja").First(&pegawai, item.IDPegawai)
+	sixDayWeek := sixDayWeekForPegawai(pegawai)
+	var jenisForHari models.JenisCuti
+	db.First(&jenisForHari, item.IDJenisCuti)
+	item.JumlahHari = calculateWorkingDays(db, start, end, sixDayWeek, jenisForHari.Jenis)
 	item.IDPolaHariKerja = autoPolaID(db, sixDayWeek)
 
 	// editing resets it back to pending so the approval flow runs again --
@@ -1169,11 +1223,13 @@ func importPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		if len(errs) == 0 {
 			var peg models.Pegawai
 			sixDayWeek := false
-			if err := db.First(&peg, item.IDPegawai).Error; err == nil {
-				sixDayWeek = sixDayWeekForTempatTgs(peg.TempatTgs)
+			if err := db.Preload("UnitKerja").First(&peg, item.IDPegawai).Error; err == nil {
+				sixDayWeek = sixDayWeekForPegawai(peg)
 			}
 			item.IDPolaHariKerja = autoPolaID(db, sixDayWeek)
-			item.JumlahHari = calculateWorkingDays(db, item.TglMulai, item.TglSelesai, sixDayWeek)
+			var jenisForHari models.JenisCuti
+			db.First(&jenisForHari, item.IDJenisCuti)
+			item.JumlahHari = calculateWorkingDays(db, item.TglMulai, item.TglSelesai, sixDayWeek, jenisForHari.Jenis)
 			if item.JumlahHari <= 0 {
 				errs = append(errs, "rentang tanggal tidak memiliki hari kerja")
 			}

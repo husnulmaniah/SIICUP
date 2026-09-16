@@ -17,6 +17,19 @@ export const jenisJabatanOptions = [
 ]
 export const jenisJabatanLabels = jenisJabatanOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
 
+// Pilihan Tempat Kerja (statis, sama pola dengan Jenis Jabatan di atas) --
+// kategori EKSPLISIT dinas/kantor vs sekolah untuk satu Unit Kerja (lihat
+// formField 'tempat_kerja' pada tableConfigs['unit-kerja'] di bawah). Kalau
+// diisi, backend memakai ini sebagai acuan UTAMA untuk menentukan jam kerja
+// absen, 5/6 hari kerja, dan syarat dokumen cuti pegawai di unit kerja itu --
+// menggantikan tebakan otomatis dari kata "sekolah" pada Tempat Tugas
+// pegawai (lihat isSekolahPegawai di backend/handlers/pengajuan_cuti.go).
+export const tempatKerjaOptions = [
+  { id: 'dinas', label: 'Dinas/Kantor' },
+  { id: 'sekolah', label: 'Sekolah' },
+]
+export const tempatKerjaLabels = tempatKerjaOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
+
 export const tableConfigs = {
   role: {
     title: 'Role',
@@ -72,6 +85,7 @@ export const tableConfigs = {
       { field: 'id', header: 'ID', width: '80px' },
       { field: 'unit', header: 'Unit Kerja' },
       { field: 'kecamatan.nama', header: 'Kecamatan', width: '160px' },
+      { field: 'tempat_kerja', header: 'Tempat Kerja', type: 'lookup', map: tempatKerjaLabels, width: '130px' },
       { field: 'lat', header: 'Titik Koordinat Absen', type: 'coords', latField: 'lat', lngField: 'lng', width: '160px' },
       {
         field: 'jam_mulai_pagi',
@@ -99,13 +113,21 @@ export const tableConfigs = {
         hint: 'Opsional. Mengelompokkan unit kerja/sekolah ini, dipakai juga di Pengaturan Absen untuk memilih kecamatan mana saja yang boleh absen.',
       },
       {
+        field: 'tempat_kerja',
+        label: 'Tempat Kerja',
+        type: 'select',
+        staticOptions: tempatKerjaOptions,
+        optionLabel: 'label',
+        hint: 'Opsional. Kalau diisi, jam kerja absen, 5/6 hari kerja, & syarat dokumen cuti pegawai di unit kerja ini otomatis mengikuti kategori ini (lebih diutamakan daripada tebakan dari kata "sekolah" pada Tempat Tugas pegawai). Kosongkan untuk memakai tebakan otomatis seperti sebelumnya.',
+      },
+      {
         field: 'lat',
         type: 'coords',
         label: 'Titik Koordinat Absen',
         latField: 'lat',
         lngField: 'lng',
         radiusField: 'radius_meter',
-        hint: 'Opsional. Kalau diisi, absen pegawai di unit kerja/sekolah ini divalidasi terhadap titik ini (bukan titik kantor default di menu Rekap Absen -> Pengaturan). Kosongkan untuk memakai titik kantor default. Cocok untuk instansi dengan banyak sekolah di beberapa kecamatan, masing-masing dengan titik koordinatnya sendiri.',
+        hint: 'Untuk unit kerja bertempat Dinas/Kantor: BOLEH dikosongkan -- otomatis memakai titik kantor pusat yang sudah ditetapkan di menu Rekap Absen -> Pengaturan, jadi tidak perlu isi satu-satu. Untuk unit bertempat Sekolah: SEBAIKNYA diisi sendiri satu-satu -- kalau dikosongkan, absen di sekolah itu TIDAK otomatis memakai titik kantor dinas (supaya tidak salah lokasi), geofence-nya dianggap belum diatur sampai titik ini diisi.',
       },
       {
         field: 'jam_mulai_pagi',
@@ -118,7 +140,7 @@ export const tableConfigs = {
           mulaiPulang: 'jam_mulai_pulang',
           tutupPulang: 'jam_tutup_pulang',
         },
-        hint: 'Opsional. Kalau kelima jam ini diisi, jam kerja unit kerja/sekolah ini dipakai menggantikan jam default Sekolah/Dinas di menu Rekap Absen -> Pengaturan, khusus untuk pegawai yang unit kerjanya menunjuk ke sini. Kosongkan semua untuk memakai jam default. Cocok kalau ada sekolah dengan jam masuk/pulang yang berbeda dari sekolah lain.',
+        hint: 'Opsional. Kalau kelima jam ini diisi, jam kerja unit kerja/sekolah ini dipakai menggantikan jam default Sekolah/Dinas di menu Rekap Absen -> Pengaturan, khusus untuk pegawai yang unit kerjanya menunjuk ke sini. Kosongkan semua untuk memakai jam default sesuai kategori Tempat Kerja di atas (Dinas/Kantor atau Sekolah). Cocok kalau ada sekolah dengan jam masuk/pulang yang berbeda dari sekolah lain.',
       },
     ],
     searchPlaceholder: 'Cari unit kerja...',
@@ -228,6 +250,21 @@ export const tableConfigs = {
       { field: 'status.status', header: 'Status', type: 'badge' },
       { field: 'no_hp', header: 'No HP' },
     ],
+    // filters: dropdown pencarian TAMBAHAN di atas tabel, di luar kotak cari
+    // nama/NIP biasa (lihat searchPlaceholder di bawah) -- supaya Data
+    // Pegawai bisa dicari berdasarkan Jenis Jabatan, Jabatan, Kecamatan,
+    // maupun Unit Kerja sekaligus (dikombinasikan, bukan salah satu saja).
+    // Jenis Jabatan pakai staticOptions (3 pilihan tetap, sama seperti form
+    // Jabatan di atas); Jabatan/Unit Kerja pakai ref yang sama dengan form
+    // tambah/edit pegawai; Kecamatan pakai ref 'kecamatan' (dicocokkan lewat
+    // kecamatan unit kerja/sekolah pegawai di backend, karena pegawai tidak
+    // punya kolom kecamatan sendiri).
+    filters: [
+      { field: 'jenis_jabatan', label: 'Jenis Jabatan', type: 'select', staticOptions: jenisJabatanOptions, optionLabel: 'label' },
+      { field: 'id_jabatan', label: 'Jabatan', type: 'select', ref: 'jabatan', optionLabel: 'jabatan' },
+      { field: 'id_kecamatan', label: 'Kecamatan', type: 'select', ref: 'kecamatan', optionLabel: 'nama' },
+      { field: 'id_unit_kerja', label: 'Unit Kerja', type: 'select', ref: 'unit-kerja', optionLabel: 'unit' },
+    ],
     formFields: [
       { field: 'nip', label: 'NIP', type: 'text', required: true },
       { field: 'nama', label: 'Nama Lengkap', type: 'text', required: true },
@@ -236,7 +273,21 @@ export const tableConfigs = {
       { field: 'id_pangkat_gol', label: 'Pangkat / Golongan', type: 'select', ref: 'pangkat-gol', optionLabel: (o) => `${o.pangkat?.pangkat || '-'} / ${o.gol?.gol || '-'}`, optionValue: 'id' },
       { field: 'id_status', label: 'Status', type: 'select', ref: 'status', optionLabel: 'status', optionValue: 'id' },
       { field: 'id_atasan', label: 'Atasan Langsung', type: 'select', ref: 'pegawai', optionLabel: (o) => `${o.nama} (${o.nip})`, optionValue: 'id' },
-      { field: 'tempat_tgs', label: 'Tempat Tugas', type: 'text' },
+      {
+        field: 'tempat_tgs',
+        label: 'Tempat Tugas (Dinas/Kantor atau Sekolah)',
+        type: 'select',
+        staticOptions: tempatKerjaOptions,
+        optionLabel: 'label',
+        // syncFrom: begitu admin memilih/mengubah Unit Kerja di atas, field
+        // ini otomatis ikut kategori Tempat Kerja unit kerja tersebut (kalau
+        // unit kerjanya sudah dikategorikan) -- lihat penanganan generik
+        // "syncFrom" di CrudManager.vue. Ini menghubungkan langsung data
+        // Tempat Tugas pegawai dengan Tempat Kerja Unit Kerja, jadi admin
+        // tidak perlu isi manual dua kali & datanya selalu konsisten.
+        syncFrom: { field: 'id_unit_kerja', ref: 'unit-kerja', pick: (uk) => uk?.tempat_kerja || null },
+        hint: 'Otomatis ikut kategori "Tempat Kerja" dari Unit Kerja yang dipilih di atas. Kalau Unit Kerja belum dikategorikan (lihat menu Unit Kerja), pilih manual di sini.',
+      },
       { field: 'tmt', label: 'TMT', type: 'date' },
       {
         field: 'tgl_lahir',

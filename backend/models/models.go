@@ -49,9 +49,33 @@ type Kecamatan struct {
 
 func (Kecamatan) TableName() string { return "kecamatan" }
 
+// TempatKerjaDinas/TempatKerjaSekolah: nilai kolom UnitKerja.TempatKerja --
+// kategori EKSPLISIT dinas/kantor vs sekolah untuk unit kerja tersebut,
+// diisi administrator lewat menu Master Data -> Unit Kerja (lihat komentar
+// pada field TempatKerja di bawah). Dipakai sebagai PRIORITAS UTAMA oleh
+// isSekolahPegawai (handlers/pengajuan_cuti.go) untuk menentukan jam kerja
+// absen, 5/6 hari kerja, & syarat dokumen cuti pegawai -- menggantikan
+// tebakan otomatis dari kata "sekolah" pada Tempat Tugas pegawai
+// (isSekolahFromTempatTgs) untuk unit kerja yang sudah diberi kategori ini.
+const (
+	TempatKerjaDinas   = "dinas"
+	TempatKerjaSekolah = "sekolah"
+)
+
 // UnitKerja merepresentasikan unit kerja/sekolah tempat pegawai bertugas.
 //   - IDKecamatan/Kecamatan: kecamatan tempat unit kerja/sekolah ini berada
 //     (opsional -- nullable untuk data lama yang belum diisi administrator).
+//   - TempatKerja: kategori EKSPLISIT "dinas" (TempatKerjaDinas) atau
+//     "sekolah" (TempatKerjaSekolah) untuk unit kerja/sekolah ini (opsional,
+//     nullable). Kalau diisi, inilah yang dipakai (PRIORITAS UTAMA, lebih
+//     diutamakan daripada menebak dari kata "sekolah" pada Tempat Tugas
+//     pegawai) untuk menentukan: jam kerja absen (Dinas/Kantor vs Sekolah,
+//     lihat jamAbsenUntukPegawai di handlers/absensi.go), 5/6 hari kerja
+//     (sixDayWeekForPegawai), dan syarat dokumen cuti/Surat Rekomendasi
+//     Kepala Sekolah (dokumenRequirementsForJenis) -- lihat isSekolahPegawai
+//     di handlers/pengajuan_cuti.go yang memilih ini kalau sudah diisi, atau
+//     jatuh kembali (fallback) ke tebakan dari Tempat Tugas pegawai kalau
+//     unit kerja ini belum diberi kategori (kompatibel dengan data lama).
 //   - Lat/Lng/RadiusMeter: titik koordinat & radius absen KHUSUS untuk unit
 //     kerja/sekolah ini. Kalau diisi, absen pegawai yang id_unit_kerja-nya
 //     menunjuk ke sini divalidasi terhadap titik ini (lihat absensiCekRadius
@@ -73,12 +97,13 @@ func (Kecamatan) TableName() string { return "kecamatan" }
 //     kelima field ini kosong, jam kerja unit kerja ini dianggap BELUM
 //     diatur & pegawainya jatuh kembali (fallback) ke set Sekolah/Dinas
 //     "global" di PengaturanAbsensi berdasarkan Tempat Tugas pegawai seperti
-//     sebelumnya (kompatibel dengan data lama) -- lihat jamAbsenUntukTempatTgs.
+//     sebelumnya (kompatibel dengan data lama) -- lihat jamAbsenUntukPegawai.
 type UnitKerja struct {
 	ID             uint       `json:"id" gorm:"primaryKey"`
 	Unit           string     `json:"unit" gorm:"size:150;not null"`
 	IDKecamatan    *uint      `json:"id_kecamatan" gorm:"column:id_kecamatan"`
 	Kecamatan      *Kecamatan `json:"kecamatan,omitempty" gorm:"foreignKey:IDKecamatan;references:ID"`
+	TempatKerja    *string    `json:"tempat_kerja" gorm:"column:tempat_kerja;size:20"`
 	Lat            *float64   `json:"lat" gorm:"column:lat"`
 	Lng            *float64   `json:"lng" gorm:"column:lng"`
 	RadiusMeter    *int       `json:"radius_meter" gorm:"column:radius_meter"`
@@ -614,13 +639,14 @@ func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
 //     belum sempat absen pulang hari itu (lihat absenPulang di
 //     handlers/absensi.go).
 //   - JamMulaiPagiSekolah..JamTutupPulangSekolah: SET KEDUA, jam kerja penuh
-//     (mulai pagi s.d tutup pulang) khusus pegawai yang bertugas di SEKOLAH
-//     (tempat_tgs mengandung kata "sekolah" -- lihat isSekolahFromTempatTgs
-//     di handlers/pengajuan_cuti.go, dipakai juga untuk menentukan 5/6 hari
-//     kerja & syarat dokumen cuti). Artinya & urutannya identik dengan set
-//     Dinas/Kantor di atas, hanya berlaku untuk pegawai sekolah -- lihat
-//     jamAbsenUntukTempatTgs di handlers/absensi.go yang memilih set mana
-//     dipakai per pegawai secara otomatis berdasarkan tempat tugasnya. Ini
+//     (mulai pagi s.d tutup pulang) khusus pegawai berstatus SEKOLAH (lihat
+//     isSekolahPegawai di handlers/pengajuan_cuti.go -- kategori Tempat
+//     Kerja pada Unit Kerja pegawai kalau sudah diisi, atau fallback tebakan
+//     dari kata "sekolah" pada Tempat Tugas untuk data lama; dipakai juga
+//     untuk menentukan 5/6 hari kerja & syarat dokumen cuti). Artinya &
+//     urutannya identik dengan set Dinas/Kantor di atas, hanya berlaku untuk
+//     pegawai sekolah -- lihat jamAbsenUntukPegawai di handlers/absensi.go
+//     yang memilih set mana dipakai per pegawai secara otomatis. Ini
 //     dipakai sebagai FALLBACK kalau unit kerja/sekolah pegawai belum diberi
 //     jam kerja sendiri -- lihat UnitKerja.JamMulaiPagi dkk & fungsi
 //     jamAbsenUntukPegawai (yang memilih antara jam khusus unit kerja ini

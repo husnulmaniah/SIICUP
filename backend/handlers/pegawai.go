@@ -586,6 +586,38 @@ func listPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		countQuery = countQuery.Where(cond, "%"+search+"%", "%"+search+"%")
 	}
 
+	// Filter tambahan untuk Data Pegawai (lihat filter di
+	// frontend/src/config/tables.js -> pegawai.filters): Jabatan & Unit Kerja
+	// langsung berupa kolom id_jabatan/id_unit_kerja pada pegawai, sedangkan
+	// Jenis Jabatan (kolom ada di tabel jabatan) dan Kecamatan (kolom ada di
+	// tabel unit_kerja) dicocokkan lewat subquery supaya tidak perlu JOIN
+	// (yang berisiko ambigu dengan kolom "id" yang sama-sama ada di semua
+	// tabel terkait).
+	if idJabatanStr := strings.TrimSpace(q.Get("id_jabatan")); idJabatanStr != "" {
+		if idJabatan, err := strconv.Atoi(idJabatanStr); err == nil {
+			query = query.Where("id_jabatan = ?", idJabatan)
+			countQuery = countQuery.Where("id_jabatan = ?", idJabatan)
+		}
+	}
+	if idUnitKerjaStr := strings.TrimSpace(q.Get("id_unit_kerja")); idUnitKerjaStr != "" {
+		if idUnitKerja, err := strconv.Atoi(idUnitKerjaStr); err == nil {
+			query = query.Where("id_unit_kerja = ?", idUnitKerja)
+			countQuery = countQuery.Where("id_unit_kerja = ?", idUnitKerja)
+		}
+	}
+	if jenisJabatan := strings.TrimSpace(q.Get("jenis_jabatan")); jenisJabatan != "" {
+		sub := db.Model(&models.Jabatan{}).Select("id").Where("jenis_jabatan = ?", jenisJabatan)
+		query = query.Where("id_jabatan IN (?)", sub)
+		countQuery = countQuery.Where("id_jabatan IN (?)", sub)
+	}
+	if idKecamatanStr := strings.TrimSpace(q.Get("id_kecamatan")); idKecamatanStr != "" {
+		if idKecamatan, err := strconv.Atoi(idKecamatanStr); err == nil {
+			sub := db.Model(&models.UnitKerja{}).Select("id").Where("id_kecamatan = ?", idKecamatan)
+			query = query.Where("id_unit_kerja IN (?)", sub)
+			countQuery = countQuery.Where("id_unit_kerja IN (?)", sub)
+		}
+	}
+
 	var total int64
 	countQuery.Count(&total)
 	var items []models.Pegawai

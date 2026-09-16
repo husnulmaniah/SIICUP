@@ -21,6 +21,30 @@ import (
 // sehingga validasi format di sini ditulis ulang secara sederhana.
 var jamHHMMPattern = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
 
+// tempatKerjaLabel/parseTempatKerjaLabel menerjemahkan kolom Excel "Tempat
+// Kerja" (lihat models.UnitKerja.TempatKerja & models.TempatKerjaDinas/
+// TempatKerjaSekolah) antara nilai tersimpan ("dinas"/"sekolah") dan label
+// yang enak dibaca administrator di Excel ("Dinas/Kantor"/"Sekolah"). Parse
+// menerima beberapa variasi teks umum (case-insensitive) supaya tidak
+// terlalu kaku saat mengisi/meng-import.
+func tempatKerjaLabel(v string) string {
+	if v == models.TempatKerjaSekolah {
+		return "Sekolah"
+	}
+	return "Dinas/Kantor"
+}
+
+func parseTempatKerjaLabel(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "sekolah":
+		return models.TempatKerjaSekolah, nil
+	case "dinas", "kantor", "dinas/kantor", "dinas / kantor":
+		return models.TempatKerjaDinas, nil
+	default:
+		return "", fmt.Errorf(`tempat kerja harus salah satu dari "Dinas/Kantor" atau "Sekolah", bukan "%s"`, raw)
+	}
+}
+
 // jamUnitKerjaColumn membuat satu kolom Excel untuk salah satu dari kelima
 // field jam kerja KHUSUS unit kerja/sekolah pada models.UnitKerja (lihat
 // komentar pada struct itu) -- field yang mana ditentukan lewat fieldPtr
@@ -147,6 +171,26 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 					}
 					id := k.ID
 					i.(*models.UnitKerja).IDKecamatan = &id
+					return nil
+				}},
+			{Header: "Tempat Kerja (Dinas/Kantor atau Sekolah)", Example: "Dinas/Kantor",
+				Get: func(i interface{}) string {
+					uk := i.(models.UnitKerja)
+					if uk.TempatKerja == nil {
+						return ""
+					}
+					return tempatKerjaLabel(*uk.TempatKerja)
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						return nil
+					}
+					v, err := parseTempatKerjaLabel(raw)
+					if err != nil {
+						return err
+					}
+					i.(*models.UnitKerja).TempatKerja = &v
 					return nil
 				}},
 			{Header: "Latitude", Example: "-1.976688",
