@@ -724,6 +724,24 @@ func (p *PengajuanSuratKolektif) SetTanggalList(tanggal []string) {
 	p.TanggalListRaw = string(b)
 }
 
+// TemplateSurat menyimpan template surat (PDF/Word) yang disediakan
+// administrator untuk semua akun sekolah lewat menu baru "Template Surat"
+// (lihat handlers/template_surat.go). Ditampilkan sebagai grid kartu --
+// administrator bisa menambah/mengubah/menghapus, sedangkan pegawai/atasan
+// bertugas di sekolah (isSekolahPegawai) hanya bisa melihat & preview
+// (endpoint file dengan ?inline=1, sama seperti downloadPengajuanSuratKolektif)
+// tanpa harus mendownload dulu.
+type TemplateSurat struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	Judul     string    `json:"judul" gorm:"column:judul;size:150;not null"`
+	NamaFile  string    `json:"nama_file" gorm:"column:nama_file;size:255"`
+	File      []byte    `json:"-" gorm:"column:file;type:bytea"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (TemplateSurat) TableName() string { return "template_surat" }
+
 // PengaturanAbsensi menyimpan pengaturan menu Absen -- selalu ada tepat satu
 // baris (ID = 1), mengikuti pola PengaturanSurat. Jam disimpan sebagai teks
 // "HH:MM" (bukan time.Time) karena hanya dipakai sebagai jam patokan harian,

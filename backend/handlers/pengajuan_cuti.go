@@ -374,6 +374,10 @@ func dokumenContentType(filename string) string {
 		return "image/jpeg"
 	case ".png":
 		return "image/png"
+	case ".doc":
+		return "application/msword"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	default:
 		return "application/octet-stream"
 	}

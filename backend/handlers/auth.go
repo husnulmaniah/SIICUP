@@ -24,8 +24,13 @@ func LoginHandler(db *gorm.DB) http.HandlerFunc {
 			return
 		}
 
+		// "Pegawai.UnitKerja" ditambahkan (di samping "Pegawai" itu sendiri)
+		// supaya isSekolahPegawai bisa dihitung akurat langsung dari sini --
+		// dipakai frontend (auth store) untuk menentukan visibilitas menu
+		// "Template Surat" (hanya akun sekolah) tanpa harus memanggil /api/me
+		// atau menebak-nebak dari data yang mungkin belum lengkap.
 		var user models.User
-		if err := db.Preload("Role").Preload("Pegawai").
+		if err := db.Preload("Role").Preload("Pegawai.UnitKerja").
 			Where("username = ?", req.Username).First(&user).Error; err != nil {
 			utils.Error(w, http.StatusUnauthorized, "username atau password salah")
 			return
@@ -50,6 +55,11 @@ func LoginHandler(db *gorm.DB) http.HandlerFunc {
 			roleName = user.Role.Role
 		}
 
+		isSekolah := false
+		if user.Pegawai != nil {
+			isSekolah = isSekolahPegawai(*user.Pegawai)
+		}
+
 		token, err := utils.GenerateToken(user.ID, user.Username, user.IDRole, roleName, user.IDPegawai, user.IsAdminAbsensi, user.IsAdminVerifikasi)
 		if err != nil {
 			utils.Error(w, http.StatusInternalServerError, "gagal membuat token")
@@ -68,6 +78,7 @@ func LoginHandler(db *gorm.DB) http.HandlerFunc {
 				"pegawai":             user.Pegawai,
 				"is_admin_absensi":    user.IsAdminAbsensi,
 				"is_admin_verifikasi": user.IsAdminVerifikasi,
+				"is_sekolah":          isSekolah,
 			},
 		})
 	}

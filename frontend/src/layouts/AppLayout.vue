@@ -117,6 +117,13 @@ const navSections = computed(() => {
     })
   }
 
+  // Template Surat: administrator/admin mengelola, pegawai/atasan bertugas
+  // di SEKOLAH hanya melihat/preview (lihat auth.canViewTemplateSurat,
+  // dihitung dari flag is_sekolah yang dikirim backend saat login).
+  if (auth.canViewTemplateSurat) {
+    sections.push({ header: null, items: [{ label: 'Template Surat', icon: 'pi pi-file-word', to: '/template-surat' }] })
+  }
+
   if (auth.canManageMaster) {
     sections.push({ header: null, items: [{ label: 'Rekap Absen', icon: 'pi pi-camera', to: '/rekap-absen' }] })
   } else if (auth.isAdminAbsensi || auth.isAdminVerifikasi) {

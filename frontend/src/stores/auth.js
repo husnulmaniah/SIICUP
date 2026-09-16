@@ -25,6 +25,15 @@ export const useAuthStore = defineStore('auth', {
     // role/isAdminAbsensi-nya.
     isAdminVerifikasi: (state) => !!state.user?.is_admin_verifikasi,
     canManageMaster: (state) => ['administrator', 'admin'].includes(state.user?.role),
+    // isSekolah: true kalau akun ini terhubung ke data pegawai yang bertugas
+    // di SEKOLAH (dihitung backend saat login, lihat is_sekolah pada
+    // LoginHandler/handlers/auth.go) -- dipakai untuk menampilkan menu
+    // "Template Surat" hanya ke akun sekolah (+ administrator/admin untuk
+    // mengelola), tanpa perlu menebak dari data yang mungkin belum lengkap
+    // di sisi klien.
+    isSekolah: (state) => !!state.user?.is_sekolah,
+    canViewTemplateSurat: (state) =>
+      ['administrator', 'admin'].includes(state.user?.role) || !!state.user?.is_sekolah,
   },
 
   actions: {

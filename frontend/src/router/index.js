@@ -13,6 +13,7 @@ import PerubahanDataView from '../views/PerubahanDataView.vue'
 import PengajuanPensiunView from '../views/PengajuanPensiunView.vue'
 import AbsensiView from '../views/AbsensiView.vue'
 import RekapAbsensiView from '../views/RekapAbsensiView.vue'
+import TemplateSuratView from '../views/TemplateSuratView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -36,6 +37,11 @@ const routes = [
       // beforeEach karena meta.roles hanya bisa mencocokkan role, bukan flag
       // tambahan.
       { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin'], allowAdminAbsensi: true, allowAdminVerifikasi: true } },
+      // Template Surat: terlihat oleh administrator/admin (mengelola) DAN
+      // pegawai/atasan bertugas di SEKOLAH saja (melihat/preview) --
+      // pengecekan tambahan requireTemplateSuratAccess di beforeEach karena
+      // meta.roles saja tidak bisa membedakan pegawai sekolah vs. dinas.
+      { path: 'template-surat', name: 'template-surat', component: TemplateSuratView, meta: { roles: ['administrator', 'admin', 'pegawai', 'atasan'], requireTemplateSuratAccess: true } },
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'pengajuan-pensiun', name: 'pengajuan-pensiun', component: PengajuanPensiunView, meta: { roles: ['administrator', 'admin'] } },
     ],
@@ -72,6 +78,9 @@ router.beforeEach((to) => {
     if (!lewatFlag) {
       return { name: 'dashboard' }
     }
+  }
+  if (to.meta.requireTemplateSuratAccess && !auth.canViewTemplateSurat) {
+    return { name: 'dashboard' }
   }
   return true
 })
