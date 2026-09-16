@@ -11,7 +11,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -340,14 +339,28 @@ func absensiAllowedKecamatanIDs(item models.PengaturanAbsensi) []uint {
 // (belum pernah diatur), menu Absen terbuka untuk semua pegawai -- filter
 // baru berlaku begitu administrator mengisi salah satu/lebih daftarnya lewat
 // halaman Rekap Absen. pegawai HARUS sudah di-preload dengan UnitKerja kalau
-// ingin filter kecamatan berfungsi (lihat pemanggil di absenMasuk/
-// absenPulang/getPengaturanAbsensiHandler) -- kalau tidak, pegawai.UnitKerja
-// nil dan pegawai otomatis tidak lolos begitu filter kecamatan diisi.
+// ingin filter kecamatan/tempat tugas berfungsi (lihat pemanggil di
+// absenMasuk/absenPulang/getPengaturanAbsensiHandler) -- kalau tidak,
+// pegawai.UnitKerja nil dan pegawai otomatis tidak lolos begitu filter itu
+// diisi (fallback ke tebakan teks Tempat Tugas untuk filter tempat tugas,
+// lihat isSekolahPegawai).
+//
+// Filter tempat tugas dicocokkan lewat isSekolahPegawai (kategori Dinas/
+// Sekolah yang sama dipakai jam kerja absen, 5/6 hari kerja, & syarat
+// dokumen cuti), BUKAN lagi teks Pegawai.TempatTgs mentah -- sebelumnya
+// pegawai yang Unit Kerja/sekolahnya sudah benar dikategorikan & dikonfigurasi
+// lengkap tetap bisa gagal lolos filter ini kalau teks Tempat Tugas
+// mentahnya tidak persis sama dengan yang dicentang administrator (lihat
+// opsiTempatTugasAbsensi di atas).
 func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai) bool {
 	if allowed := absensiAllowedTempatTugas(setting); len(allowed) > 0 {
+		kategori := models.TempatKerjaDinas
+		if isSekolahPegawai(pegawai) {
+			kategori = models.TempatKerjaSekolah
+		}
 		match := false
 		for _, t := range allowed {
-			if strings.EqualFold(strings.TrimSpace(t), strings.TrimSpace(pegawai.TempatTgs)) {
+			if strings.EqualFold(strings.TrimSpace(t), kategori) {
 				match = true
 				break
 			}
@@ -565,18 +578,26 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 	utils.Success(w, "ok", out)
 }
 
-// opsiTempatTugasAbsensi mengambil daftar nilai tempat_tgs unik yang benar-
-// benar ada di data pegawai, dipakai administrator untuk memilih tempat
-// tugas mana yang boleh memakai menu Absen (lihat pengaturanAbsensiPayload
-// di absensi_admin.go) -- tempat_tgs adalah field teks bebas (bukan tabel
-// referensi), jadi tidak ada daftar master untuk itu.
+// opsiTempatTugasAbsensi mengembalikan 2 pilihan TETAP (Dinas/Kantor,
+// Sekolah) untuk filter "Tempat Tugas yang Boleh Absen" di Pengaturan Absen.
+//
+// Sebelumnya endpoint ini mengambil daftar nilai Pegawai.TempatTgs unik APA
+// ADANYA dari data pegawai (teks bebas, mis. "Kantor Cabang Utara", nama
+// sekolah masing-masing, dst.) -- administrator harus mencocokkan teks bebas
+// itu satu-satu, dan pegawai yang teks Tempat Tugas mentahnya tidak persis
+// sama dengan pilihan yang dicentang jadi TIDAK LOLOS filter ini walau Unit
+// Kerja-nya sendiri sudah benar dikategorikan & dikonfigurasi lengkap (mis.
+// pegawai di sekolah yang tempat_tgs mentahnya nama sekolah spesifik, bukan
+// literal "Sekolah") -- ini yang membuat menu Absen tertutup untuk pegawai
+// yang sekolahnya sudah diatur admin dengan benar. Sekarang filter ini
+// dicocokkan lewat isSekolahPegawai (kategori Dinas/Sekolah yang sama dipakai
+// jam kerja absen, 5/6 hari kerja, & syarat dokumen cuti -- lihat
+// absensiEligible di bawah), bukan lagi teks Tempat Tugas mentah.
 func opsiTempatTugasAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
-	var values []string
-	db.Model(&models.Pegawai{}).
-		Where("tempat_tgs IS NOT NULL AND tempat_tgs <> ''").
-		Distinct().Pluck("tempat_tgs", &values)
-	sort.Strings(values)
-	utils.Success(w, "ok", values)
+	utils.Success(w, "ok", []map[string]string{
+		{"value": models.TempatKerjaDinas, "label": "Dinas/Kantor"},
+		{"value": models.TempatKerjaSekolah, "label": "Sekolah"},
+	})
 }
 
 // holidaySetInRange mengambil semua tgl_merah dalam rentang sekali saja,

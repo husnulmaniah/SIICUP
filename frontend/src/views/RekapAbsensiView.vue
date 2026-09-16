@@ -163,6 +163,16 @@ async function loadPengaturan() {
   try {
     const { data } = await http.get('/absensi/pengaturan')
     Object.assign(pengaturan, data.data)
+    // Normalisasi ke huruf kecil ("dinas"/"sekolah") supaya pengaturan lama
+    // yang tersimpan dengan huruf besar (mis. "DINAS", dari sebelum filter
+    // ini memakai kategori Tempat Kerja) tetap cocok dengan value pilihan
+    // tetap di tempatTugasOptions dan tampil sebagai chip berlabel benar,
+    // bukan chip kosong/rusak. Backend sendiri sudah mencocokkan tanpa
+    // peduli huruf besar/kecil (lihat absensiEligible), ini murni supaya
+    // tampilannya ikut rapi.
+    if (Array.isArray(pengaturan.tempat_tugas_allowed)) {
+      pengaturan.tempat_tugas_allowed = pengaturan.tempat_tugas_allowed.map((v) => (v || '').toLowerCase())
+    }
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat pengaturan absen', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
@@ -170,10 +180,16 @@ async function loadPengaturan() {
   }
 }
 
+// opsi-tempat-tugas sekarang mengembalikan 2 pilihan tetap {value,label}
+// (Dinas/Kantor, Sekolah) yang dicocokkan lewat kategori Tempat Kerja Unit
+// Kerja pegawai (isSekolahPegawai di backend) -- bukan lagi daftar teks bebas
+// Tempat Tugas pegawai apa adanya, supaya filter ini konsisten dengan jam
+// kerja absen, 5/6 hari kerja, & syarat dokumen cuti yang sudah memakai
+// kategori yang sama.
 async function loadTempatTugasOptions() {
   try {
     const { data } = await http.get('/absensi/opsi-tempat-tugas')
-    tempatTugasOptions.value = (data.data || []).map((t) => ({ label: t, value: t }))
+    tempatTugasOptions.value = data.data || []
   } catch {
     tempatTugasOptions.value = []
   }
@@ -856,7 +872,7 @@ function kodeDokumen(jenis) {
                 </div>
               </div>
               <Message severity="info" :closable="false" style="margin-top: 0.5rem">
-                Berlaku untuk pegawai yang tempat tugasnya BUKAN sekolah (dinas/kantor). Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu. Absen pulang juga otomatis ditutup begitu lewat jam tutup absen pulang, walaupun pegawai sudah absen masuk dan belum sempat absen pulang.
+                Berlaku untuk pegawai berkategori Dinas/Kantor (lihat "Tempat Kerja" di menu Unit Kerja -- kalau unit kerja pegawai belum dikategorikan, dipakai tebakan otomatis dari kata "sekolah" pada Tempat Tugas). Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu. Absen pulang juga otomatis ditutup begitu lewat jam tutup absen pulang, walaupun pegawai sudah absen masuk dan belum sempat absen pulang.
               </Message>
             </div>
 
@@ -885,8 +901,9 @@ function kodeDokumen(jenis) {
                 </div>
               </div>
               <Message severity="info" :closable="false" style="margin-top: 0.5rem">
-                Berlaku untuk pegawai yang tempat tugasnya mengandung kata "sekolah" (guru/staf sekolah) -- jam
-                kerjanya otomatis dipakai menggantikan set Dinas/Kantor di atas untuk pegawai tersebut, mengikuti
+                Berlaku untuk pegawai berkategori Sekolah (lihat "Tempat Kerja" di menu Unit Kerja -- kalau unit
+                kerja pegawai belum dikategorikan, dipakai tebakan otomatis dari kata "sekolah" pada Tempat Tugas) --
+                jam kerjanya otomatis dipakai menggantikan set Dinas/Kantor di atas untuk pegawai tersebut, mengikuti
                 aturan yang sama dengan penentuan 5/6 hari kerja & syarat dokumen cuti di menu lain.
               </Message>
             </div>
@@ -951,7 +968,7 @@ function kodeDokumen(jenis) {
             <div class="pengaturan-group">
               <div class="group-title">Siapa yang Boleh Absen</div>
               <div>
-                <label class="field-label">Tempat Tugas yang Boleh Absen</label>
+                <label class="field-label">Kategori Tempat Kerja yang Boleh Absen</label>
                 <MultiSelect
                   v-model="pengaturan.tempat_tugas_allowed"
                   :options="tempatTugasOptions"
@@ -959,10 +976,14 @@ function kodeDokumen(jenis) {
                   optionValue="value"
                   filter
                   display="chip"
-                  placeholder="Semua tempat tugas (belum dibatasi)"
+                  placeholder="Semua kategori (belum dibatasi)"
                   style="width: 100%"
                 />
-                <small class="text-muted">Kosongkan untuk mengizinkan semua tempat tugas.</small>
+                <small class="text-muted">
+                  Kosongkan untuk mengizinkan semua pegawai (Dinas/Kantor maupun Sekolah). Dicocokkan lewat kategori
+                  "Tempat Kerja" Unit Kerja pegawai (menu Unit Kerja) -- pegawai yang unit kerjanya belum dikategorikan
+                  memakai tebakan otomatis dari Tempat Tugas seperti biasa.
+                </small>
               </div>
               <div>
                 <label class="field-label">Jabatan yang Boleh Absen</label>
