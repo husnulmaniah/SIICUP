@@ -615,17 +615,22 @@ var AbsensiDokumenKodeLabel = map[string]string{
 // Surat (CRUD generik, administrator only). Slug dipakai sebagai nilai yang
 // tersimpan di AbsensiDokumen.Jenis (harus unik, dipakai juga sebagai "value"
 // dropdown di frontend), Nama adalah label yang tampil di dropdown & rekap,
-// Kode adalah salah satu dari "DD" (Dinas Dalam)/"I" (Izin)/"S" (Sakit) --
-// menentukan bagaimana surat jenis ini dihitung/ditampilkan di rekap & PDF
-// (lihat models.AbsensiDokumenKodeLabel). 4 jenis bawaan (Surat Tugas, Berita
-// Acara, Surat Izin, SKS) di-seed otomatis saat migrasi kalau tabel masih
-// kosong -- slug-nya SENGAJA disamakan dengan konstanta AbsensiDokumen* di
-// atas supaya data lama tetap valid.
+// Kode adalah kode singkat BEBAS yang diketik sendiri oleh administrator
+// (tidak wajib salah satu dari DD/I/S -- lihat handlers/labelUntukJenis
+// untuk bagaimana label tampilannya dihitung tanpa bergantung pada tiga kode
+// bawaan itu). Kode "DD"/"I"/"S" tetap dikenali khusus di rekap/PDF absen
+// untuk dihitung ke kolom Jumlah DD/Izin/Sakit (lihat handlers/absensi_admin.go
+// & handlers/absensi_pdf.go); kode lain di luar itu tetap menutup tanggal
+// terlewat pegawai (tidak dianggap tidak hadir) tapi tidak ikut masuk ke tiga
+// kolom hitungan tersebut. 4 jenis bawaan (Surat Tugas, Berita Acara, Surat
+// Izin, SKS) di-seed otomatis saat migrasi kalau tabel masih kosong --
+// slug-nya SENGAJA disamakan dengan konstanta AbsensiDokumen* di atas supaya
+// data lama tetap valid.
 type JenisSurat struct {
 	ID   uint   `json:"id" gorm:"primaryKey"`
 	Slug string `json:"slug" gorm:"column:slug;size:40;not null;uniqueIndex"`
 	Nama string `json:"nama" gorm:"column:nama;size:150;not null"`
-	Kode string `json:"kode" gorm:"column:kode;size:2;not null"`
+	Kode string `json:"kode" gorm:"column:kode;size:10;not null"`
 }
 
 func (JenisSurat) TableName() string { return "jenis_surat" }

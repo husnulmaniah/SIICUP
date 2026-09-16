@@ -370,12 +370,18 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 			item.Slug = strings.ToLower(strings.TrimSpace(item.Slug))
 			item.Slug = strings.ReplaceAll(item.Slug, " ", "_")
 			item.Nama = strings.TrimSpace(item.Nama)
+			// Kode bebas ditentukan administrator sendiri (tidak wajib
+			// DD/I/S) -- lihat labelUntukJenis (absensi_dokumen.go) untuk
+			// bagaimana label tampilannya dihitung tanpa bergantung pada
+			// tiga kode bawaan itu. Cuma dirapikan (huruf besar, tanpa
+			// spasi berlebih) & dibatasi panjangnya supaya tetap ringkas
+			// saat ditampilkan sebagai Tag di rekap/riwayat absen.
 			item.Kode = strings.ToUpper(strings.TrimSpace(item.Kode))
-			if item.Slug == "" || item.Nama == "" {
-				return fmt.Errorf("slug dan nama jenis surat wajib diisi")
+			if item.Slug == "" || item.Nama == "" || item.Kode == "" {
+				return fmt.Errorf("slug, nama, dan kode jenis surat wajib diisi")
 			}
-			if item.Kode != "DD" && item.Kode != "I" && item.Kode != "S" {
-				return fmt.Errorf("kode harus salah satu dari: DD (Dinas Dalam), I (Izin), S (Sakit)")
+			if len(item.Kode) > 10 {
+				return fmt.Errorf("kode maksimal 10 karakter")
 			}
 			return nil
 		},
@@ -386,12 +392,15 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 			{Header: "Nama Jenis Surat", Required: true, Example: "Surat Dinas Luar",
 				Get: func(i interface{}) string { return i.(models.JenisSurat).Nama },
 				Set: func(i interface{}, raw string) error { i.(*models.JenisSurat).Nama = raw; return nil }},
-			{Header: "Kode (DD/I/S)", Required: true, Example: "DD",
+			{Header: "Kode (bebas, mis. DD/I/S/CT)", Required: true, Example: "DD",
 				Get: func(i interface{}) string { return i.(models.JenisSurat).Kode },
 				Set: func(i interface{}, raw string) error {
 					raw = strings.ToUpper(strings.TrimSpace(raw))
-					if raw != "DD" && raw != "I" && raw != "S" {
-						return fmt.Errorf("kode harus salah satu dari: DD, I, S")
+					if raw == "" {
+						return fmt.Errorf("kode wajib diisi")
+					}
+					if len(raw) > 10 {
+						return fmt.Errorf("kode maksimal 10 karakter")
 					}
 					i.(*models.JenisSurat).Kode = raw
 					return nil

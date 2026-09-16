@@ -51,6 +51,23 @@ func kodeUntukJenis(lookup map[string]models.JenisSurat, jenis string) string {
 	return models.AbsensiDokumenKode[jenis]
 }
 
+// labelUntukJenis mengembalikan label yang ditampilkan di riwayat/rekap/PDF
+// untuk satu slug jenis surat: diambil dari Nama pada master Jenis Surat
+// (jadi otomatis benar untuk kode apapun yang diketik administrator sendiri,
+// bukan cuma DD/I/S). Kalau slug-nya sudah tidak ada di master, coba tebak
+// dari peta label 3 kode bawaan supaya data lama tetap tampil, dan kalau itu
+// pun tidak ketemu, kode-nya sendiri dipakai sebagai label supaya tidak
+// pernah tampil kosong.
+func labelUntukJenis(lookup map[string]models.JenisSurat, jenis string, kode string) string {
+	if js, ok := lookup[jenis]; ok && js.Nama != "" {
+		return js.Nama
+	}
+	if lbl, ok := models.AbsensiDokumenKodeLabel[kode]; ok {
+		return lbl
+	}
+	return kode
+}
+
 func canAccessAbsensiDokumen(claims *utils.Claims, item models.AbsensiDokumen) bool {
 	if claims.RoleName == "administrator" || claims.RoleName == "admin" || claims.IsAdminAbsensi {
 		return true

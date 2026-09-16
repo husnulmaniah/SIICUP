@@ -159,6 +159,11 @@ const jabatanOptions = ref([])
 const kecamatanOptions = ref([])
 const jenisSuratOptions = ref([])
 const jenisSuratKodeMap = ref({})
+// kodeLabelMap: kode (mis. "CT") -> nama jenis surat pertama yang memakainya
+// -- dipakai untuk memberi label yang enak dibaca pada badge "Lainnya" di
+// kolom DD/Izin/Sakit rekap, untuk kode custom di luar DD/I/S bawaan (lihat
+// jumlah_lainnya dari backend, buildRekapItems di absensi_admin.go).
+const kodeLabelMap = ref({})
 
 async function loadPengaturan() {
   loadingPengaturan.value = true
@@ -226,6 +231,9 @@ async function loadJenisSuratOptions() {
     const items = data.data || []
     jenisSuratOptions.value = items.map((it) => ({ label: `${it.nama} (${it.kode})`, value: it.slug }))
     jenisSuratKodeMap.value = items.reduce((acc, it) => ({ ...acc, [it.slug]: it.kode }), {})
+    // beberapa jenis surat bisa berbagi kode custom yang sama -- ambil nama
+    // yang pertama ketemu saja per kode supaya badge "Lainnya" tetap ringkas
+    kodeLabelMap.value = items.reduce((acc, it) => (it.kode in acc ? acc : { ...acc, [it.kode]: it.nama }), {})
   } catch {
     jenisSuratOptions.value = []
   }
@@ -1201,13 +1209,19 @@ const defaultTab = computed(() => {
             <span v-else>0</span>
           </template>
         </Column>
-        <Column header="DD / Izin / Sakit">
+        <Column header="DD / Izin / Sakit / Lainnya">
           <template #body="{ data }">
-            <span v-if="!data.jumlah_dd && !data.jumlah_izin && !data.jumlah_sakit">-</span>
+            <span v-if="!data.jumlah_dd && !data.jumlah_izin && !data.jumlah_sakit && !Object.keys(data.jumlah_lainnya || {}).length">-</span>
             <span v-else class="kode-badges">
               <Tag v-if="data.jumlah_dd" severity="info" :value="`DD ${data.jumlah_dd}`" />
               <Tag v-if="data.jumlah_izin" severity="secondary" :value="`Izin ${data.jumlah_izin}`" />
               <Tag v-if="data.jumlah_sakit" severity="secondary" :value="`Sakit ${data.jumlah_sakit}`" />
+              <Tag
+                v-for="(jumlah, kode) in data.jumlah_lainnya || {}"
+                :key="kode"
+                severity="warn"
+                :value="`${kodeLabelMap[kode] || kode} ${jumlah}`"
+              />
             </span>
           </template>
         </Column>

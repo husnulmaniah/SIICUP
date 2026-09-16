@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,13 @@ type ringkasanRekapPDF struct {
 	Izin       int
 	Sakit      int
 	TidakAbsen int
+	// Lainnya menghitung dokumen ber-Kode selain DD/I/S (kode bebas buatan
+	// administrator sendiri, mis. "CT" untuk Cuti Tahunan) -- key-nya kode,
+	// value-nya label (Nama jenis surat) supaya baris ringkasan tambahan di
+	// PDF bisa ditulis "<Label> (<Kode>): <jumlah> hari" seperti
+	// DD/Izin/Sakit, bukan cuma kode mentah.
+	Lainnya      map[string]int
+	LabelLainnya map[string]string
 }
 
 // exportRekapAbsensiPegawaiPDF menangani GET /api/absensi/rekap/pdf
@@ -171,7 +179,8 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 			}
 		} else if dok, ada := dokumenByTanggal[key]; ada {
 			kode := kodeUntukJenis(jenisLookup, dok.Jenis)
-			row.Status = fmt.Sprintf("%s (%s)", models.AbsensiDokumenKodeLabel[kode], kode)
+			label := labelUntukJenis(jenisLookup, dok.Jenis, kode)
+			row.Status = fmt.Sprintf("%s (%s)", label, kode)
 			switch kode {
 			case "DD":
 				ringkasan.DinasDalam++
@@ -179,6 +188,15 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 				ringkasan.Izin++
 			case "S":
 				ringkasan.Sakit++
+			default:
+				if kode != "" {
+					if ringkasan.Lainnya == nil {
+						ringkasan.Lainnya = map[string]int{}
+						ringkasan.LabelLainnya = map[string]string{}
+					}
+					ringkasan.Lainnya[kode]++
+					ringkasan.LabelLainnya[kode] = label
+				}
 			}
 		} else {
 			ringkasan.TidakAbsen++
@@ -229,17 +247,47 @@ func buildRekapAbsensiPDF(
 	ringkasan ringkasanRekapPDF,
 ) ([]byte, error) {
 	const (
-		marginX    = 42.0
-		rowH       = 22.0
-		headerH    = 18.0
-		bottomY    = 781.0 // batas bawah tabel (sisakan ruang untuk footer)
-		fontBaris  = 7.5
-		fotoSisi   = 18.0
-		yTabelHal1 = 276.0
-		yTabelLain = 78.0
+		marginX         = 42.0
+		rowH            = 22.0
+		headerH         = 18.0
+		bottomY         = 781.0 // batas bawah tabel (sisakan ruang untuk footer)
+		fontBaris       = 7.5
+		fotoSisi        = 18.0
+		yTabelHal1Dasar = 276.0
+		yTabelLain      = 78.0
 	)
 	pageW := utils.PageWidthA4
 	rightX := pageW - marginX
+
+	// baris ringkasan tambahan untuk kode surat kolektif custom (selain
+	// DD/I/S, mis. "CT" -- Kode bebas yang diketik administrator di menu
+	// Master Data -> Jenis Surat, lihat models.JenisSurat) -- diurutkan
+	// alfabetis supaya tampilannya konsisten antar-cetak (map Go tidak
+	// terurut). Kalau organisasi ini tidak pernah pakai kode custom, baris
+	// ini kosong & layout PDF sama persis seperti sebelumnya.
+	lainnyaLine := ""
+	if len(ringkasan.Lainnya) > 0 {
+		kodeList := make([]string, 0, len(ringkasan.Lainnya))
+		for k := range ringkasan.Lainnya {
+			kodeList = append(kodeList, k)
+		}
+		sort.Strings(kodeList)
+		parts := make([]string, 0, len(kodeList))
+		for _, k := range kodeList {
+			label := ringkasan.LabelLainnya[k]
+			if label == "" {
+				label = k
+			}
+			parts = append(parts, fmt.Sprintf("%s (%s) %d hari", label, k, ringkasan.Lainnya[k]))
+		}
+		lainnyaLine = strings.Join(parts, "  |  ")
+	}
+	// tabel digeser turun 13pt kalau ada baris "Lainnya" supaya tidak
+	// bertindih dengan ringkasan utama & catatan koordinat di atasnya
+	yTabelHal1 := yTabelHal1Dasar
+	if lainnyaLine != "" {
+		yTabelHal1 += 13.0
+	}
 
 	// lebar kolom (total 511 = lebar area cetak A4 dengan margin 42)
 	kolom := []struct {
@@ -392,8 +440,14 @@ func buildRekapAbsensiPDF(
 				"Hadir %d hari  |  Terlambat %d kali  |  Dinas Dalam %d  |  Izin %d  |  Sakit %d  |  Tidak Absen %d",
 				ringkasan.Hadir, ringkasan.Terlambat, ringkasan.DinasDalam, ringkasan.Izin, ringkasan.Sakit, ringkasan.TidakAbsen,
 			))
+			yCatatan := 265.0
+			if lainnyaLine != "" {
+				p.SetFont(false, 8.5)
+				p.Text(marginX+60, 262, "Lainnya: "+lainnyaLine)
+				yCatatan = 278.0
+			}
 			p.SetFont(false, 7.5)
-			p.Text(marginX, 265, "Titik koordinat pada tabel bisa diklik untuk membuka lokasi absen di Google Maps.")
+			p.Text(marginX, yCatatan, "Titik koordinat pada tabel bisa diklik untuk membuka lokasi absen di Google Maps.")
 
 			yTabel = yTabelHal1
 		} else {

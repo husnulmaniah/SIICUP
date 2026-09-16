@@ -936,7 +936,7 @@ func tercoverEntryFromDokumen(d models.AbsensiDokumen, jenisLookup map[string]mo
 		Tanggal: d.Tanggal.Format("2006-01-02"),
 		Jenis:   d.Jenis,
 		Kode:    kode,
-		Label:   models.AbsensiDokumenKodeLabel[kode],
+		Label:   labelUntukJenis(jenisLookup, d.Jenis, kode),
 	}
 }
 

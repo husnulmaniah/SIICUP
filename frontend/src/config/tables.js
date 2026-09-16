@@ -231,7 +231,7 @@ export const tableConfigs = {
         label: 'Kode',
         type: 'text',
         required: true,
-        hint: 'Ketik salah satu: DD (Dinas Dalam), I (Izin), atau S (Sakit). Menentukan cara jenis surat ini dihitung & ditampilkan di rekap/PDF absen.',
+        hint: 'Bebas, tentukan sendiri (maks. 10 karakter), mis. "DD", "I", "S", atau kode lain seperti "CT" untuk Cuti Tahunan. Khusus kode DD/I/S yang dihitung ke kolom Jumlah DD/Izin/Sakit di rekap & PDF absen; kode lain tetap menutup tanggal terlewat pegawai tapi tidak masuk ke tiga kolom itu.',
       },
     ],
     searchPlaceholder: 'Cari jenis surat...',

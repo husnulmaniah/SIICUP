@@ -167,6 +167,13 @@ type rekapAbsensiItem struct {
 	JumlahDD        int                    `json:"jumlah_dd"`
 	JumlahIzin      int                    `json:"jumlah_izin"`
 	JumlahSakit     int                    `json:"jumlah_sakit"`
+	// JumlahLainnya menghitung dokumen ber-Kode SELAIN DD/I/S (kode bebas
+	// yang diketik administrator sendiri di menu Master Data -> Jenis Surat,
+	// mis. "CT" untuk Cuti Tahunan) -- key-nya kode itu sendiri, supaya
+	// frontend bisa menampilkan badge hitungan tersendiri untuk tiap kode
+	// custom tanpa perlu kolom tetap baru per kode. Selalu map kosong
+	// (bukan nil) supaya konsisten sebagai {} di JSON, bukan null.
+	JumlahLainnya map[string]int `json:"jumlah_lainnya"`
 }
 
 // rekapPeriode membaca query bulan/tahun/id_pegawai dan mengembalikan
@@ -268,6 +275,7 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 
 		tercover := []tanggalTercoverEntry{}
 		jumlahDD, jumlahIzin, jumlahSakit := 0, 0, 0
+		jumlahLainnya := map[string]int{}
 		// absen masuk/pulang yang ditandai Dinas Dalam sendiri oleh pegawai
 		// (lihat models.Absensi.IsDinasDalam) ikut dihitung sebagai "DD" di
 		// sini, sama seperti dokumen Surat Tugas/Berita Acara yang diinput
@@ -298,6 +306,10 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 				jumlahIzin++
 			case "S":
 				jumlahSakit++
+			default:
+				if entry.Kode != "" {
+					jumlahLainnya[entry.Kode]++
+				}
 			}
 		}
 
@@ -309,6 +321,7 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 			JumlahDD:        jumlahDD,
 			JumlahIzin:      jumlahIzin,
 			JumlahSakit:     jumlahSakit,
+			JumlahLainnya:   jumlahLainnya,
 		})
 	}
 
