@@ -73,7 +73,7 @@ func userExcelColumns(db *gorm.DB) []utils.ExcelColumn {
 
 func RegisterUserRoutes(mux *http.ServeMux, db *gorm.DB) {
 	protect := func(h http.HandlerFunc) http.Handler {
-		return middleware.Chain(h, middleware.Auth, middleware.RequireRole("administrator"))
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole("administrator"))
 	}
 
 	mux.Handle("GET /api/user", protect(func(w http.ResponseWriter, r *http.Request) { listUsers(w, r, db) }))
@@ -143,6 +143,10 @@ type userPayload struct {
 	// pegawai/atasan yang sama tetap bisa dipakai untuk absen & mengajukan
 	// cuti sendiri SEKALIGUS mengelola menu "Input Rekapan Absensi".
 	IsAdminAbsensi bool `json:"is_admin_absensi"`
+	// IsAdminVerifikasi: lihat models.User.IsAdminVerifikasi -- centang
+	// tambahan di form Akun Pengguna, independen dari IsAdminAbsensi di
+	// atas & dari pilihan Role.
+	IsAdminVerifikasi bool `json:"is_admin_verifikasi"`
 }
 
 func createUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -160,7 +164,7 @@ func createUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal memproses password")
 		return
 	}
-	user := models.User{Username: p.Username, Pass: hash, Nama: p.Nama, IDRole: p.IDRole, IDPegawai: p.IDPegawai, IsAdminAbsensi: p.IsAdminAbsensi}
+	user := models.User{Username: p.Username, Pass: hash, Nama: p.Nama, IDRole: p.IDRole, IDPegawai: p.IDPegawai, IsAdminAbsensi: p.IsAdminAbsensi, IsAdminVerifikasi: p.IsAdminVerifikasi}
 	if err := db.Create(&user).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan user (username mungkin sudah dipakai): "+err.Error())
 		return
@@ -193,6 +197,7 @@ func updateUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	updates["id_pegawai"] = p.IDPegawai
 	updates["is_admin_absensi"] = p.IsAdminAbsensi
+	updates["is_admin_verifikasi"] = p.IsAdminVerifikasi
 	if p.Password != "" {
 		hash, err := utils.HashPassword(p.Password)
 		if err != nil {

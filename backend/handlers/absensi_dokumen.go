@@ -25,11 +25,30 @@ import (
 // melihat/mengunduh surat yang sudah diinput untuknya
 // (listAbsensiDokumenSaya/downloadAbsensiDokumen).
 
-var absensiDokumenLabels = map[string]string{
-	models.AbsensiDokumenSKS:         "Surat Keterangan Sakit (SKS)",
-	models.AbsensiDokumenSuratTugas:  "Surat Tugas",
-	models.AbsensiDokumenBeritaAcara: "Berita Acara",
-	models.AbsensiDokumenSuratIzin:   "Surat Izin",
+// jenisSuratLookup memuat semua master Jenis Surat (menu Master Data ->
+// Jenis Surat) sekaligus jadi map by slug -- dipakai riwayat/rekap/PDF
+// supaya kode (DD/I/S) tidak lagi hardcode dan otomatis ikut jenis surat
+// tambahan yang dibuat administrator, tanpa query berulang per baris.
+func jenisSuratLookup(db *gorm.DB) map[string]models.JenisSurat {
+	var rows []models.JenisSurat
+	db.Find(&rows)
+	out := make(map[string]models.JenisSurat, len(rows))
+	for _, row := range rows {
+		out[row.Slug] = row
+	}
+	return out
+}
+
+// kodeUntukJenis mengembalikan kode (DD/I/S) untuk satu slug jenis surat dari
+// hasil jenisSuratLookup. Kalau slug-nya sudah tidak ada di master (misalnya
+// baris JenisSurat-nya dihapus administrator) tapi masih dipakai baris
+// AbsensiDokumen lama, coba tebak dari peta 4 jenis bawaan supaya data lama
+// tetap tampil benar di rekap/PDF.
+func kodeUntukJenis(lookup map[string]models.JenisSurat, jenis string) string {
+	if js, ok := lookup[jenis]; ok {
+		return js.Kode
+	}
+	return models.AbsensiDokumenKode[jenis]
 }
 
 func canAccessAbsensiDokumen(claims *utils.Claims, item models.AbsensiDokumen) bool {
@@ -106,11 +125,12 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	}
 
 	jenis := strings.TrimSpace(r.FormValue("jenis"))
-	label, valid := absensiDokumenLabels[jenis]
-	if !valid {
-		utils.Error(w, http.StatusBadRequest, "jenis surat tidak valid (pilih: sks, surat_tugas, berita_acara, atau surat_izin)")
+	var jenisSurat models.JenisSurat
+	if jenis == "" || db.Where("slug = ?", jenis).First(&jenisSurat).Error != nil {
+		utils.Error(w, http.StatusBadRequest, "jenis surat tidak valid -- pilih dari daftar Jenis Surat yang tersedia (kelola di menu Master Data -> Jenis Surat)")
 		return
 	}
+	label := jenisSurat.Nama
 
 	fh := formFileHeader(r, "file")
 	if fh == nil {

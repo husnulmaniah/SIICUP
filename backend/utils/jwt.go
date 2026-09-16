@@ -19,17 +19,24 @@ type Claims struct {
 	// biasanya pegawai/atasan) yang tambahan boleh mengakses menu "Input
 	// Rekapan Absensi" tanpa mengubah role utamanya.
 	IsAdminAbsensi bool `json:"is_admin_absensi"`
+	// IsAdminVerifikasi: lihat models.User.IsAdminVerifikasi -- akun (role
+	// apa pun) yang tambahan boleh memverifikasi (menyetujui/mengembalikan)
+	// Pengajuan Surat Kolektif dari pegawai sekolah, terlepas dari
+	// IsAdminAbsensi. Kedua centang ini independen & bisa dicentang
+	// bersamaan pada satu akun yang sama.
+	IsAdminVerifikasi bool `json:"is_admin_verifikasi"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID uint, username string, roleID uint, roleName string, idPegawai *uint, isAdminAbsensi bool) (string, error) {
+func GenerateToken(userID uint, username string, roleID uint, roleName string, idPegawai *uint, isAdminAbsensi bool, isAdminVerifikasi bool) (string, error) {
 	claims := Claims{
-		UserID:         userID,
-		Username:       username,
-		RoleID:         roleID,
-		RoleName:       roleName,
-		IDPegawai:      idPegawai,
-		IsAdminAbsensi: isAdminAbsensi,
+		UserID:            userID,
+		Username:          username,
+		RoleID:            roleID,
+		RoleName:          roleName,
+		IDPegawai:         idPegawai,
+		IsAdminAbsensi:    isAdminAbsensi,
+		IsAdminVerifikasi: isAdminVerifikasi,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

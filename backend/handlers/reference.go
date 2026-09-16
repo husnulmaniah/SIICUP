@@ -76,4 +76,13 @@ func RegisterReferenceRoutes(mux *http.ServeMux, db *gorm.DB) {
 		db.Order("role asc").Find(&items)
 		utils.Success(w, "ok", items)
 	}))
+	// jenis-surat: dipakai dropdown "Jenis Surat" pada form Surat Kolektif
+	// (menu Rekap Absen, admin/administrator/IsAdminAbsensi/IsAdminVerifikasi)
+	// -- CRUD penuhnya (/api/jenis-surat, tambah/edit/hapus) tetap
+	// administrator-only, lihat routes/master_routes.go.
+	mux.Handle("GET /api/ref/jenis-surat", any(func(w http.ResponseWriter, r *http.Request) {
+		var items []models.JenisSurat
+		db.Order("nama asc").Find(&items)
+		utils.Success(w, "ok", items)
+	}))
 }

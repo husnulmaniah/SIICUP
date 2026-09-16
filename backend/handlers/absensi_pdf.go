@@ -107,6 +107,7 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 	for _, d := range dokumenRows {
 		dokumenByTanggal[d.Tanggal.Format("2006-01-02")] = d
 	}
+	jenisLookup := jenisSuratLookup(db)
 
 	doc := utils.NewPDFDoc()
 	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
@@ -169,7 +170,7 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 				}
 			}
 		} else if dok, ada := dokumenByTanggal[key]; ada {
-			kode := models.AbsensiDokumenKode[dok.Jenis]
+			kode := kodeUntukJenis(jenisLookup, dok.Jenis)
 			row.Status = fmt.Sprintf("%s (%s)", models.AbsensiDokumenKodeLabel[kode], kode)
 			switch kode {
 			case "DD":

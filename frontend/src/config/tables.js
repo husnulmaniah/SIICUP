@@ -30,6 +30,17 @@ export const tempatKerjaOptions = [
 ]
 export const tempatKerjaLabels = tempatKerjaOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
 
+// Pilihan Kode Jenis Surat Kolektif (statis) -- menentukan bagaimana satu
+// jenis surat kolektif (lihat tableConfigs['jenis-surat'] di bawah) dihitung
+// & ditampilkan di rekap/PDF absen: DD (Dinas Dalam), I (Izin), S (Sakit).
+// Harus sama persis dengan validasi backend (models.AbsensiDokumenKodeLabel).
+export const jenisSuratKodeOptions = [
+  { id: 'DD', label: 'DD -- Dinas Dalam' },
+  { id: 'I', label: 'I -- Izin' },
+  { id: 'S', label: 'S -- Sakit' },
+]
+export const jenisSuratKodeLabels = jenisSuratKodeOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
+
 export const tableConfigs = {
   role: {
     title: 'Role',
@@ -87,19 +98,6 @@ export const tableConfigs = {
       { field: 'kecamatan.nama', header: 'Kecamatan', width: '160px' },
       { field: 'tempat_kerja', header: 'Tempat Kerja', type: 'lookup', map: tempatKerjaLabels, width: '130px' },
       { field: 'lat', header: 'Titik Koordinat Absen', type: 'coords', latField: 'lat', lngField: 'lng', width: '160px' },
-      {
-        field: 'jam_mulai_pagi',
-        header: 'Jam Kerja Khusus',
-        type: 'jamKerja',
-        jamFields: {
-          mulaiPagi: 'jam_mulai_pagi',
-          batasPagi: 'jam_batas_pagi',
-          tutupPagi: 'jam_tutup_pagi',
-          mulaiPulang: 'jam_mulai_pulang',
-          tutupPulang: 'jam_tutup_pulang',
-        },
-        width: '150px',
-      },
     ],
     formFields: [
       { field: 'unit', label: 'Unit Kerja / Sekolah', type: 'text', required: true },
@@ -128,19 +126,6 @@ export const tableConfigs = {
         lngField: 'lng',
         radiusField: 'radius_meter',
         hint: 'Untuk unit kerja bertempat Dinas/Kantor: BOLEH dikosongkan -- otomatis memakai titik kantor pusat yang sudah ditetapkan di menu Rekap Absen -> Pengaturan, jadi tidak perlu isi satu-satu. Untuk unit bertempat Sekolah: SEBAIKNYA diisi sendiri satu-satu -- kalau dikosongkan, absen di sekolah itu TIDAK otomatis memakai titik kantor dinas (supaya tidak salah lokasi), geofence-nya dianggap belum diatur sampai titik ini diisi.',
-      },
-      {
-        field: 'jam_mulai_pagi',
-        type: 'jamKerja',
-        label: 'Jam Kerja Khusus Unit Kerja/Sekolah Ini (opsional)',
-        jamFields: {
-          mulaiPagi: 'jam_mulai_pagi',
-          batasPagi: 'jam_batas_pagi',
-          tutupPagi: 'jam_tutup_pagi',
-          mulaiPulang: 'jam_mulai_pulang',
-          tutupPulang: 'jam_tutup_pulang',
-        },
-        hint: 'Opsional. Kalau kelima jam ini diisi, jam kerja unit kerja/sekolah ini dipakai menggantikan jam default Sekolah/Dinas di menu Rekap Absen -> Pengaturan, khusus untuk pegawai yang unit kerjanya menunjuk ke sini. Kosongkan semua untuk memakai jam default sesuai kategori Tempat Kerja di atas (Dinas/Kantor atau Sekolah). Cocok kalau ada sekolah dengan jam masuk/pulang yang berbeda dari sekolah lain.',
       },
     ],
     searchPlaceholder: 'Cari unit kerja...',
@@ -219,6 +204,39 @@ export const tableConfigs = {
     columns: [{ field: 'id', header: 'ID', width: '80px' }, { field: 'pola', header: 'Pola Hari Kerja' }],
     formFields: [{ field: 'pola', label: 'Pola Hari Kerja', type: 'text', required: true, placeholder: 'contoh: 5 Hari Kerja (Senin-Jumat)' }],
     searchPlaceholder: 'Cari pola hari kerja...',
+  },
+
+  'jenis-surat': {
+    title: 'Jenis Surat',
+    subtitle: 'Kelola jenis-jenis surat kolektif yang bisa dipilih saat menginput/mengajukan Surat Kolektif pada menu Rekap Absen',
+    endpoint: '/jenis-surat',
+    roles: ['administrator'],
+    columns: [
+      { field: 'id', header: 'ID', width: '80px' },
+      { field: 'nama', header: 'Nama Jenis Surat' },
+      { field: 'slug', header: 'Slug', width: '180px' },
+      { field: 'kode', header: 'Kode', type: 'lookup', map: jenisSuratKodeLabels, width: '160px' },
+    ],
+    formFields: [
+      { field: 'nama', label: 'Nama Jenis Surat', type: 'text', required: true, hint: 'Nama yang tampil di dropdown Surat Kolektif, mis. "Surat Tugas" atau "Surat Dinas Luar".' },
+      {
+        field: 'slug',
+        label: 'Slug (kode unik)',
+        type: 'text',
+        required: true,
+        hint: 'Wajib unik, huruf kecil tanpa spasi (gunakan garis bawah), mis. "surat_dinas_luar". Ini yang tersimpan di data surat -- jangan diubah lagi setelah dipakai, supaya surat yang sudah ada tetap cocok.',
+      },
+      {
+        field: 'kode',
+        label: 'Kode',
+        type: 'select',
+        staticOptions: jenisSuratKodeOptions,
+        optionLabel: 'label',
+        required: true,
+        hint: 'Menentukan cara jenis surat ini dihitung & ditampilkan di rekap/PDF absen: DD (Dinas Dalam), I (Izin), atau S (Sakit).',
+      },
+    ],
+    searchPlaceholder: 'Cari jenis surat...',
   },
 
   'tgl-merah': {
@@ -324,6 +342,7 @@ export const tableConfigs = {
       { field: 'role.role', header: 'Role', type: 'badge' },
       { field: 'pegawai.nama', header: 'Terhubung ke Pegawai' },
       { field: 'is_admin_absensi', header: 'Admin Absensi', type: 'boolean' },
+      { field: 'is_admin_verifikasi', header: 'Admin Verifikasi', type: 'boolean' },
     ],
     formFields: [
       { field: 'username', label: 'Username', type: 'text', required: true },
@@ -336,6 +355,12 @@ export const tableConfigs = {
         label: 'Admin Absensi',
         type: 'checkbox',
         hint: 'Jika dicentang, akun ini tetap punya menu biasa (Dashboard, Pengajuan Cuti, Absen, dst.) DITAMBAH 1 menu "Input Rekapan Absensi" untuk mengelola rekap absensi semua pegawai & surat kolektif.',
+      },
+      {
+        field: 'is_admin_verifikasi',
+        label: 'Admin Verifikasi',
+        type: 'checkbox',
+        hint: 'Jika dicentang, akun ini boleh memverifikasi (menyetujui/mengembalikan) Pengajuan Surat Kolektif dari pegawai sekolah. Independen dari Admin Absensi -- kalau KEDUANYA dicentang, akun ini bisa menginput Surat Kolektif dinas SEKALIGUS memverifikasi pengajuan surat kolektif sekolah.',
       },
     ],
     searchPlaceholder: 'Cari username / nama...',

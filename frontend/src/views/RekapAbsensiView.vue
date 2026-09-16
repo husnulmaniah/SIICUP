@@ -157,6 +157,8 @@ function terapkanTempelKoordinat() {
 const tempatTugasOptions = ref([])
 const jabatanOptions = ref([])
 const kecamatanOptions = ref([])
+const jenisSuratOptions = ref([])
+const jenisSuratKodeMap = ref({})
 
 async function loadPengaturan() {
   loadingPengaturan.value = true
@@ -210,6 +212,22 @@ async function loadKecamatanOptions() {
     kecamatanOptions.value = (data.data || []).map((k) => ({ label: k.nama, value: k.id }))
   } catch {
     kecamatanOptions.value = []
+  }
+}
+
+// Jenis Surat untuk dropdown form Surat Kolektif -- dimuat dari master data
+// (menu Master Data -> Jenis Surat, administrator only untuk tambah/edit/
+// hapus, tapi endpoint /ref/jenis-surat ini terbuka untuk siapa saja yang
+// login) supaya jenis tambahan yang dibuat administrator otomatis muncul di
+// sini juga, tidak lagi daftar tetap 4 jenis yang di-hardcode di frontend.
+async function loadJenisSuratOptions() {
+  try {
+    const { data } = await http.get('/ref/jenis-surat')
+    const items = data.data || []
+    jenisSuratOptions.value = items.map((it) => ({ label: `${it.nama} (${it.kode})`, value: it.slug }))
+    jenisSuratKodeMap.value = items.reduce((acc, it) => ({ ...acc, [it.slug]: it.kode }), {})
+  } catch {
+    jenisSuratOptions.value = []
   }
 }
 
@@ -396,8 +414,18 @@ onMounted(async () => {
   // otomatis DITUTUP (lihat absenPulangSudahTutup), bukan cuma dipakai
   // kartu Pengaturan.
   const tugasAdminOnly = auth.isAdministrator ? [loadTempatTugasOptions(), loadJabatanOptions(), loadKecamatanOptions()] : []
-  await Promise.all([loadPegawaiOptions(), loadPengaturan(), ...tugasAdminOnly])
-  await Promise.all([loadRekap(), loadDokumenAdmin()])
+  const verifikasiOnly = auth.isAdministrator || auth.isAdminVerifikasi ? [loadVerifikasiList()] : []
+  await Promise.all([loadPegawaiOptions(), loadPengaturan(), loadJenisSuratOptions(), ...tugasAdminOnly, ...verifikasiOnly])
+  // loadRekap/loadDokumenAdmin dipakai tab "Rekap Absen" & "Surat Kolektif",
+  // yang endpoint-nya (GET /absensi/rekap, /absensi/dokumen/rekap) memang
+  // hanya boleh diakses administrator/admin/IsAdminAbsensi (manage() di
+  // backend) -- akun yang HANYA IsAdminVerifikasi (tanpa salah satu itu)
+  // tidak punya tab-tab tersebut sama sekali (lihat v-if pada Tab/TabPanel
+  // di atas), jadi keduanya dilewati supaya tidak memicu error 403 yang
+  // tidak perlu ditampilkan ke akun itu.
+  if (auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi) {
+    await Promise.all([loadRekap(), loadDokumenAdmin()])
+  }
 })
 
 // Hadir TIDAK termasuk hari yang ditandai Dinas Dalam (baik absen masuk
@@ -804,8 +832,121 @@ function confirmHapusDokumenAdmin(item) {
 }
 
 function kodeDokumen(jenis) {
-  return JENIS_KODE[jenis] || ''
+  return jenisSuratKodeMap.value[jenis] || JENIS_KODE[jenis] || ''
 }
+
+// ============================================================
+// Verifikasi Pengajuan Surat Kolektif Sekolah (pengajuan MANDIRI pegawai
+// sekolah, lihat handlers/pengajuan_surat_kolektif.go) -- tab ini HANYA
+// untuk administrator/akun IsAdminVerifikasi (lihat v-if pada Tab &
+// TabPanel di template), berbeda dari tab "Surat Kolektif" di atas yang
+// tetap dikelola administrator/admin/IsAdminAbsensi (input langsung, efek
+// langsung, tanpa alur persetujuan).
+// ============================================================
+
+const verifikasiList = ref([])
+const loadingVerifikasi = ref(false)
+const verifikasiStatusFilter = ref('menunggu')
+const verifikasiStatusOptions = [
+  { label: 'Menunggu Verifikasi', value: 'menunggu' },
+  { label: 'Disetujui', value: 'disetujui' },
+  { label: 'Dikembalikan', value: 'dikembalikan' },
+  { label: 'Semua', value: 'semua' },
+]
+
+async function loadVerifikasiList() {
+  loadingVerifikasi.value = true
+  try {
+    const { data } = await http.get('/pengajuan-surat-kolektif', { params: { status: verifikasiStatusFilter.value } })
+    verifikasiList.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    loadingVerifikasi.value = false
+  }
+}
+watch(verifikasiStatusFilter, () => loadVerifikasiList())
+
+async function downloadVerifikasiFile(item) {
+  try {
+    const res = await http.get(`/pengajuan-surat-kolektif/${item.id}/file`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = item.nama_file || 'surat'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
+function confirmSetujuiVerifikasi(item) {
+  confirm.require({
+    message: `Setujui pengajuan surat kolektif "${item.label}" dari ${item.pegawai?.nama || 'pegawai ini'} untuk ${item.tanggal_list.length} tanggal? Absen pegawai akan otomatis berubah jadi bersurat untuk tanggal-tanggal tersebut.`,
+    header: 'Konfirmasi Setujui',
+    icon: 'pi pi-check-circle',
+    acceptLabel: 'Ya, Setujui',
+    rejectLabel: 'Batal',
+    accept: async () => {
+      try {
+        const { data } = await http.put(`/pengajuan-surat-kolektif/${item.id}/setujui`)
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+        await loadVerifikasiList()
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+      }
+    },
+  })
+}
+
+// dialog "Kembalikan" -- wajib isi catatan supaya pegawai tahu apa yang
+// perlu diperbaiki (lihat kembalikanPengajuanSuratKolektif di backend).
+const kembalikanDialog = ref(false)
+const kembalikanItem = ref(null)
+const kembalikanCatatan = ref('')
+const submittingKembalikan = ref(false)
+
+function bukaKembalikanDialog(item) {
+  kembalikanItem.value = item
+  kembalikanCatatan.value = ''
+  kembalikanDialog.value = true
+}
+function closeKembalikanDialog() {
+  kembalikanDialog.value = false
+  kembalikanItem.value = null
+}
+async function submitKembalikan() {
+  if (!kembalikanCatatan.value.trim()) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Catatan wajib diisi', life: 4000 })
+    return
+  }
+  submittingKembalikan.value = true
+  try {
+    const fd = new FormData()
+    fd.append('catatan', kembalikanCatatan.value.trim())
+    const { data } = await http.put(`/pengajuan-surat-kolektif/${kembalikanItem.value.id}/kembalikan`, fd)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    closeKembalikanDialog()
+    await loadVerifikasiList()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    submittingKembalikan.value = false
+  }
+}
+
+// defaultTab: tab pertama yang benar-benar terlihat untuk akun yang login --
+// akun yang HANYA IsAdminVerifikasi (tanpa administrator/admin/
+// IsAdminAbsensi) tidak punya tab "Rekap Absen" sama sekali, jadi tab
+// default untuk mereka langsung ke "Verifikasi Surat Kolektif Sekolah".
+const defaultTab = computed(() => {
+  if (auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi) return 'rekap'
+  if (auth.isAdminVerifikasi) return 'verifikasi-sekolah'
+  return 'rekap'
+})
 </script>
 
 <template>
@@ -821,13 +962,21 @@ function kodeDokumen(jenis) {
 
     <!-- Tab "Rekap Absen" (semua bisa lihat), "Pengaturan Absen" (HANYA
          administrator -- role admin tidak boleh melihat/mengubah sama
-         sekali) & "Surat Kolektif" (admin & administrator), menggantikan
-         tampilan lama yang menumpuk ketiganya sekaligus di satu halaman. -->
-    <Tabs value="rekap">
+         sekali), "Surat Kolektif" (admin/administrator/IsAdminAbsensi --
+         input langsung, efek langsung, dipakai juga untuk pegawai DINAS)
+         & "Verifikasi Surat Kolektif Sekolah" (HANYA administrator/
+         IsAdminVerifikasi -- menyetujui/mengembalikan pengajuan MANDIRI
+         pegawai sekolah, lihat handlers/pengajuan_surat_kolektif.go),
+         menggantikan tampilan lama yang menumpuk semuanya sekaligus di
+         satu halaman. -->
+    <Tabs :value="defaultTab">
       <TabList>
-        <Tab value="rekap"><i class="pi pi-list" style="margin-right: 0.4rem"></i> Rekap Absen</Tab>
+        <Tab v-if="auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi" value="rekap"><i class="pi pi-list" style="margin-right: 0.4rem"></i> Rekap Absen</Tab>
         <Tab v-if="auth.isAdministrator" value="pengaturan"><i class="pi pi-cog" style="margin-right: 0.4rem"></i> Pengaturan Absen</Tab>
-        <Tab value="surat"><i class="pi pi-file" style="margin-right: 0.4rem"></i> Surat Kolektif</Tab>
+        <Tab v-if="auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi" value="surat"><i class="pi pi-file" style="margin-right: 0.4rem"></i> Surat Kolektif</Tab>
+        <Tab v-if="auth.isAdministrator || auth.isAdminVerifikasi" value="verifikasi-sekolah">
+          <i class="pi pi-check-square" style="margin-right: 0.4rem"></i> Verifikasi Surat Kolektif Sekolah
+        </Tab>
       </TabList>
       <TabPanels>
     <TabPanel v-if="auth.isAdministrator" value="pengaturan">
@@ -908,60 +1057,20 @@ function kodeDokumen(jenis) {
               </Message>
             </div>
 
-            <div class="pengaturan-group">
-              <div class="group-title">Titik Koordinat Kantor &amp; Radius Absen (Default)</div>
-              <Message severity="info" :closable="false" style="margin-bottom: 0.75rem">
-                Titik ini dipakai sebagai DEFAULT/CADANGAN untuk pegawai yang unit kerja/sekolahnya belum diberi titik
-                koordinat sendiri. Untuk instansi dengan banyak sekolah di beberapa kecamatan, atur titik koordinat
-                khusus per sekolah lewat menu Master Data -> Unit Kerja (titik di sana jadi prioritas utama).
-              </Message>
-
-              <label class="field-label">Tempel Koordinat / Link Google Maps</label>
-              <div class="kantor-tempel">
-                <InputText
-                  v-model="tempelKoordinat"
-                  placeholder='Contoh: -1.976688, 121.335284 (atau tempel link Google Maps)'
-                  style="flex: 1 1 220px"
-                  @keyup.enter="terapkanTempelKoordinat"
-                />
-                <Button label="Terapkan" icon="pi pi-map" size="small" @click="terapkanTempelKoordinat" />
-              </div>
-              <small class="text-muted" style="display: block; margin-bottom: 0.75rem">
-                Cari gedung kantor di Google Maps, klik-kanan pada titik yang tepat di gedung tersebut lalu pilih
-                koordinat yang muncul paling atas (atau salin link/koordinatnya), lalu tempel di atas ini.
-              </small>
-
-              <div class="kantor-grid">
-                <InputNumber v-model="pengaturan.kantor_lat" placeholder="Lintang (lat)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
-                <InputNumber v-model="pengaturan.kantor_lng" placeholder="Bujur (lng)" :minFractionDigits="6" :maxFractionDigits="6" style="width: 100%" />
-                <InputNumber v-model="pengaturan.radius_meter" placeholder="Radius (meter)" suffix=" m" :min="1" style="width: 100%" />
-              </div>
-              <div class="kantor-actions">
-                <Button label="Ambil Lokasi Saat Ini" icon="pi pi-map-marker" size="small" outlined :loading="locatingKantor" @click="ambilLokasiKantor" />
-                <Button v-if="pengaturan.kantor_lat != null" label="Hapus Titik Kantor" icon="pi pi-times" size="small" text severity="danger" @click="hapusLokasiKantor" />
-              </div>
-              <small class="text-muted" style="display: block; margin-bottom: 0.5rem">
-                Kalau diisi, kamera absen hanya akan terbuka jika pegawai berada dalam radius ini dari titik kantor.
-                Kosongkan (Hapus Titik Kantor) untuk menonaktifkan pembatasan lokasi. Isi radius sesuai luas gedung/
-                halaman kantor SEBENARNYA (mis. 50-100m -- bisa diukur pakai fitur "Ukur jarak" di Google Maps),
-                bukan dibesar-besarkan untuk mengakali GPS yang kurang akurat -- sistem SUDAH otomatis menambah
-                toleransi {{ TOLERANSI_MIN }}-{{ TOLERANSI_MAKS }}m di atas radius ini untuk noise GPS, jadi radius
-                tidak perlu diperbesar lagi untuk alasan itu. "Ambil Lokasi Saat Ini" hanya akurat kalau Anda sedang
-                berada tepat di titik kantor yang dijadikan patokan.
-              </small>
-              <small v-if="jangkauanEfektif" class="text-muted" style="display: block">
-                Dengan radius {{ pengaturan.radius_meter }}m, absen akan diterima dari jarak sekitar
-                <strong>{{ jangkauanEfektif.min }}-{{ jangkauanEfektif.maks }} meter</strong> dari titik kantor
-                (radius + toleransi akurasi GPS otomatis).
-              </small>
-              <Message v-if="radiusTerlaluBesar" severity="warn" :closable="false" style="margin-top: 0.5rem">
-                Radius {{ pengaturan.radius_meter }}m tergolong besar -- jangkauan efektifnya bisa sampai
-                {{ jangkauanEfektif?.maks }}m dari titik kantor, kemungkinan sudah menjangkau luar area kantor
-                (termasuk rumah pegawai yang berdekatan). Kalau tujuannya supaya pegawai di kantor tidak tertolak
-                karena GPS kurang akurat, itu sudah ditangani otomatis oleh toleransi di atas -- coba kecilkan radius
-                ini agar sesuai luas kantor sebenarnya.
-              </Message>
-            </div>
+            <!--
+              Card "Titik Koordinat Kantor & Radius Absen (Default)" SENGAJA
+              disembunyikan dari sini (atas permintaan: titik koordinat kini
+              diatur per Unit Kerja lewat menu Master Data -> Unit Kerja, yang
+              jadi prioritas utama). Field pengaturan.kantor_lat/kantor_lng/
+              radius_meter & fallback-nya di backend (lihat absensiCekRadius,
+              handlers/absensi.go) TETAP ada & tetap aktif sebagai jaring
+              pengaman -- kalau ada Unit Kerja kategori Dinas/Kantor yang
+              belum diisi titik sendiri, absen di situ tidak otomatis terbuka
+              tanpa validasi jarak sama sekali. Fungsi ambilLokasiKantor/
+              hapusLokasiKantor/terapkanTempelKoordinat & state
+              tempelKoordinat di <script> sengaja dibiarkan (tidak dihapus)
+              kalau suatu saat card ini perlu ditampilkan kembali.
+            -->
           </div>
 
           <div class="pengaturan-col">
@@ -1033,7 +1142,7 @@ function kodeDokumen(jenis) {
     </div>
     </TabPanel>
 
-    <TabPanel value="rekap">
+    <TabPanel v-if="auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi" value="rekap">
     <div class="card">
       <div class="rekap-toolbar">
         <DatePicker v-model="periodDate" view="month" dateFormat="MM yy" showIcon style="width: 180px" />
@@ -1139,7 +1248,7 @@ function kodeDokumen(jenis) {
     </div>
     </TabPanel>
 
-    <TabPanel value="surat">
+    <TabPanel v-if="auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi" value="surat">
     <div class="card">
       <h3 style="margin-top: 0">Input Surat Kolektif (BA / Surat Tugas / Surat Izin / SKS)</h3>
       <p class="text-muted">
@@ -1201,17 +1310,16 @@ function kodeDokumen(jenis) {
           <label class="field-label">Jenis Surat</label>
           <Select
             v-model="kolektifForm.jenis"
-            :options="[
-              { label: 'Surat Tugas (DD)', value: 'surat_tugas' },
-              { label: 'Berita Acara (DD)', value: 'berita_acara' },
-              { label: 'Surat Izin (I)', value: 'surat_izin' },
-              { label: 'SKS -- Surat Keterangan Sakit (S)', value: 'sks' },
-            ]"
+            :options="jenisSuratOptions"
             optionLabel="label"
             optionValue="value"
             placeholder="Pilih jenis surat"
+            filter
             style="width: 100%"
           />
+          <small v-if="jenisSuratOptions.length === 0" style="color: var(--p-text-muted-color)">
+            Belum ada Jenis Surat -- tambahkan dulu di menu Master Data -&gt; Jenis Surat.
+          </small>
         </div>
         <div>
           <label class="field-label">Berkas (PDF/JPG/PNG)</label>
@@ -1280,6 +1388,52 @@ function kodeDokumen(jenis) {
           </template>
         </Column>
         <template #empty>Belum ada surat yang diinput pada bulan ini.</template>
+      </DataTable>
+    </div>
+    </TabPanel>
+
+    <TabPanel v-if="auth.isAdministrator || auth.isAdminVerifikasi" value="verifikasi-sekolah">
+    <div class="card">
+      <h3 style="margin-top: 0">Verifikasi Pengajuan Surat Kolektif Sekolah</h3>
+      <p class="text-muted">
+        Pengajuan surat kolektif yang diajukan MANDIRI oleh pegawai bertugas di sekolah untuk tanggal absen yang
+        terlewat. Setujui untuk membuat absen pegawai otomatis berubah jadi bersurat, atau kembalikan untuk direvisi
+        (wajib isi catatan).
+      </p>
+      <div class="entries-picker">
+        <span class="entries-picker-label">Status</span>
+        <Select v-model="verifikasiStatusFilter" :options="verifikasiStatusOptions" optionLabel="label" optionValue="value" />
+      </div>
+      <DataTable :value="verifikasiList" :loading="loadingVerifikasi" size="small" stripedRows responsiveLayout="scroll">
+        <Column header="Pegawai">
+          <template #body="{ data }">{{ data.pegawai?.nama }}</template>
+        </Column>
+        <Column header="Tanggal">
+          <template #body="{ data }">{{ data.tanggal_list.map(formatTanggal).join(', ') }}</template>
+        </Column>
+        <Column field="label" header="Jenis Surat" />
+        <Column field="keterangan" header="Keterangan" />
+        <Column header="Status">
+          <template #body="{ data }">
+            <Tag
+              :severity="data.status === 'disetujui' ? 'success' : data.status === 'dikembalikan' ? 'danger' : 'warn'"
+              :value="data.status === 'disetujui' ? 'Disetujui' : data.status === 'dikembalikan' ? 'Dikembalikan' : 'Menunggu'"
+            />
+          </template>
+        </Column>
+        <Column v-if="verifikasiStatusFilter !== 'menunggu'" header="Catatan Verifikasi">
+          <template #body="{ data }">{{ data.catatan_verifikasi || '-' }}</template>
+        </Column>
+        <Column header="Aksi">
+          <template #body="{ data }">
+            <Button icon="pi pi-download" size="small" text rounded title="Unduh berkas" @click="downloadVerifikasiFile(data)" />
+            <template v-if="data.status === 'menunggu'">
+              <Button icon="pi pi-check" size="small" text rounded severity="success" title="Setujui" @click="confirmSetujuiVerifikasi(data)" />
+              <Button icon="pi pi-undo" size="small" text rounded severity="danger" title="Kembalikan untuk direvisi" @click="bukaKembalikanDialog(data)" />
+            </template>
+          </template>
+        </Column>
+        <template #empty>Tidak ada pengajuan pada status ini.</template>
       </DataTable>
     </div>
     </TabPanel>
@@ -1432,6 +1586,27 @@ function kodeDokumen(jenis) {
       @hide="closeFotoDialog"
     >
       <img v-if="fotoDialogUrl" :src="fotoDialogUrl" style="width: 100%; border-radius: 8px" alt="Foto absen" />
+    </Dialog>
+
+    <!-- ================= dialog kembalikan pengajuan surat kolektif sekolah ================= -->
+    <Dialog
+      v-model:visible="kembalikanDialog"
+      modal
+      header="Kembalikan Pengajuan untuk Direvisi"
+      :style="{ width: '440px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeKembalikanDialog"
+    >
+      <p class="text-muted">
+        Pengajuan dari <b>{{ kembalikanItem?.pegawai?.nama }}</b> akan dikembalikan ke pegawai untuk direvisi &amp;
+        diajukan ulang. Jelaskan apa yang perlu diperbaiki.
+      </p>
+      <div class="field-label">Catatan (wajib)</div>
+      <Textarea v-model="kembalikanCatatan" rows="3" style="width: 100%" autofocus />
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="closeKembalikanDialog" />
+        <Button label="Kembalikan" icon="pi pi-undo" severity="danger" :loading="submittingKembalikan" @click="submitKembalikan" />
+      </template>
     </Dialog>
   </div>
 </template>

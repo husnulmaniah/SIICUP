@@ -30,10 +30,12 @@ const routes = [
       { path: 'absen', name: 'absen', component: AbsensiView, meta: { roles: ['pegawai'] } },
       // Rekap Absen: bisa diakses administrator/admin (lewat meta.roles di
       // bawah) ATAU akun mana pun yang dicentang "Admin Absensi" (flag
-      // is_admin_absensi, lihat stores/auth.js) -- pengecekan flag ini
-      // ditambahkan khusus di beforeEach karena meta.roles hanya bisa
-      // mencocokkan role, bukan flag tambahan.
-      { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin'], allowAdminAbsensi: true } },
+      // is_admin_absensi) ATAU "Admin Verifikasi" (flag is_admin_verifikasi,
+      // dipakai tab verifikasi Pengajuan Surat Kolektif sekolah -- lihat
+      // stores/auth.js) -- pengecekan flag ini ditambahkan khusus di
+      // beforeEach karena meta.roles hanya bisa mencocokkan role, bukan flag
+      // tambahan.
+      { path: 'rekap-absen', name: 'rekap-absen', component: RekapAbsensiView, meta: { roles: ['administrator', 'admin'], allowAdminAbsensi: true, allowAdminVerifikasi: true } },
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'pengajuan-pensiun', name: 'pengajuan-pensiun', component: PengajuanPensiunView, meta: { roles: ['administrator', 'admin'] } },
     ],
@@ -63,8 +65,11 @@ router.beforeEach((to) => {
   }
   if (to.meta.roles && !to.meta.roles.includes(auth.role)) {
     // izinkan lewat kalau rute ini membolehkan akun ber-flag Admin Absensi
-    // (lihat meta.allowAdminAbsensi pada rute 'rekap-absen' di atas).
-    if (!(to.meta.allowAdminAbsensi && auth.isAdminAbsensi)) {
+    // dan/atau Admin Verifikasi (lihat meta.allowAdminAbsensi/
+    // allowAdminVerifikasi pada rute 'rekap-absen' di atas).
+    const lewatFlag =
+      (to.meta.allowAdminAbsensi && auth.isAdminAbsensi) || (to.meta.allowAdminVerifikasi && auth.isAdminVerifikasi)
+    if (!lewatFlag) {
       return { name: 'dashboard' }
     }
   }

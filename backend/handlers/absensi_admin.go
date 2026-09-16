@@ -218,6 +218,7 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 		db.Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", idList, start, limit).Find(&dokumenRows)
 	}
 	holidaySet := holidaySetInRange(db, start, limit)
+	jenisLookup := jenisSuratLookup(db)
 
 	absensiByPegawai := map[uint][]models.Absensi{}
 	hadirSet := map[uint]map[string]bool{}
@@ -288,7 +289,7 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 			if hadirSet[p.ID][d.Tanggal.Format("2006-01-02")] {
 				continue
 			}
-			entry := tercoverEntryFromDokumen(d)
+			entry := tercoverEntryFromDokumen(d, jenisLookup)
 			tercover = append(tercover, entry)
 			switch entry.Kode {
 			case "DD":

@@ -930,8 +930,8 @@ type tanggalTercoverEntry struct {
 	Label   string `json:"label"`
 }
 
-func tercoverEntryFromDokumen(d models.AbsensiDokumen) tanggalTercoverEntry {
-	kode := models.AbsensiDokumenKode[d.Jenis]
+func tercoverEntryFromDokumen(d models.AbsensiDokumen, jenisLookup map[string]models.JenisSurat) tanggalTercoverEntry {
+	kode := kodeUntukJenis(jenisLookup, d.Jenis)
 	return tanggalTercoverEntry{
 		Tanggal: d.Tanggal.Format("2006-01-02"),
 		Jenis:   d.Jenis,
@@ -946,6 +946,15 @@ type riwayatAbsenResponse struct {
 	Absensi         []models.Absensi       `json:"absensi"`
 	TanggalTerlewat []string               `json:"tanggal_terlewat"`
 	TanggalTercover []tanggalTercoverEntry `json:"tanggal_tercover"`
+	// IsSekolah: hasil isSekolahPegawai (sudah memperhitungkan UnitKerja.
+	// TempatKerja sebagai prioritas utama, bukan cuma tebakan teks Tempat
+	// Tugas) -- dikirim di sini karena riwayatAbsenSaya sudah memuat pegawai
+	// + UnitKerja-nya, supaya frontend (AbsensiView.vue) bisa menampilkan
+	// kartu "Ajukan Surat Kolektif" HANYA untuk pegawai sekolah tanpa perlu
+	// menduga-duga sendiri dari data yang mungkin belum lengkap di sisi
+	// klien (lihat auth store yang cuma menyimpan hasil login, belum tentu
+	// memuat UnitKerja pegawai).
+	IsSekolah bool `json:"is_sekolah"`
 }
 
 // riwayatAbsenSaya mengembalikan riwayat absen pegawai yang login untuk satu
@@ -1014,6 +1023,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var dokumen []models.AbsensiDokumen
 	db.Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, limit).
 		Order("tanggal desc").Find(&dokumen)
+	jenisLookup := jenisSuratLookup(db)
 	tercoverSet := map[string]bool{}
 	tercover := []tanggalTercoverEntry{}
 	for _, d := range dokumen {
@@ -1028,7 +1038,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			continue
 		}
 		tercoverSet[key] = true
-		tercover = append(tercover, tercoverEntryFromDokumen(d))
+		tercover = append(tercover, tercoverEntryFromDokumen(d, jenisLookup))
 	}
 
 	sixDayWeek := sixDayWeekForPegawai(pegawai)
@@ -1048,6 +1058,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		Absensi:         rows,
 		TanggalTerlewat: terlewat,
 		TanggalTercover: tercover,
+		IsSekolah:       isSekolahPegawai(pegawai),
 	})
 }
 

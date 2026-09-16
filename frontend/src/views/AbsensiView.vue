@@ -14,8 +14,19 @@ import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import Checkbox from 'primevue/checkbox'
+import MultiSelect from 'primevue/multiselect'
+import Select from 'primevue/select'
+import Textarea from 'primevue/textarea'
 
 const toast = useToast()
+
+// isSekolahSaya: dikirim langsung oleh backend lewat riwayat.is_sekolah
+// (hasil isSekolahPegawai yang sudah memperhitungkan UnitKerja.TempatKerja
+// sebagai prioritas utama -- lihat riwayatAbsenResponse.IsSekolah di
+// handlers/absensi.go) -- dipakai untuk menampilkan/menyembunyikan kartu
+// "Ajukan Surat Kolektif" di bawah, pegawai bertugas DINAS/KANTOR tidak
+// boleh mengajukan sendiri (poin 6 permintaan pengguna).
+const isSekolahSaya = computed(() => !!riwayat.value?.is_sekolah)
 
 // ============================================================
 // pengaturan (aktif/nonaktif & jendela waktu) + riwayat bulanan
@@ -155,6 +166,166 @@ async function loadDokumen() {
 }
 
 // ============================================================
+// Pengajuan Surat Kolektif mandiri (khusus pegawai bertugas di sekolah --
+// lihat isSekolahSaya di atas) untuk tanggal terlewat, lewat
+// handlers/pengajuan_surat_kolektif.go. Menunggu verifikasi administrator/
+// akun Admin Verifikasi sebelum absen benar-benar "berubah" jadi bersurat.
+// ============================================================
+
+const jenisSuratOptions = ref([])
+async function loadJenisSuratOptions() {
+  try {
+    const { data } = await http.get('/ref/jenis-surat')
+    jenisSuratOptions.value = (data.data || []).map((it) => ({ label: `${it.nama} (${it.kode})`, value: it.slug }))
+  } catch {
+    jenisSuratOptions.value = []
+  }
+}
+
+const pengajuanSayaList = ref([])
+async function loadPengajuanSaya() {
+  try {
+    const { data } = await http.get('/pengajuan-surat-kolektif/saya')
+    pengajuanSayaList.value = data.data || []
+  } catch {
+    // tidak kritikal -- daftar cukup dibiarkan kosong kalau gagal
+  }
+}
+
+// opsi tanggal untuk MultiSelect form pengajuan -- daftar tanggal_terlewat
+// bulan yang sedang dilihat, DITAMBAH tanggal milik pengajuan yang sedang
+// diedit (kalau ada, supaya tetap terlihat & bisa dipilih ulang walau
+// pengajuan itu dibuat/berasal dari bulan lain).
+function opsiTanggalUntuk(extraDates) {
+  const set = new Set(riwayat.value.tanggal_terlewat || [])
+  for (const t of extraDates || []) set.add(t)
+  return Array.from(set)
+    .sort()
+    .map((t) => ({ label: formatTanggal(t), value: t }))
+}
+const opsiTanggalKolektif = computed(() => opsiTanggalUntuk(editPengajuanItem.value ? editPengajuanItem.value.tanggal_list : []))
+
+const kolektifSelfForm = ref({ tanggal: [], jenis: null, keterangan: '' })
+const kolektifSelfFile = ref(null)
+const kolektifSelfFileInput = ref(null)
+const submittingKolektifSelf = ref(false)
+function pickKolektifSelfFile() {
+  kolektifSelfFileInput.value?.click()
+}
+function onKolektifSelfFileChosen(e) {
+  kolektifSelfFile.value = e.target.files?.[0] || null
+}
+
+async function submitKolektifSelf() {
+  if (!kolektifSelfForm.value.tanggal.length) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih minimal satu tanggal terlewat', life: 4000 })
+    return
+  }
+  if (!kolektifSelfForm.value.jenis) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih jenis surat', life: 4000 })
+    return
+  }
+  if (!kolektifSelfFile.value) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih berkas surat', life: 4000 })
+    return
+  }
+  submittingKolektifSelf.value = true
+  try {
+    const fd = new FormData()
+    for (const t of kolektifSelfForm.value.tanggal) fd.append('tanggal', t)
+    fd.append('jenis', kolektifSelfForm.value.jenis)
+    fd.append('keterangan', kolektifSelfForm.value.keterangan || '')
+    fd.append('file', kolektifSelfFile.value)
+    const { data } = await http.post('/pengajuan-surat-kolektif', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    kolektifSelfForm.value = { tanggal: [], jenis: null, keterangan: '' }
+    kolektifSelfFile.value = null
+    await Promise.all([loadPengajuanSaya(), loadRiwayat()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 7000 })
+  } finally {
+    submittingKolektifSelf.value = false
+  }
+}
+
+// dialog edit & ajukan ulang -- hanya untuk pengajuan berstatus "dikembalikan"
+const editPengajuanDialog = ref(false)
+const editPengajuanItem = ref(null)
+const editPengajuanForm = ref({ tanggal: [], jenis: null, keterangan: '' })
+const editPengajuanFile = ref(null)
+const editPengajuanFileInput = ref(null)
+const submittingEditPengajuan = ref(false)
+
+function bukaEditPengajuan(item) {
+  editPengajuanItem.value = item
+  editPengajuanForm.value = { tanggal: [...item.tanggal_list], jenis: item.jenis, keterangan: item.keterangan || '' }
+  editPengajuanFile.value = null
+  editPengajuanDialog.value = true
+}
+function pickEditPengajuanFile() {
+  editPengajuanFileInput.value?.click()
+}
+function onEditPengajuanFileChosen(e) {
+  editPengajuanFile.value = e.target.files?.[0] || null
+}
+function closeEditPengajuan() {
+  editPengajuanDialog.value = false
+  editPengajuanItem.value = null
+}
+
+async function submitEditPengajuan() {
+  if (!editPengajuanForm.value.tanggal.length || !editPengajuanForm.value.jenis) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih tanggal & jenis surat', life: 4000 })
+    return
+  }
+  submittingEditPengajuan.value = true
+  try {
+    const fd = new FormData()
+    for (const t of editPengajuanForm.value.tanggal) fd.append('tanggal', t)
+    fd.append('jenis', editPengajuanForm.value.jenis)
+    fd.append('keterangan', editPengajuanForm.value.keterangan || '')
+    if (editPengajuanFile.value) fd.append('file', editPengajuanFile.value)
+    const { data } = await http.put(`/pengajuan-surat-kolektif/${editPengajuanItem.value.id}`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    closeEditPengajuan()
+    await Promise.all([loadPengajuanSaya(), loadRiwayat()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 7000 })
+  } finally {
+    submittingEditPengajuan.value = false
+  }
+}
+
+async function downloadPengajuanFile(item) {
+  try {
+    const res = await http.get(`/pengajuan-surat-kolektif/${item.id}/file`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = item.nama_file || 'surat'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
+function statusPengajuanSeverity(status) {
+  if (status === 'disetujui') return 'success'
+  if (status === 'dikembalikan') return 'danger'
+  return 'warn'
+}
+function statusPengajuanLabel(status) {
+  if (status === 'disetujui') return 'Disetujui'
+  if (status === 'dikembalikan') return 'Dikembalikan (perlu revisi)'
+  return 'Menunggu Verifikasi'
+}
+
+// ============================================================
 // thumbnail foto absen (ditampilkan langsung di tabel riwayat)
 // ============================================================
 
@@ -209,7 +380,7 @@ watch(periodDate, () => loadRiwayat())
 
 onMounted(async () => {
   await loadPengaturan()
-  await Promise.all([loadRiwayat(), loadDokumen(), loadStatusHariIni()])
+  await Promise.all([loadRiwayat(), loadDokumen(), loadStatusHariIni(), loadJenisSuratOptions(), loadPengajuanSaya()])
 })
 
 function formatTanggal(key) {
@@ -875,6 +1046,90 @@ async function downloadDokumen(item) {
         </div>
       </div>
 
+      <div v-if="isSekolahSaya" class="section">
+        <h3>Ajukan Surat Kolektif</h3>
+        <Message severity="info" :closable="false">
+          Khusus pegawai bertugas di sekolah: ajukan surat (Surat Tugas/Berita Acara/Surat Izin/SKS/dst) untuk
+          beberapa tanggal terlewat sekaligus. Pengajuan menunggu persetujuan administrator/admin verifikasi --
+          absen Anda baru berubah jadi bersurat setelah disetujui.
+        </Message>
+        <div class="kolektif-self-form">
+          <div class="field">
+            <label>Tanggal Terlewat</label>
+            <MultiSelect
+              v-model="kolektifSelfForm.tanggal"
+              :options="opsiTanggalKolektif"
+              optionLabel="label"
+              optionValue="value"
+              placeholder="Pilih satu atau beberapa tanggal"
+              display="chip"
+              style="width: 100%"
+            />
+            <small v-if="!opsiTanggalKolektif.length" class="text-muted">Tidak ada tanggal terlewat pada bulan yang sedang dilihat.</small>
+          </div>
+          <div class="field">
+            <label>Jenis Surat</label>
+            <Select
+              v-model="kolektifSelfForm.jenis"
+              :options="jenisSuratOptions"
+              optionLabel="label"
+              optionValue="value"
+              placeholder="Pilih jenis surat"
+              filter
+              style="width: 100%"
+            />
+          </div>
+          <div class="field">
+            <label>Berkas (PDF/JPG/PNG)</label>
+            <input ref="kolektifSelfFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onKolektifSelfFileChosen" />
+            <Button
+              :label="kolektifSelfFile ? kolektifSelfFile.name : 'Pilih Berkas'"
+              icon="pi pi-file"
+              severity="secondary"
+              outlined
+              @click="pickKolektifSelfFile"
+            />
+          </div>
+          <div class="field">
+            <label>Keterangan (opsional)</label>
+            <Textarea v-model="kolektifSelfForm.keterangan" rows="2" style="width: 100%" />
+          </div>
+          <Button label="Ajukan" icon="pi pi-send" :loading="submittingKolektifSelf" @click="submitKolektifSelf" />
+        </div>
+
+        <div v-if="pengajuanSayaList.length" class="pengajuan-saya-list">
+          <h4>Pengajuan Saya</h4>
+          <DataTable :value="pengajuanSayaList" size="small" stripedRows responsiveLayout="scroll">
+            <Column header="Tanggal">
+              <template #body="{ data }">{{ data.tanggal_list.map(formatTanggal).join(', ') }}</template>
+            </Column>
+            <Column field="label" header="Jenis Surat" />
+            <Column header="Status">
+              <template #body="{ data }">
+                <Tag :severity="statusPengajuanSeverity(data.status)" :value="statusPengajuanLabel(data.status)" />
+              </template>
+            </Column>
+            <Column header="Catatan Verifikasi">
+              <template #body="{ data }">{{ data.catatan_verifikasi || '-' }}</template>
+            </Column>
+            <Column header="Aksi">
+              <template #body="{ data }">
+                <Button icon="pi pi-download" size="small" text rounded title="Unduh berkas" @click="downloadPengajuanFile(data)" />
+                <Button
+                  v-if="data.status === 'dikembalikan'"
+                  icon="pi pi-pencil"
+                  size="small"
+                  text
+                  rounded
+                  title="Edit & ajukan ulang"
+                  @click="bukaEditPengajuan(data)"
+                />
+              </template>
+            </Column>
+          </DataTable>
+        </div>
+      </div>
+
       <div v-if="dokumenList.length" class="section">
         <h3>Surat Pendukung (Diinput Administrator)</h3>
         <p class="text-muted">Surat berikut diinput oleh administrator/admin untuk melengkapi tanggal absen Anda.</p>
@@ -976,6 +1231,63 @@ async function downloadDokumen(item) {
       @hide="closeFotoDialog"
     >
       <img v-if="fotoDialogUrl" :src="fotoDialogUrl" style="width: 100%; border-radius: 8px" alt="Foto absen" />
+    </Dialog>
+
+    <!-- ================= dialog edit & ajukan ulang pengajuan surat kolektif ================= -->
+    <Dialog
+      v-model:visible="editPengajuanDialog"
+      modal
+      header="Edit &amp; Ajukan Ulang"
+      :style="{ width: '480px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeEditPengajuan"
+    >
+      <Message v-if="editPengajuanItem?.catatan_verifikasi" severity="warn" :closable="false" style="margin-bottom: 1rem">
+        Catatan dari verifikator: {{ editPengajuanItem.catatan_verifikasi }}
+      </Message>
+      <div class="field">
+        <label>Tanggal Terlewat</label>
+        <MultiSelect
+          v-model="editPengajuanForm.tanggal"
+          :options="opsiTanggalKolektif"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Pilih satu atau beberapa tanggal"
+          display="chip"
+          style="width: 100%"
+        />
+      </div>
+      <div class="field">
+        <label>Jenis Surat</label>
+        <Select
+          v-model="editPengajuanForm.jenis"
+          :options="jenisSuratOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Pilih jenis surat"
+          filter
+          style="width: 100%"
+        />
+      </div>
+      <div class="field">
+        <label>Berkas Baru (opsional -- kosongkan untuk memakai berkas lama)</label>
+        <input ref="editPengajuanFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onEditPengajuanFileChosen" />
+        <Button
+          :label="editPengajuanFile ? editPengajuanFile.name : editPengajuanItem?.nama_file || 'Pilih Berkas'"
+          icon="pi pi-file"
+          severity="secondary"
+          outlined
+          @click="pickEditPengajuanFile"
+        />
+      </div>
+      <div class="field">
+        <label>Keterangan (opsional)</label>
+        <Textarea v-model="editPengajuanForm.keterangan" rows="2" style="width: 100%" />
+      </div>
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="closeEditPengajuan" />
+        <Button label="Ajukan Ulang" icon="pi pi-send" :loading="submittingEditPengajuan" @click="submitEditPengajuan" />
+      </template>
     </Dialog>
   </div>
 </template>
@@ -1157,6 +1469,19 @@ async function downloadDokumen(item) {
   font-weight: 600;
   margin-bottom: 0.3rem;
   color: #374151;
+}
+.kolektif-self-form {
+  max-width: 480px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-top: 0.75rem;
+}
+.pengajuan-saya-list {
+  margin-top: 1.5rem;
+}
+.pengajuan-saya-list h4 {
+  margin: 0 0 0.5rem;
 }
 
 /* ---------- tampilan HP ---------- */

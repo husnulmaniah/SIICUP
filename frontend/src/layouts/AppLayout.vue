@@ -119,10 +119,13 @@ const navSections = computed(() => {
 
   if (auth.canManageMaster) {
     sections.push({ header: null, items: [{ label: 'Rekap Absen', icon: 'pi pi-camera', to: '/rekap-absen' }] })
-  } else if (auth.isAdminAbsensi) {
-    // Akun (pegawai/atasan) yang dicentang "Admin Absensi" tetap punya semua
-    // menu normalnya (Dashboard, Pengajuan Cuti, Absen, Profil Saya, dst.)
-    // dan HANYA mendapat tambahan 1 menu ini -- bukan akun terpisah.
+  } else if (auth.isAdminAbsensi || auth.isAdminVerifikasi) {
+    // Akun (pegawai/atasan) yang dicentang "Admin Absensi" dan/atau "Admin
+    // Verifikasi" tetap punya semua menu normalnya (Dashboard, Pengajuan
+    // Cuti, Absen, Profil Saya, dst.) dan HANYA mendapat tambahan 1 menu ini
+    // -- bukan akun terpisah. Kalau hanya Admin Verifikasi (tanpa Admin
+    // Absensi), menu tetap dibuka tapi isinya cuma tab verifikasi Pengajuan
+    // Surat Kolektif sekolah (lihat v-if per tab di RekapAbsensiView.vue).
     sections.push({ header: null, items: [{ label: 'Input Rekapan Absensi', icon: 'pi pi-camera', to: '/rekap-absen' }] })
   }
 
@@ -155,6 +158,7 @@ const navSections = computed(() => {
               { label: 'Golongan', icon: 'pi pi-hashtag', to: '/master/golongan' },
               { label: 'Pangkat / Golongan', icon: 'pi pi-th-large', to: '/master/pangkat-gol' },
               { label: 'Jenis Cuti', icon: 'pi pi-book', to: '/master/jenis-cuti' },
+              { label: 'Jenis Surat', icon: 'pi pi-file-edit', to: '/master/jenis-surat' },
               { label: 'Pola Hari Kerja', icon: 'pi pi-clock', to: '/master/pola-hari-kerja' },
             ]
           : []),

@@ -19,6 +19,11 @@ export const useAuthStore = defineStore('auth', {
     // Pengajuan Cuti, Absen, dst.) dan HANYA mendapat tambahan 1 menu "Input
     // Rekapan Absensi" (lihat layouts/AppLayout.vue & router/index.js).
     isAdminAbsensi: (state) => !!state.user?.is_admin_absensi,
+    // isAdminVerifikasi: sama pola dengan isAdminAbsensi di atas & independen
+    // darinya -- akun dengan ini boleh memverifikasi (menyetujui/
+    // mengembalikan) Pengajuan Surat Kolektif pegawai sekolah, terlepas dari
+    // role/isAdminAbsensi-nya.
+    isAdminVerifikasi: (state) => !!state.user?.is_admin_verifikasi,
     canManageMaster: (state) => ['administrator', 'admin'].includes(state.user?.role),
   },
 

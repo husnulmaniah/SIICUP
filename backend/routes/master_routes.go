@@ -358,6 +358,47 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 		},
 	}, "administrator")
 
+	// ---- jenis_surat ---- (jenis surat kolektif: Surat Tugas/Berita Acara/
+	// Surat Izin/SKS bawaan + jenis tambahan yang dibuat administrator lewat
+	// menu Master Data -> Jenis Surat. Slug dipakai sebagai nilai dropdown
+	// "jenis" di form Surat Kolektif -- lihat handlers/absensi_dokumen.go &
+	// frontend RekapAbsensiView.vue.)
+	handlers.RegisterCrud(mux, db, "/api/jenis-surat", handlers.CrudConfig[models.JenisSurat]{
+		FileBaseName: "jenis_surat",
+		SearchFields: []string{"nama", "slug"},
+		BeforeSave: func(item *models.JenisSurat) error {
+			item.Slug = strings.ToLower(strings.TrimSpace(item.Slug))
+			item.Slug = strings.ReplaceAll(item.Slug, " ", "_")
+			item.Nama = strings.TrimSpace(item.Nama)
+			item.Kode = strings.ToUpper(strings.TrimSpace(item.Kode))
+			if item.Slug == "" || item.Nama == "" {
+				return fmt.Errorf("slug dan nama jenis surat wajib diisi")
+			}
+			if item.Kode != "DD" && item.Kode != "I" && item.Kode != "S" {
+				return fmt.Errorf("kode harus salah satu dari: DD (Dinas Dalam), I (Izin), S (Sakit)")
+			}
+			return nil
+		},
+		Columns: []utils.ExcelColumn{
+			{Header: "Slug (kode unik, huruf kecil, tanpa spasi)", Required: true, Example: "surat_dinas_luar",
+				Get: func(i interface{}) string { return i.(models.JenisSurat).Slug },
+				Set: func(i interface{}, raw string) error { i.(*models.JenisSurat).Slug = raw; return nil }},
+			{Header: "Nama Jenis Surat", Required: true, Example: "Surat Dinas Luar",
+				Get: func(i interface{}) string { return i.(models.JenisSurat).Nama },
+				Set: func(i interface{}, raw string) error { i.(*models.JenisSurat).Nama = raw; return nil }},
+			{Header: "Kode (DD/I/S)", Required: true, Example: "DD",
+				Get: func(i interface{}) string { return i.(models.JenisSurat).Kode },
+				Set: func(i interface{}, raw string) error {
+					raw = strings.ToUpper(strings.TrimSpace(raw))
+					if raw != "DD" && raw != "I" && raw != "S" {
+						return fmt.Errorf("kode harus salah satu dari: DD, I, S")
+					}
+					i.(*models.JenisSurat).Kode = raw
+					return nil
+				}},
+		},
+	}, "administrator")
+
 	// ---- pola_hari_kerja ----
 	handlers.RegisterCrud(mux, db, "/api/pola-hari-kerja", handlers.CrudConfig[models.PolaHariKerja]{
 		FileBaseName: "pola_hari_kerja",

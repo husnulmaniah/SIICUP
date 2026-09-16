@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ============================================================
 // MASTER DATA TABLES (simple lookup tables)
@@ -257,6 +260,16 @@ type User struct {
 	// sendiri lewat akun yang sama (tidak perlu akun terpisah). Lihat
 	// RegisterAbsensiRoutes (absensi.go) & utils.Claims.IsAdminAbsensi.
 	IsAdminAbsensi bool `json:"is_admin_absensi" gorm:"column:is_admin_absensi;default:false"`
+	// IsAdminVerifikasi menandai akun (role apa pun, sama pola dengan
+	// IsAdminAbsensi di atas & independen darinya) sebagai tambahan boleh
+	// memverifikasi (menyetujui/mengembalikan) Pengajuan Surat Kolektif yang
+	// diajukan sendiri oleh pegawai sekolah (lihat
+	// handlers/pengajuan_surat_kolektif.go). Kalau IsAdminAbsensi & ini
+	// SAMA-SAMA dicentang pada satu akun, pegawai itu bisa menginput Surat
+	// Kolektif dinas (lewat IsAdminAbsensi) SEKALIGUS memverifikasi
+	// pengajuan surat kolektif sekolah (lewat ini) -- dua kewenangan yang
+	// tetap terpisah, hanya kebetulan dipegang orang yang sama.
+	IsAdminVerifikasi bool `json:"is_admin_verifikasi" gorm:"column:is_admin_verifikasi;default:false"`
 	// Aktif: false berarti akun ini TERTUTUP -- tidak bisa login (lihat
 	// LoginHandler) dan setiap request API dari akun ini langsung ditolak
 	// (lihat middleware.RequireActiveUser), walau token JWT-nya masih
@@ -596,6 +609,27 @@ var AbsensiDokumenKodeLabel = map[string]string{
 	"S":  "Sakit",
 }
 
+// JenisSurat adalah master data jenis surat kolektif yang bisa dipilih saat
+// admin/administrator menginput Surat Kolektif (lihat
+// handlers/absensi_dokumen.go) -- dikelola lewat menu Master Data -> Jenis
+// Surat (CRUD generik, administrator only). Slug dipakai sebagai nilai yang
+// tersimpan di AbsensiDokumen.Jenis (harus unik, dipakai juga sebagai "value"
+// dropdown di frontend), Nama adalah label yang tampil di dropdown & rekap,
+// Kode adalah salah satu dari "DD" (Dinas Dalam)/"I" (Izin)/"S" (Sakit) --
+// menentukan bagaimana surat jenis ini dihitung/ditampilkan di rekap & PDF
+// (lihat models.AbsensiDokumenKodeLabel). 4 jenis bawaan (Surat Tugas, Berita
+// Acara, Surat Izin, SKS) di-seed otomatis saat migrasi kalau tabel masih
+// kosong -- slug-nya SENGAJA disamakan dengan konstanta AbsensiDokumen* di
+// atas supaya data lama tetap valid.
+type JenisSurat struct {
+	ID   uint   `json:"id" gorm:"primaryKey"`
+	Slug string `json:"slug" gorm:"column:slug;size:40;not null;uniqueIndex"`
+	Nama string `json:"nama" gorm:"column:nama;size:150;not null"`
+	Kode string `json:"kode" gorm:"column:kode;size:2;not null"`
+}
+
+func (JenisSurat) TableName() string { return "jenis_surat" }
+
 // AbsensiDokumen menyimpan surat yang diupload pegawai untuk tanggal absen
 // yang terlewat (SKS/Surat Tugas/Berita Acara/Surat Izin) -- mengikuti pola
 // file-di-database yang sama dengan PengajuanDokumen.
@@ -613,6 +647,77 @@ type AbsensiDokumen struct {
 }
 
 func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
+
+// PengajuanSuratKolektifStatus adalah 3 status pengajuan surat kolektif
+// mandiri (lihat handlers/pengajuan_surat_kolektif.go) -- mengikuti pola
+// yang sama seperti PengajuanCuti: Menunggu -> Disetujui (baris AbsensiDokumen
+// otomatis dibuat untuk tiap tanggal) atau Menunggu -> Dikembalikan (pegawai
+// bisa mengedit & mengajukan ulang, balik jadi Menunggu lagi).
+const (
+	PengajuanSuratKolektifMenunggu     = "menunggu"
+	PengajuanSuratKolektifDisetujui    = "disetujui"
+	PengajuanSuratKolektifDikembalikan = "dikembalikan"
+)
+
+// PengajuanSuratKolektif menyimpan pengajuan surat kolektif MANDIRI oleh
+// pegawai bertugas di SEKOLAH (pegawai dinas/kantor TIDAK boleh mengajukan
+// sendiri lewat sini -- lihat pembatasan isSekolahPegawai di
+// buatPengajuanSuratKolektif) untuk menutup beberapa tanggal absen yang
+// terlewat sekaligus, dengan 1 jenis surat & 1 berkas untuk semua tanggal
+// yang dipilih -- meniru bentuk inputAbsensiDokumenKolektif (menu Rekap
+// Absen) tapi diajukan sendiri oleh pegawai & butuh persetujuan administrator
+// atau akun IsAdminVerifikasi sebelum baris AbsensiDokumen sungguhan dibuat.
+//
+//   - TanggalListRaw: daftar tanggal (format "YYYY-MM-DD") yang diajukan,
+//     disimpan sebagai teks JSON (mis. ["2026-09-01","2026-09-02"]) --
+//     mengikuti pola TempatTugasAllowed dkk pada PengaturanAbsensi. Diparsing
+//     lewat TanggalList()/diisi lewat SetTanggalList() di bawah; endpoint API
+//     mengekspos daftar tanggal ini lewat DTO terpisah (bukan field ini
+//     langsung, makanya json:"-").
+//   - Status: menunggu/disetujui/dikembalikan (lihat konstanta di atas).
+//   - IDVerifikator/Verifikator/DiverifikasiAt: siapa & kapan pengajuan ini
+//     disetujui/dikembalikan (administrator atau akun IsAdminVerifikasi).
+//   - CatatanVerifikasi: wajib diisi verifikator saat mengembalikan (supaya
+//     pegawai tahu apa yang perlu diperbaiki), opsional saat menyetujui.
+type PengajuanSuratKolektif struct {
+	ID                uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai         uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
+	Pegawai           *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	TanggalListRaw    string     `json:"-" gorm:"column:tanggal_list;type:text;not null"`
+	Jenis             string     `json:"jenis" gorm:"column:jenis;size:40;not null"`
+	Label             string     `json:"label" gorm:"column:label;size:150"`
+	NamaFile          string     `json:"nama_file" gorm:"column:nama_file;size:255"`
+	File              []byte     `json:"-" gorm:"column:file;type:bytea"`
+	Keterangan        string     `json:"keterangan" gorm:"column:keterangan;size:255"`
+	Status            string     `json:"status" gorm:"column:status;size:20;not null;default:'menunggu';index"`
+	CatatanVerifikasi string     `json:"catatan_verifikasi" gorm:"column:catatan_verifikasi;size:255"`
+	IDVerifikator     *uint      `json:"id_verifikator" gorm:"column:id_verifikator"`
+	Verifikator       *User      `json:"verifikator,omitempty" gorm:"foreignKey:IDVerifikator;references:ID"`
+	DiverifikasiAt    *time.Time `json:"diverifikasi_at" gorm:"column:diverifikasi_at"`
+	CreatedAt         time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt         time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (PengajuanSuratKolektif) TableName() string { return "pengajuan_surat_kolektif" }
+
+// TanggalList mengurai TanggalListRaw (teks JSON) jadi slice string
+// "YYYY-MM-DD". Dipakai handler untuk validasi & ditampilkan ke frontend
+// lewat DTO, dan untuk membuat baris AbsensiDokumen saat disetujui.
+func (p PengajuanSuratKolektif) TanggalList() []string {
+	var out []string
+	if p.TanggalListRaw == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(p.TanggalListRaw), &out)
+	return out
+}
+
+// SetTanggalList menyimpan slice tanggal "YYYY-MM-DD" ke TanggalListRaw
+// sebagai teks JSON.
+func (p *PengajuanSuratKolektif) SetTanggalList(tanggal []string) {
+	b, _ := json.Marshal(tanggal)
+	p.TanggalListRaw = string(b)
+}
 
 // PengaturanAbsensi menyimpan pengaturan menu Absen -- selalu ada tepat satu
 // baris (ID = 1), mengikuti pola PengaturanSurat. Jam disimpan sebagai teks

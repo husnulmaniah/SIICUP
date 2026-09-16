@@ -28,6 +28,7 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 	handlers.RegisterPengajuanPensiunRoutes(mux, db)
 	handlers.RegisterPengaturanKenaikanGajiBerkalaRoutes(mux, db)
 	handlers.RegisterAbsensiRoutes(mux, db)
+	handlers.RegisterPengajuanSuratKolektifRoutes(mux, db)
 	handlers.RegisterNotifikasiRoutes(mux, db)
 
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
