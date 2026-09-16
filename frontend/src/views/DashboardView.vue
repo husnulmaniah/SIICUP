@@ -24,6 +24,15 @@ function formatDate(v) {
   return d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+const NAMA_BULAN = [
+  '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+]
+function namaBulanTahun(statistik) {
+  if (!statistik) return ''
+  return `${NAMA_BULAN[statistik.bulan] || ''} ${statistik.tahun}`
+}
+
 onMounted(async () => {
   try {
     const { data: res } = await http.get('/dashboard')
@@ -105,6 +114,32 @@ onMounted(async () => {
           <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.sisa }}</div><div class="stat-label">Sisa Cuti</div></div>
           <div class="stat-card" style="border-color: #0d9488"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Menunggu Persetujuan</div></div>
         </div>
+
+        <div v-if="data.statistik_absensi" class="card">
+          <h3 style="margin-top: 0">Statistik Absensi &mdash; {{ namaBulanTahun(data.statistik_absensi) }}</h3>
+          <p class="page-subtitle" style="margin-top: -0.5rem">
+            Dari {{ data.statistik_absensi.total_hari_kerja }} hari kerja bulan ini (Sabtu-Minggu untuk pegawai dinas, atau hanya Minggu untuk pegawai sekolah, & tanggal merah tidak dihitung)
+          </p>
+          <div class="stat-grid stat-grid-absensi">
+            <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.statistik_absensi.hadir }}</div><div class="stat-label">Hadir</div></div>
+            <div class="stat-card" style="border-color: #f97316"><div class="stat-value">{{ data.statistik_absensi.sakit }}</div><div class="stat-label">Sakit</div></div>
+            <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.statistik_absensi.izin }}</div><div class="stat-label">Izin</div></div>
+            <div class="stat-card" style="border-color: #0ea5e9"><div class="stat-value">{{ data.statistik_absensi.cuti }}</div><div class="stat-label">Cuti</div></div>
+            <div class="stat-card" style="border-color: #a855f7"><div class="stat-value">{{ data.statistik_absensi.cuti_melahirkan }}</div><div class="stat-label">Cuti Melahirkan</div></div>
+            <div class="stat-card" style="border-color: #d97706"><div class="stat-value">{{ data.statistik_absensi.tidak_absen_pulang }}</div><div class="stat-label">Hadir tapi Tidak Absen Pulang</div></div>
+            <div class="stat-card" style="border-color: #ef4444"><div class="stat-value">{{ data.statistik_absensi.tidak_melakukan_absensi }}</div><div class="stat-label">Tidak Melakukan Absensi</div></div>
+            <div
+              v-for="(jumlah, kode) in data.statistik_absensi.lainnya || {}"
+              :key="kode"
+              class="stat-card"
+              style="border-color: #64748b"
+            >
+              <div class="stat-value">{{ jumlah }}</div>
+              <div class="stat-label">{{ kode }}</div>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <h3 style="margin-top: 0">Riwayat Pengajuan Cuti Saya</h3>
           <div class="responsive-table-wrap">
@@ -143,5 +178,16 @@ onMounted(async () => {
   .dashboard-logo {
     height: 42px;
   }
+}
+
+.stat-grid-absensi {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-bottom: 0;
+}
+.stat-grid-absensi .stat-card {
+  padding: 0.85rem 1rem;
+}
+.stat-grid-absensi .stat-value {
+  font-size: 1.4rem;
 }
 </style>

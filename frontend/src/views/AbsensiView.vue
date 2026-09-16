@@ -1193,7 +1193,10 @@ async function downloadDokumen(item) {
           <div v-if="!capturedUrl" class="video-wrap">
             <video ref="videoEl" autoplay playsinline muted class="camera-video"></video>
             <div class="camera-overlay">
-              <span v-if="!blink.faceDetected.value">Arahkan wajah ke kamera...</span>
+              <span v-if="!blink.faceDetected.value && blink.lowLight.value">
+                Wajah belum terdeteksi -- cahaya kurang terang, coba hadapkan wajah ke sumber cahaya atau nyalakan lampu
+              </span>
+              <span v-else-if="!blink.faceDetected.value">Arahkan wajah ke kamera...</span>
               <span v-else-if="!blink.blinkDetected.value">Wajah terdeteksi -- berkedip untuk mengambil foto otomatis</span>
             </div>
           </div>

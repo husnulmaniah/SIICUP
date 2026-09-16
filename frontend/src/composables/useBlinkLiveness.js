@@ -77,12 +77,40 @@ function loadModels() {
   return modelsLoadPromise
 }
 
+// -- Deteksi wajah tahan cahaya redup --
+// Laporan pegawai: kedipan mata HAMPIR SELALU tidak terdeteksi saat absen
+// PULANG (berbeda dengan absen masuk yang biasanya lancar). Akar masalahnya
+// bukan di perhitungan EAR/kedipan di atas, tapi SEBELUM itu: deteksi wajah
+// oleh TinyFaceDetector sendiri gagal (faceDetected tidak pernah true) pada
+// kondisi cahaya yang lebih redup/backlit yang umum terjadi sore/malam hari
+// saat pulang -- kalau wajah tidak pernah terdeteksi, EAR tidak pernah bisa
+// dihitung sama sekali, jadi kedipan juga tidak akan pernah terdeteksi,
+// berapa pun bagus & jelasnya pegawai benar-benar berkedip.
+//
+// Dua perbaikan di sini menyasar akar masalah itu (bukan cuma menurunkan
+// ambang EAR yang sudah adaptif di atas):
+// 1. Setiap frame digambar dulu ke <canvas> tersembunyi dengan filter
+//    kecerahan/kontras SEBELUM dideteksi (bukan langsung dari <video>) --
+//    teknik umum untuk membantu deteksi wajah pada gambar under-exposed.
+//    Kecerahan makin dinaikkan bertahap kalau wajah belum juga terdeteksi.
+// 2. scoreThreshold TinyFaceDetector juga ikut diturunkan bertahap kalau
+//    wajah belum terdeteksi cukup lama, supaya deteksi lebih "toleran" pada
+//    kondisi sulit tanpa mengorbankan akurasi saat cahaya sudah cukup
+//    (tahap 0 = pengaturan normal, tidak berubah sama sekali).
+const NO_FACE_STAGE_MS = [0, 1000, 3000] // mulai tahap 1 setelah 1s, tahap 2 setelah 3s
+const STAGE_BRIGHTNESS = [1, 1.35, 1.75]
+const STAGE_SCORE_THRESHOLD = [0.4, 0.3, 0.2]
+
 export function useBlinkLiveness() {
   const modelsReady = ref(false)
   const modelsError = ref('')
   const faceDetected = ref(false)
   const blinkDetected = ref(false)
   const currentEar = ref(null)
+  // lowLight: true kalau wajah belum terdeteksi cukup lama (tahap >= 1) --
+  // dipakai AbsensiView.vue untuk menyarankan pegawai pindah ke tempat yang
+  // lebih terang, bukan cuma diam menunggu tanpa penjelasan.
+  const lowLight = ref(false)
 
   let intervalId = null
   let videoEl = null
@@ -95,6 +123,9 @@ export function useBlinkLiveness() {
   // (lebih sering terjadi di cahaya redup) tidak salah terbaca sebagai
   // kedipan atau, sebaliknya, menutupi kedipan yang sesungguhnya.
   let prevRawEar = null
+  let lastFaceAt = Date.now()
+  let workCanvas = null
+  let workCtx = null
 
   async function init() {
     if (modelsReady.value) return
@@ -111,28 +142,61 @@ export function useBlinkLiveness() {
     blinkDetected.value = false
     faceDetected.value = false
     currentEar.value = null
+    lowLight.value = false
     wasClosed = false
     closedSince = 0
     baselineEar = null
     prevRawEar = null
+    lastFaceAt = Date.now()
+  }
+
+  // ensureWorkCanvas menyiapkan <canvas> kerja seukuran frame video saat ini
+  // (dibuat sekali, dipakai ulang tiap tick -- resize otomatis kalau ukuran
+  // video berubah, mis. baru selesai load metadata).
+  function ensureWorkCanvas(video) {
+    const w = video.videoWidth || 320
+    const h = video.videoHeight || 240
+    if (!workCanvas) {
+      workCanvas = document.createElement('canvas')
+      workCtx = workCanvas.getContext('2d')
+    }
+    if (workCanvas.width !== w || workCanvas.height !== h) {
+      workCanvas.width = w
+      workCanvas.height = h
+    }
+    return workCanvas
   }
 
   async function tick() {
     if (ticking || !videoEl || videoEl.readyState < 2) return
     ticking = true
     try {
-      // inputSize 320 (naik dari 224) & scoreThreshold sedikit diturunkan
-      // supaya wajah tetap terdeteksi pada kondisi cahaya lebih redup (mis.
-      // absen pulang sore/malam hari) -- masih cukup cepat untuk sampling
-      // tiap 200ms pada HP kelas menengah.
+      const noFaceMs = Date.now() - lastFaceAt
+      const stage = noFaceMs >= NO_FACE_STAGE_MS[2] ? 2 : noFaceMs >= NO_FACE_STAGE_MS[1] ? 1 : 0
+      lowLight.value = stage >= 1
+
+      // gambar frame ke canvas kerja dulu (opsional filter kecerahan/kontras
+      // kalau sedang di tahap toleransi cahaya redup) -- dideteksi dari
+      // canvas ini, bukan langsung dari elemen <video>.
+      const canvas = ensureWorkCanvas(videoEl)
+      workCtx.filter = stage > 0 ? `brightness(${STAGE_BRIGHTNESS[stage]}) contrast(1.1)` : 'none'
+      workCtx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)
+
+      // inputSize 320 (naik dari 224) & scoreThreshold diturunkan bertahap
+      // kalau wajah belum terdeteksi cukup lama -- supaya wajah tetap
+      // terdeteksi pada kondisi cahaya lebih redup (mis. absen pulang sore/
+      // malam hari) tanpa mengorbankan akurasi saat cahaya sudah cukup
+      // (tahap 0 dipakai selama wajah masih normal terdeteksi).
       const result = await faceapi
-        .detectSingleFace(videoEl, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
+        .detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: STAGE_SCORE_THRESHOLD[stage] }))
         .withFaceLandmarks(true)
       if (!result) {
         faceDetected.value = false
         currentEar.value = null
         return
       }
+      lastFaceAt = Date.now()
+      lowLight.value = false
       faceDetected.value = true
       const leftEar = eyeAspectRatio(result.landmarks.getLeftEye())
       const rightEar = eyeAspectRatio(result.landmarks.getRightEye())
@@ -193,5 +257,5 @@ export function useBlinkLiveness() {
     videoEl = null
   }
 
-  return { modelsReady, modelsError, faceDetected, blinkDetected, currentEar, init, start, stop, reset }
+  return { modelsReady, modelsError, faceDetected, blinkDetected, currentEar, lowLight, init, start, stop, reset }
 }
