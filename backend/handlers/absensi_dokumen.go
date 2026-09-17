@@ -349,8 +349,13 @@ func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	if idStr := strings.TrimSpace(r.URL.Query().Get("id_pegawai")); idStr != "" {
 		query = query.Where("id_pegawai = ?", idStr)
 	}
+	// Diurutkan berdasarkan PENGINPUTAN paling baru (updated_at, lihat komentar
+	// UpdatedAt pada models.AbsensiDokumen) -- BUKAN tanggal absennya sendiri --
+	// supaya surat yang baru saja diinput/diedit selalu tampil paling atas,
+	// baik itu diinput administrator/admin/admin absen langsung lewat menu
+	// ini, maupun lewat pengajuan mandiri pegawai sekolah yang baru disetujui.
 	items := []models.AbsensiDokumen{}
-	if err := query.Order("tanggal desc").Find(&items).Error; err != nil {
+	if err := query.Order("updated_at desc").Find(&items).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data")
 		return
 	}

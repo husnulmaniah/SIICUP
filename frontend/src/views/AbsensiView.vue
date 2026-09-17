@@ -4,6 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import http from '../api/http'
 import { toApiDate } from '../utils/date'
 import { useBlinkLiveness } from '../composables/useBlinkLiveness'
+import { KETERANGAN_SURAT_DROPDOWN, KETERANGAN_LAINNYA, pisahkanKeterangan, gabungkanKeterangan } from '../composables/keteranganSurat'
 
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -216,6 +217,16 @@ function onKolektifSelfFileChosen(e) {
   kolektifSelfFile.value = e.target.files?.[0] || null
 }
 
+// Keterangan sekarang dropdown (lihat composables/keteranganSurat.js) --
+// kolektifSelfForm.keterangan tetap dipakai (ini yang benar-benar dikirim
+// ke server), tapi nilainya diturunkan dari 2 ref terpisah ini: pilihan
+// dropdown, dan teks bebas kalau pilihan = "Lainnya".
+const kolektifSelfKeteranganPilihan = ref(null)
+const kolektifSelfKeteranganLainnya = ref('')
+watch([kolektifSelfKeteranganPilihan, kolektifSelfKeteranganLainnya], () => {
+  kolektifSelfForm.value.keterangan = gabungkanKeterangan(kolektifSelfKeteranganPilihan.value, kolektifSelfKeteranganLainnya.value)
+})
+
 async function submitKolektifSelf() {
   if (!kolektifSelfForm.value.tanggal.length) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih minimal satu tanggal terlewat', life: 4000 })
@@ -239,6 +250,8 @@ async function submitKolektifSelf() {
     const { data } = await http.post('/pengajuan-surat-kolektif', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
     kolektifSelfForm.value = { tanggal: [], jenis: null, keterangan: '' }
+    kolektifSelfKeteranganPilihan.value = null
+    kolektifSelfKeteranganLainnya.value = ''
     kolektifSelfFile.value = null
     await Promise.all([loadPengajuanSaya(), loadRiwayat()])
   } catch (e) {
@@ -256,9 +269,23 @@ const editPengajuanFile = ref(null)
 const editPengajuanFileInput = ref(null)
 const submittingEditPengajuan = ref(false)
 
+// Sama seperti kolektifSelfKeteranganPilihan/Lainnya di atas -- lihat
+// composables/keteranganSurat.js. bukaEditPengajuan menentukan pilihan awal
+// dari teks keterangan yang sudah tersimpan (pisahkanKeterangan), termasuk
+// untuk pengajuan lama yang keterangannya masih teks bebas dari sebelum
+// dropdown ini ada -- otomatis jatuh ke "Lainnya" supaya teksnya tidak hilang.
+const editPengajuanKeteranganPilihan = ref(null)
+const editPengajuanKeteranganLainnya = ref('')
+watch([editPengajuanKeteranganPilihan, editPengajuanKeteranganLainnya], () => {
+  editPengajuanForm.value.keterangan = gabungkanKeterangan(editPengajuanKeteranganPilihan.value, editPengajuanKeteranganLainnya.value)
+})
+
 function bukaEditPengajuan(item) {
   editPengajuanItem.value = item
   editPengajuanForm.value = { tanggal: [...item.tanggal_list], jenis: item.jenis, keterangan: item.keterangan || '' }
+  const { pilihan, lainnya } = pisahkanKeterangan(item.keterangan)
+  editPengajuanKeteranganPilihan.value = pilihan
+  editPengajuanKeteranganLainnya.value = lainnya
   editPengajuanFile.value = null
   editPengajuanDialog.value = true
 }
@@ -1115,7 +1142,20 @@ async function downloadDokumen(item) {
           </div>
           <div class="field">
             <label>Keterangan (opsional)</label>
-            <Textarea v-model="kolektifSelfForm.keterangan" rows="2" style="width: 100%" />
+            <Select
+              v-model="kolektifSelfKeteranganPilihan"
+              :options="KETERANGAN_SURAT_DROPDOWN"
+              placeholder="Pilih keterangan"
+              showClear
+              style="width: 100%"
+            />
+            <Textarea
+              v-if="kolektifSelfKeteranganPilihan === KETERANGAN_LAINNYA"
+              v-model="kolektifSelfKeteranganLainnya"
+              rows="2"
+              placeholder="Isi keterangan sesuai surat"
+              style="width: 100%; margin-top: 0.5rem"
+            />
           </div>
           <Button label="Ajukan" icon="pi pi-send" :loading="submittingKolektifSelf" @click="submitKolektifSelf" />
         </div>
@@ -1313,7 +1353,20 @@ async function downloadDokumen(item) {
       </div>
       <div class="field">
         <label>Keterangan (opsional)</label>
-        <Textarea v-model="editPengajuanForm.keterangan" rows="2" style="width: 100%" />
+        <Select
+          v-model="editPengajuanKeteranganPilihan"
+          :options="KETERANGAN_SURAT_DROPDOWN"
+          placeholder="Pilih keterangan"
+          showClear
+          style="width: 100%"
+        />
+        <Textarea
+          v-if="editPengajuanKeteranganPilihan === KETERANGAN_LAINNYA"
+          v-model="editPengajuanKeteranganLainnya"
+          rows="2"
+          placeholder="Isi keterangan sesuai surat"
+          style="width: 100%; margin-top: 0.5rem"
+        />
       </div>
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeEditPengajuan" />

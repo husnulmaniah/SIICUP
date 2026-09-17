@@ -660,6 +660,16 @@ type AbsensiDokumen struct {
 	IDDiinputOleh *uint     `json:"id_diinput_oleh,omitempty" gorm:"column:id_diinput_oleh"`
 	DiinputOleh   *User     `json:"diinput_oleh,omitempty" gorm:"foreignKey:IDDiinputOleh;references:ID"`
 	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
+	// UpdatedAt -- dipakai listAbsensiDokumenAdmin untuk mengurutkan tabel
+	// "Surat yang Sudah Diinput Bulan Ini" berdasarkan PENGINPUTAN paling
+	// baru (bukan tanggal absennya) -- GORM otomatis mengisi ini baik saat
+	// baris baru dibuat (Create) maupun saat baris yang sudah ada ditimpa
+	// ulang (Save), lewat inputAbsensiDokumenKolektif ATAUPUN lewat
+	// setujuiPengajuanSuratKolektif (pengajuan mandiri pegawai sekolah yang
+	// disetujui) -- jadi urutannya konsisten apa pun jalur & siapa yang
+	// menginput (administrator/admin/admin absen langsung, atau verifikator
+	// yang menyetujui pengajuan pegawai sekolah).
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }

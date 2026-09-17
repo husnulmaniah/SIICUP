@@ -4,6 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 import { toApiDate } from '../utils/date'
+import { KETERANGAN_SURAT_DROPDOWN, KETERANGAN_LAINNYA, gabungkanKeterangan } from '../composables/keteranganSurat'
 import { useAuthStore } from '../stores/auth'
 
 import Button from 'primevue/button'
@@ -735,6 +736,17 @@ const kolektifFile = ref(null)
 const kolektifFileInput = ref(null)
 const submittingKolektif = ref(false)
 
+// Keterangan sekarang dropdown (lihat composables/keteranganSurat.js) --
+// kolektifForm.keterangan tetap dipakai (ini yang benar-benar dikirim ke
+// server), nilainya diturunkan dari 2 ref terpisah: pilihan dropdown, dan
+// teks bebas kalau pilihan = "Lainnya". Sama persis dengan pola yang dipakai
+// AbsensiView.vue untuk "Ajukan Surat Kolektif" & dialog edit-nya.
+const kolektifKeteranganPilihan = ref(null)
+const kolektifKeteranganLainnya = ref('')
+watch([kolektifKeteranganPilihan, kolektifKeteranganLainnya], () => {
+  kolektifForm.keterangan = gabungkanKeterangan(kolektifKeteranganPilihan.value, kolektifKeteranganLainnya.value)
+})
+
 // pegawai yang sedang dipilih (di filter rekap maupun di form kolektif)
 // diingat labelnya supaya tetap tampil walau daftar opsi berganti karena
 // pencarian baru -- lihat komentar pada loadPegawaiOptions.
@@ -802,6 +814,8 @@ async function submitKolektif() {
     kolektifForm.id_pegawai = []
     kolektifForm.jenis = null
     kolektifForm.keterangan = ''
+    kolektifKeteranganPilihan.value = null
+    kolektifKeteranganLainnya.value = ''
     kolektifFile.value = null
     // kembalikan daftar pegawai ke keadaan awal (tanpa kata kunci pencarian)
     await Promise.all([loadRekap(), loadDokumenAdmin(), loadPegawaiOptions()])
@@ -1439,7 +1453,20 @@ const defaultTab = computed(() => {
 
         <div class="kolektif-span">
           <label class="field-label">Keterangan (opsional)</label>
-          <Textarea v-model="kolektifForm.keterangan" rows="2" style="width: 100%" />
+          <Select
+            v-model="kolektifKeteranganPilihan"
+            :options="KETERANGAN_SURAT_DROPDOWN"
+            placeholder="Pilih keterangan"
+            showClear
+            style="width: 100%"
+          />
+          <Textarea
+            v-if="kolektifKeteranganPilihan === KETERANGAN_LAINNYA"
+            v-model="kolektifKeteranganLainnya"
+            rows="2"
+            placeholder="Isi keterangan sesuai surat"
+            style="width: 100%; margin-top: 0.5rem"
+          />
         </div>
 
         <div class="kolektif-span">
