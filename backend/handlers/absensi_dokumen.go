@@ -303,10 +303,41 @@ func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	utils.Success(w, "ok", items)
 }
 
+// absensiDokumenSayaOut adalah bentuk tampil satu baris "Surat Pendukung"
+// pada menu Absen milik pegawai sendiri (AbsensiView.vue) -- field Kode
+// SENGAJA ditambahkan & dihitung ulang di sini (tidak ada di kolom tabel
+// absensi_dokumen), mengikuti pola yang sama dengan tercoverEntryFromDokumen
+// (absensi.go) dan exportRekapAbsensiPegawaiPDF (absensi_pdf.go): Kode & Label
+// selalu diambil LIVE dari master Jenis Surat (menu Master Data -> Jenis
+// Surat) lewat kodeUntukJenis/labelUntukJenis, BUKAN dihardcode di frontend.
+//
+// SEBELUM perbaikan ini, endpoint ini mengembalikan baris models.AbsensiDokumen
+// APA ADANYA (cuma field jenis mentah, tanpa kode) -- AbsensiView.vue lalu
+// mencoba menerka Kode sendiri lewat peta JENIS_KODE yang hardcode cuma 4
+// slug bawaan (sks/surat_tugas/berita_acara/surat_izin). Begitu administrator
+// membuat Jenis Surat baru lewat menu Master Data (mis. slug "dinas_dalam"
+// dengan Label "Dinas Dalam", BUKAN "surat_tugas"/"berita_acara" bawaan),
+// peta hardcode di frontend itu tidak mengenalinya sama sekali -- Jenis Surat
+// tetap tampil benar (field label yang dibekukan saat surat diinput, ikut
+// terkirim apa adanya), tapi Kode selalu kosong karena kuncinya tidak ada di
+// peta tersebut. Sekarang Kode dihitung di backend (satu-satunya tempat yang
+// tahu isi master Jenis Surat terkini) dan dikirim langsung, jadi benar untuk
+// jenis surat apa pun yang dibuat administrator, tidak dibatasi 4 bawaan.
+type absensiDokumenSayaOut struct {
+	ID         uint      `json:"id"`
+	Tanggal    time.Time `json:"tanggal"`
+	Jenis      string    `json:"jenis"`
+	Kode       string    `json:"kode"`
+	Label      string    `json:"label"`
+	NamaFile   string    `json:"nama_file"`
+	Keterangan string    `json:"keterangan"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 func listAbsensiDokumenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	if claims.IDPegawai == nil {
-		utils.Success(w, "ok", []models.AbsensiDokumen{})
+		utils.Success(w, "ok", []absensiDokumenSayaOut{})
 		return
 	}
 	items := []models.AbsensiDokumen{}
@@ -315,7 +346,22 @@ func listAbsensiDokumenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB)
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data")
 		return
 	}
-	utils.Success(w, "ok", items)
+	jenisLookup := jenisSuratLookup(db)
+	out := make([]absensiDokumenSayaOut, 0, len(items))
+	for _, item := range items {
+		kode := kodeUntukJenis(jenisLookup, item.Jenis)
+		out = append(out, absensiDokumenSayaOut{
+			ID:         item.ID,
+			Tanggal:    item.Tanggal,
+			Jenis:      item.Jenis,
+			Kode:       kode,
+			Label:      labelUntukJenis(jenisLookup, item.Jenis, kode),
+			NamaFile:   item.NamaFile,
+			Keterangan: item.Keterangan,
+			CreatedAt:  item.CreatedAt,
+		})
+	}
+	utils.Success(w, "ok", out)
 }
 
 func downloadAbsensiDokumen(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

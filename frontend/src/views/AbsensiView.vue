@@ -39,17 +39,17 @@ const riwayat = ref({ absensi: [], tanggal_terlewat: [], tanggal_tercover: [] })
 const loadingRiwayat = ref(false)
 const dokumenList = ref([])
 
-// jenis dokumen (diinput admin) -> kode singkat yang tampil di riwayat,
-// mengikuti pemetaan yang sama dengan models.AbsensiDokumenKode di backend:
-// Surat Tugas & Berita Acara sama-sama dibaca "DD" (Dinas Dalam).
-const JENIS_KODE = { sks: 'S', surat_tugas: 'DD', berita_acara: 'DD', surat_izin: 'I' }
-const JENIS_KODE_LABEL = { S: 'Sakit', DD: 'Dinas Dalam', I: 'Izin' }
-function kodeDokumen(jenis) {
-  return JENIS_KODE[jenis] || ''
-}
-function labelKodeDokumen(jenis) {
-  return JENIS_KODE_LABEL[kodeDokumen(jenis)] || ''
-}
+// Kode & Label kolom "Surat Pendukung" (data.kode/data.label) SEKARANG
+// dikirim langsung oleh backend (lihat absensiDokumenSayaOut di
+// listAbsensiDokumenSaya, handlers/absensi_dokumen.go), dihitung ulang LIVE
+// dari master Jenis Surat (menu Master Data -> Jenis Surat) -- BUKAN lagi
+// ditebak di sini lewat peta hardcode 4 slug bawaan (sks/surat_tugas/
+// berita_acara/surat_izin). Peta hardcode itu SEBELUMNYA dipakai di sini
+// (kodeDokumen/labelKodeDokumen) dan gagal mengenali Jenis Surat baru yang
+// dibuat administrator sendiri (mis. slug "dinas_dalam") -- Kode-nya selalu
+// tampil kosong walau Jenis Surat/labelnya sendiri tampil benar. Dihapus
+// supaya tidak ada lagi dua sumber kebenaran (backend vs peta lokal di sini)
+// yang bisa saling tidak sinkron.
 
 function dateKey(iso) {
   return (iso || '').slice(0, 10)
@@ -1163,7 +1163,7 @@ async function downloadDokumen(item) {
           <Column field="label" header="Jenis Surat" />
           <Column header="Kode">
             <template #body="{ data }">
-              <Tag :value="kodeDokumen(data.jenis)" :title="labelKodeDokumen(data.jenis)" />
+              <Tag :value="data.kode" :title="data.label" />
             </template>
           </Column>
           <Column field="keterangan" header="Keterangan" />

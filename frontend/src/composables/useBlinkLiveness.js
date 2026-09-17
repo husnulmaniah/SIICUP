@@ -6,7 +6,7 @@ import * as faceapi from '@vladmandic/face-api'
 // absen hanya diambil otomatis begitu terdeteksi mata pegawai berkedip
 // (bukan sekadar foto diam/statis).
 //
-// Cara kerja: setiap ~200ms mengambil satu frame dari elemen <video>, lewat
+// Cara kerja: setiap ~150ms mengambil satu frame dari elemen <video>, lewat
 // face-api.js (fork @vladmandic/face-api yang model weight-nya dibundle
 // langsung di public/models -- lihat models yang di-load lewat loadFromUri)
 // mendeteksi wajah + 68 titik landmark, menghitung Eye Aspect Ratio (EAR)
@@ -37,7 +37,19 @@ import * as faceapi from '@vladmandic/face-api'
 // Dengan begitu ambang batas otomatis menyesuaikan diri ke wajah & kondisi
 // cahaya pegawai yang sedang absen saat itu.
 const EAR_OPEN_RATIO = 0.85
-const EAR_CLOSED_RATIO = 0.72
+// EAR_CLOSED_RATIO diturunkan dari 0.72 -> 0.80 (lihat "-- Kedipan pegawai
+// berkacamata --" di bawah): pegawai yang memakai kacamata (termasuk
+// kacamata bening/minus, bukan cuma kacamata hitam) sering PENURUNAN EAR
+// saat berkedip jauh lebih TIPIS daripada mata telanjang -- frame kacamata
+// & pantulan lensa mengganggu landmark 68 titik di sekitar mata, jadi
+// walaupun matanya benar-benar menutup, titik landmark yang terdeteksi
+// tidak turun sejauh biasanya. Ambang 0.72 (harus turun ke 72% baseline)
+// terlalu ketat untuk kedipan "tipis" seperti itu sehingga tidak pernah
+// tercapai -- dinaikkan ke 0.80 supaya penurunan yang lebih kecil pun masih
+// terhitung sebagai kedipan, tanpa mengorbankan siklus tertutup->terbuka
+// yang tetap disyaratkan di bawah (lihat wasClosed/closedSince) sebagai
+// penyaring noise.
+const EAR_CLOSED_RATIO = 0.8
 // Klem baseline ke rentang EAR mata terbuka yang wajar secara umum, supaya
 // kalau frame pertama kebetulan menangkap mata separuh tertutup/silau,
 // baseline tidak jadi terlalu ekstrem (yang akan membuat blink mustahil
@@ -50,9 +62,16 @@ function clampBaseline(v) {
 }
 
 // Kedipan wajar berlangsung < 400ms, tapi deteksi kita hanya sampling tiap
-// ~200ms jadi kita beri toleransi jendela waktu tertutup->terbuka sampai 1.5s
-// (mencakup jeda antar-sampling + kedipan yang agak lambat).
-const MAX_CLOSED_MS = 1500
+// ~150ms (lihat SAMPLE_INTERVAL_MS) jadi kita beri toleransi jendela waktu
+// tertutup->terbuka sampai 1.8s (mencakup jeda antar-sampling & kedipan yang
+// agak lambat/tersamarkan kacamata).
+const MAX_CLOSED_MS = 1800
+// SAMPLE_INTERVAL_MS: jarak antar pengambilan sampel EAR. SEBELUMNYA 200ms --
+// diturunkan ke 150ms supaya sampel lebih rapat mengejar kedipan yang cepat
+// (kedipan manusia normal cuma ~100-400ms), mengurangi risiko titik
+// terendah kedipan justru jatuh di ANTARA dua sampel dan tidak pernah
+// terekam sama sekali.
+const SAMPLE_INTERVAL_MS = 150
 
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y)
@@ -100,6 +119,34 @@ function loadModels() {
 const NO_FACE_STAGE_MS = [0, 1000, 3000] // mulai tahap 1 setelah 1s, tahap 2 setelah 3s
 const STAGE_BRIGHTNESS = [1, 1.35, 1.75]
 const STAGE_SCORE_THRESHOLD = [0.4, 0.3, 0.2]
+
+// -- Kedipan pegawai berkacamata --
+// Laporan lanjutan (kali ini di dalam ruangan, cahaya cukup, foto jelas --
+// jadi BUKAN kasus cahaya redup di atas): kedipan tetap tidak pernah
+// terdeteksi otomatis sampai pegawai menyerah dan menekan "Ambil Foto"
+// manual. Pegawai yang bersangkutan memakai kacamata baca/minus (lensa
+// bening). Wajah terdeteksi dengan baik (foto hasilnya jelas), tapi
+// perhitungan EAR/kedipan di atas tidak pernah menembus ambang tertutup.
+//
+// Dua faktor yang digabung di sini menjelaskannya:
+// 1. Frame & pantulan lensa kacamata membuat landmark 68 titik di sekitar
+//    mata kurang presisi mengikuti kelopak mata yang sesungguhnya --
+//    penurunan EAR saat berkedip jadi jauh lebih TIPIS daripada mata
+//    telanjang, walau kedipannya sendiri sama jelasnya dari mata biasa.
+//    (Sudah disesuaikan lewat EAR_CLOSED_RATIO 0.72 -> 0.80 di atas.)
+// 2. Kedipan manusia hanya berlangsung 100-400ms. Sampling tiap 200ms
+//    (versi sebelumnya) berisiko titik terendah kedipan jatuh tepat di
+//    ANTARA dua sampel sehingga tidak pernah terekam sama sekali --
+//    ditambah smoothing rata-rata 2 sampel (lihat tick() di bawah) yang
+//    justru bisa "meratakan" penurunan singkat itu, meredam sinyal yang
+//    sudah tipis akibat kacamata di poin 1 sampai tidak terdeteksi sama
+//    sekali. Sekarang sampling dipercepat ke 150ms (SAMPLE_INTERVAL_MS)
+//    DAN nilai EAR yang dipakai untuk memeriksa "apakah baru menutup"
+//    memakai nilai MINIMUM dari sampel saat ini & sebelumnya (bukan
+//    rata-rata) -- supaya penurunan singkat tetap tertangkap penuh,
+//    sementara pemeriksaan "sudah terbuka lagi" (mengonfirmasi siklus
+//    kedipan selesai, bukan cuma noise) tetap memakai nilai rata-rata yang
+//    lebih stabil, sama seperti sebelumnya.
 
 export function useBlinkLiveness() {
   const modelsReady = ref(false)
@@ -201,9 +248,20 @@ export function useBlinkLiveness() {
       const leftEar = eyeAspectRatio(result.landmarks.getLeftEye())
       const rightEar = eyeAspectRatio(result.landmarks.getRightEye())
       const rawEar = (leftEar + rightEar) / 2
-      // smoothing 2-sampel supaya noise per-frame tidak memicu/menutupi
-      // kedipan secara keliru.
+      // smoothing 2-sampel (rata-rata) dipakai untuk BASELINE & tampilan EAR
+      // saat ini -- supaya noise per-frame tidak ikut menggeser baseline
+      // "mata terbuka" secara keliru. TIDAK dipakai lagi untuk memeriksa
+      // "apakah baru menutup" (lihat earUntukTertutup di bawah & komentar
+      // "-- Kedipan pegawai berkacamata --" di atas) karena rata-rata bisa
+      // meratakan/meredam penurunan singkat yang sudah tipis akibat
+      // kacamata, sampai tidak pernah menembus ambang tertutup sama sekali.
       const ear = prevRawEar == null ? rawEar : (rawEar + prevRawEar) / 2
+      // earUntukTertutup: nilai MINIMUM dari sampel saat ini & sebelumnya --
+      // begitu salah satu dari dua sampel terakhir menangkap mata sedang
+      // menutup (walau sampel yang lain kebetulan menangkap sesaat sebelum/
+      // sesudahnya saat masih agak terbuka), penurunannya tetap terekam
+      // penuh, tidak "diratakan" ke atas oleh sampel tetangganya.
+      const earUntukTertutup = prevRawEar == null ? rawEar : Math.min(rawEar, prevRawEar)
       prevRawEar = rawEar
       currentEar.value = ear
 
@@ -218,7 +276,7 @@ export function useBlinkLiveness() {
       const openThreshold = baselineEar * EAR_OPEN_RATIO
       const closedThreshold = baselineEar * EAR_CLOSED_RATIO
 
-      if (ear <= closedThreshold) {
+      if (earUntukTertutup <= closedThreshold) {
         if (!wasClosed) {
           wasClosed = true
           closedSince = now
@@ -248,7 +306,7 @@ export function useBlinkLiveness() {
     videoEl = video
     reset()
     if (intervalId) clearInterval(intervalId)
-    intervalId = setInterval(tick, 200)
+    intervalId = setInterval(tick, SAMPLE_INTERVAL_MS)
   }
 
   function stop() {
