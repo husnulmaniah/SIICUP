@@ -621,6 +621,13 @@ function serializeForm() {
       continue
     }
     let v = form[f.field]
+    // Trim field teks sebelum dikirim -- supaya "DD " atau " " (cuma
+    // spasi) tidak tersimpan apa adanya (lihat komentar validasi wajib-isi
+    // di saveForm() untuk kasus nyata yang melatarbelakangi ini: kolom Kode
+    // pada master Jenis Surat tersimpan cuma berisi spasi).
+    if (f.type === 'text' && typeof v === 'string') {
+      v = v.trim()
+    }
     if (f.type === 'date' && v instanceof Date) {
       v = toApiDate(v)
     }
@@ -660,9 +667,20 @@ function hapusJamKerja(f) {
 }
 
 async function saveForm() {
+  // Trim dulu SEBELUM membandingkan dengan '' -- versi sebelumnya lolos
+  // untuk input yang cuma berisi spasi (mis. mengetik " " lalu tanpa
+  // sengaja tidak menghapusnya lagi), karena " " !== "" secara literal.
+  // Field wajib jadi tetap bisa "tersimpan kosong secara efektif" tanpa
+  // pernah kena validasi -- ditemukan lewat kasus nyata: kolom "Kode" pada
+  // master Jenis Surat tersimpan cuma berisi spasi, membuat Kode tampil
+  // kosong di rekap/riwayat absen (Tag tanpa isi) tanpa ada error apa pun
+  // saat disimpan admin. Hanya diterapkan untuk field bertipe teks/angka
+  // (string/number) -- field lain (select/date/dst.) nilainya bukan string
+  // yang perlu ditrim, dibiarkan seperti semula.
   const missing = (props.config.formFields || []).filter((f) => {
     if (!f.required && !(f.requiredOnCreate && !isEditing.value)) return false
     const v = form[f.field]
+    if (typeof v === 'string') return v.trim() === ''
     return v === '' || v === null || v === undefined
   })
   if (missing.length) {

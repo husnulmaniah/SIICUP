@@ -32,10 +32,6 @@ const toast = useToast()
 const confirm = useConfirm()
 const auth = useAuthStore()
 
-// jenis dokumen -> kode singkat, mengikuti models.AbsensiDokumenKode di
-// backend (Surat Tugas & Berita Acara sama-sama dibaca DD/Dinas Dalam).
-const JENIS_KODE = { sks: 'S', surat_tugas: 'DD', berita_acara: 'DD', surat_izin: 'I' }
-
 // ============================================================
 // pengaturan (aktif/nonaktif, jendela waktu, siapa yang boleh absen, &
 // titik koordinat kantor)
@@ -160,7 +156,6 @@ const tempatTugasOptions = ref([])
 const jabatanOptions = ref([])
 const kecamatanOptions = ref([])
 const jenisSuratOptions = ref([])
-const jenisSuratKodeMap = ref({})
 // kodeLabelMap: kode (mis. "CT") -> nama jenis surat pertama yang memakainya
 // -- dipakai untuk memberi label yang enak dibaca pada badge "Lainnya" di
 // kolom DD/Izin/Sakit rekap, untuk kode custom di luar DD/I/S bawaan (lihat
@@ -232,7 +227,6 @@ async function loadJenisSuratOptions() {
     const { data } = await http.get('/ref/jenis-surat')
     const items = data.data || []
     jenisSuratOptions.value = items.map((it) => ({ label: `${it.nama} (${it.kode})`, value: it.slug }))
-    jenisSuratKodeMap.value = items.reduce((acc, it) => ({ ...acc, [it.slug]: it.kode }), {})
     // beberapa jenis surat bisa berbagi kode custom yang sama -- ambil nama
     // yang pertama ketemu saja per kode supaya badge "Lainnya" tetap ringkas
     kodeLabelMap.value = items.reduce((acc, it) => (it.kode in acc ? acc : { ...acc, [it.kode]: it.nama }), {})
@@ -862,10 +856,6 @@ function confirmHapusDokumenAdmin(item) {
   })
 }
 
-function kodeDokumen(jenis) {
-  return jenisSuratKodeMap.value[jenis] || JENIS_KODE[jenis] || ''
-}
-
 // ============================================================
 // Verifikasi Pengajuan Surat Kolektif Sekolah (pengajuan MANDIRI pegawai
 // sekolah, lihat handlers/pengajuan_surat_kolektif.go) -- tab ini HANYA
@@ -1425,8 +1415,15 @@ const defaultTab = computed(() => {
           <template #body="{ data }">{{ data.pegawai?.nama }}</template>
         </Column>
         <Column field="label" header="Jenis Surat" />
+        <!-- data.kode dihitung LIVE oleh backend (lihat absensiDokumenAdminOut,
+             handlers/absensi_dokumen.go) -- kalau tetap kosong/"-", berarti
+             master Jenis Surat untuk baris ini memang belum/tidak punya Kode
+             (cek & lengkapi di menu Master Data -> Jenis Surat). -->
         <Column header="Kode">
-          <template #body="{ data }"><Tag :value="kodeDokumen(data.jenis)" /></template>
+          <template #body="{ data }">
+            <Tag v-if="data.kode" :value="data.kode" />
+            <span v-else class="text-muted">-</span>
+          </template>
         </Column>
         <Column field="keterangan" header="Keterangan" />
         <!-- Diinput Oleh: HANYA tampil untuk role administrator -- data.diinput_oleh

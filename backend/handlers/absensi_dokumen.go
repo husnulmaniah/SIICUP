@@ -44,9 +44,21 @@ func jenisSuratLookup(db *gorm.DB) map[string]models.JenisSurat {
 // baris JenisSurat-nya dihapus administrator) tapi masih dipakai baris
 // AbsensiDokumen lama, coba tebak dari peta 4 jenis bawaan supaya data lama
 // tetap tampil benar di rekap/PDF.
+//
+// js.Kode SENGAJA di-trim & dianggap "tidak ada" kalau hasilnya kosong --
+// menyusul kasus nyata: baris master Jenis Surat "Dinas Dalam" tersimpan
+// dengan Kode cuma berisi whitespace (mis. satu spasi, entah salah ketik
+// atau lolos dari validasi wajib-isi versi lama di form Master Data ->
+// Jenis Surat -- lihat perbaikan saveForm() di CrudManager.vue), sehingga
+// Kode tampil sebagai Tag kosong tanpa terdeteksi ada isinya sama sekali
+// (whitespace bukan string kosong secara literal). Tanpa trim di sini,
+// kode " " akan lolos begitu saja tanpa jatuh ke fallback peta bawaan di
+// bawah, padahal secara efektif tetap tidak berguna.
 func kodeUntukJenis(lookup map[string]models.JenisSurat, jenis string) string {
 	if js, ok := lookup[jenis]; ok {
-		return js.Kode
+		if kode := strings.TrimSpace(js.Kode); kode != "" {
+			return kode
+		}
 	}
 	return models.AbsensiDokumenKode[jenis]
 }
@@ -281,6 +293,24 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	utils.Created(w, pesan, nil)
 }
 
+// absensiDokumenAdminOut membungkus models.AbsensiDokumen APA ADANYA (lewat
+// embedding) ditambah Kode yang dihitung LIVE lewat kodeUntukJenis -- SEBELUM
+// perbaikan ini, kolom "Kode" pada tabel "Surat yang Sudah Diinput" (tab
+// Surat Kolektif, RekapAbsensiView.vue) dihitung sendiri di frontend lewat
+// peta jenisSuratKodeMap (dari /ref/jenis-surat) + fallback hardcode 4 slug
+// bawaan -- terpisah dari logika yang sama persis di AbsensiView.vue (dua
+// sumber kebenaran yang gampang tidak sinkron). Menyusul laporan nyata: baris
+// "Dinas Dalam" tampil Kode kosong (Tag tanpa isi) -- entah karena kolom Kode
+// pada master Jenis Surat "Dinas Dalam" kosong/cuma whitespace, atau slug-nya
+// custom & tak dikenali peta hardcode manapun. Dipindah ke sini (satu-satunya
+// tempat yang sudah dipakai bersama oleh listAbsensiDokumenSaya/riwayat/
+// rekap/PDF -- lihat kodeUntukJenis) supaya SELALU konsisten & satu sumber
+// kebenaran, tidak bergantung pada peta terpisah di tiap file frontend.
+type absensiDokumenAdminOut struct {
+	models.AbsensiDokumen
+	Kode string `json:"kode"`
+}
+
 // listAbsensiDokumenAdmin dipakai administrator/admin/IsAdminAbsensi untuk
 // melihat/mengelola semua surat yang sudah diinput pada satu bulan (opsional
 // filter id_pegawai) -- dipakai di halaman Rekap Absen supaya admin tahu
@@ -321,19 +351,26 @@ func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data")
 		return
 	}
-	if !isAdministrator {
-		// pengaman ganda -- pastikan field ini benar-benar nil (jadi ikut
-		// dihilangkan dari JSON lewat "omitempty") walau suatu saat ada baris
-		// yang preloaded dari jalur lain. IDDiinputOleh (angka mentahnya) ikut
-		// disembunyikan juga, bukan cuma DiinputOleh (objek nama) -- supaya
-		// akun non-administrator tidak bisa menebak siapa penginputnya lewat
-		// ID-nya sendiri (mis. dicocokkan manual ke menu Pengguna).
-		for i := range items {
-			items[i].DiinputOleh = nil
-			items[i].IDDiinputOleh = nil
+	jenisLookup := jenisSuratLookup(db)
+	out := make([]absensiDokumenAdminOut, 0, len(items))
+	for _, item := range items {
+		if !isAdministrator {
+			// pengaman ganda -- pastikan field ini benar-benar nil (jadi ikut
+			// dihilangkan dari JSON lewat "omitempty") walau suatu saat ada
+			// baris yang preloaded dari jalur lain. IDDiinputOleh (angka
+			// mentahnya) ikut disembunyikan juga, bukan cuma DiinputOleh
+			// (objek nama) -- supaya akun non-administrator tidak bisa
+			// menebak siapa penginputnya lewat ID-nya sendiri (mis.
+			// dicocokkan manual ke menu Pengguna).
+			item.DiinputOleh = nil
+			item.IDDiinputOleh = nil
 		}
+		out = append(out, absensiDokumenAdminOut{
+			AbsensiDokumen: item,
+			Kode:           kodeUntukJenis(jenisLookup, item.Jenis),
+		})
 	}
-	utils.Success(w, "ok", items)
+	utils.Success(w, "ok", out)
 }
 
 // absensiDokumenSayaOut adalah bentuk tampil satu baris "Surat Pendukung"

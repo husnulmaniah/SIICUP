@@ -1161,9 +1161,14 @@ async function downloadDokumen(item) {
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
           </Column>
           <Column field="label" header="Jenis Surat" />
+          <!-- data.kode dikirim backend (absensiDokumenSayaOut) -- kalau
+               tetap kosong/"-", master Jenis Surat untuk baris ini belum
+               diberi Kode (administrator perlu melengkapinya di menu Master
+               Data -> Jenis Surat). -->
           <Column header="Kode">
             <template #body="{ data }">
-              <Tag :value="data.kode" :title="data.label" />
+              <Tag v-if="data.kode" :value="data.kode" :title="data.label" />
+              <span v-else class="text-muted">-</span>
             </template>
           </Column>
           <Column field="keterangan" header="Keterangan" />
