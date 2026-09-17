@@ -258,19 +258,44 @@ const toleransiAkurasiMinimum = 30.0
 // bukan malah memvalidasi terhadap titik kantor dinas yang jelas salah
 // lokasi) sampai admin mengisi titik koordinat sekolah itu di menu Unit
 // Kerja.
+//
+// Pesan penolakan (sumberTitik) SENGAJA menyebutkan ID unit kerja & alasan
+// jatuh ke kantor pusat (bukan cuma nama unit kerjanya) -- ditambahkan
+// setelah kasus nyata di lapangan: seorang pegawai sekolah ditolak dengan
+// jarak puluhan kilometer padahal titik koordinat sekolahnya sendiri sudah
+// benar diisi admin. Nama unit kerja saja tidak cukup untuk mendiagnosis
+// kasus seperti itu kalau ternyata ada 2 baris Unit Kerja dengan nama sama
+// persis (data dobel) atau pegawainya ternyata belum tertaut ke Unit Kerja
+// manapun -- dengan ID & alasan eksplisit di pesan, administrator bisa
+// langsung tahu penyebabnya dari screenshot error tanpa perlu investigasi
+// database manual lagi.
 func absensiCekRadius(setting models.PengaturanAbsensi, unitKerja *models.UnitKerja, lat, lng, akurasi *float64) (ok bool, pesan string) {
 	var targetLat, targetLng *float64
 	radius := setting.RadiusMeter
-	sumberTitik := "kantor"
+	sumberTitik := "kantor pusat"
 	switch {
 	case unitKerja != nil && unitKerja.Lat != nil && unitKerja.Lng != nil:
 		targetLat, targetLng = unitKerja.Lat, unitKerja.Lng
 		if unitKerja.RadiusMeter != nil && *unitKerja.RadiusMeter > 0 {
 			radius = *unitKerja.RadiusMeter
 		}
-		sumberTitik = "unit kerja " + unitKerja.Unit
-	case unitKerja == nil || unitKerja.TempatKerja == nil || *unitKerja.TempatKerja != models.TempatKerjaSekolah:
+		// ID unit kerja disertakan (bukan cuma namanya) supaya kalau ada 2
+		// baris Unit Kerja dengan NAMA sama persis (data dobel, mis. dari
+		// import lama), pesan ini tetap bisa dipakai memastikan pegawai
+		// benar-benar terhubung ke baris yang koordinatnya sudah diisi --
+		// dulu pesan ini cuma menyebut nama sehingga kasus seperti itu susah
+		// dibedakan dari sekadar "lupa isi koordinat".
+		sumberTitik = fmt.Sprintf("unit kerja \"%s\" (ID #%d)", unitKerja.Unit, unitKerja.ID)
+	case unitKerja == nil:
+		// Data pegawai yang bersangkutan belum terhubung ke Unit Kerja
+		// manapun (field "Unit Kerja" di Data Pegawai kosong) -- disebutkan
+		// eksplisit di pesan supaya administrator langsung tahu ini soal
+		// data pegawai, bukan soal titik koordinat unit kerjanya sendiri.
 		targetLat, targetLng = setting.KantorLat, setting.KantorLng
+		sumberTitik = "kantor pusat (akun pegawai ini belum terhubung ke Unit Kerja manapun di Data Pegawai)"
+	case unitKerja.TempatKerja == nil || *unitKerja.TempatKerja != models.TempatKerjaSekolah:
+		targetLat, targetLng = setting.KantorLat, setting.KantorLng
+		sumberTitik = fmt.Sprintf("kantor pusat (unit kerja \"%s\" ID #%d belum diberi titik koordinat sendiri & tidak/belum berkategori Sekolah)", unitKerja.Unit, unitKerja.ID)
 	}
 	if targetLat == nil || targetLng == nil {
 		return true, ""
