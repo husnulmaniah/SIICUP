@@ -20,6 +20,8 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Textarea from 'primevue/textarea'
 import MultiSelect from 'primevue/multiselect'
+import IconField from 'primevue/iconfield'
+import InputIcon from 'primevue/inputicon'
 import Tabs from 'primevue/tabs'
 import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
@@ -315,6 +317,27 @@ const loadingRekap = ref(false)
 const entriesOptions = [5, 10, 25, 50, 100]
 const rekapPageSize = ref(10)
 const rekapFirst = ref(0)
+
+// Pencarian bebas (nama/NIP/unit kerja) di tabel Rekap Absen -- dilakukan di
+// BROWSER (bukan ke server) karena /absensi/rekap sudah mengembalikan seluruh
+// pegawai bulan tsb sekaligus (lihat komentar rekapPageSize di atas), beda
+// dengan pencarian pegawai pada dropdown filter (yang memang harus ke server
+// karena daftar pegawai bisa jauh lebih banyak dari batas 500 baris/permintaan
+// endpoint /pegawai).
+const rekapSearch = ref('')
+const rekapFiltered = computed(() => {
+  const q = rekapSearch.value.trim().toLowerCase()
+  if (!q) return rekap.value
+  return rekap.value.filter((item) => {
+    const nama = (item.pegawai?.nama || '').toLowerCase()
+    const nip = (item.pegawai?.nip || '').toLowerCase()
+    const unitKerja = (item.pegawai?.unit_kerja?.unit || '').toLowerCase()
+    return nama.includes(q) || nip.includes(q) || unitKerja.includes(q)
+  })
+})
+watch(rekapSearch, () => {
+  rekapFirst.value = 0
+})
 
 // ------------------------------------------------------------
 // daftar pegawai untuk filter rekap & pilihan pegawai pada input surat
@@ -1168,6 +1191,10 @@ const defaultTab = computed(() => {
           style="min-width: 260px"
           @filter="onPegawaiFilter"
         />
+        <IconField class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
+          <InputText v-model="rekapSearch" placeholder="Cari nama, NIP, atau unit kerja..." style="width: 100%" />
+          <InputIcon class="pi pi-search" />
+        </IconField>
         <Button label="Export Excel" icon="pi pi-file-excel" severity="success" outlined @click="exportExcel" />
       </div>
 
@@ -1177,7 +1204,7 @@ const defaultTab = computed(() => {
       </div>
 
       <DataTable
-        :value="rekap"
+        :value="rekapFiltered"
         :loading="loadingRekap"
         paginator
         :rows="rekapPageSize"
@@ -1188,11 +1215,17 @@ const defaultTab = computed(() => {
         stripedRows
         responsiveLayout="scroll"
       >
+        <Column header="No" style="width: 3rem">
+          <template #body="{ index }">{{ rekapFirst + index + 1 }}</template>
+        </Column>
         <Column header="Nama">
           <template #body="{ data }">{{ data.pegawai?.nama }}</template>
         </Column>
         <Column header="NIP">
           <template #body="{ data }">{{ data.pegawai?.nip }}</template>
+        </Column>
+        <Column header="Unit Kerja">
+          <template #body="{ data }">{{ data.pegawai?.unit_kerja?.unit || '-' }}</template>
         </Column>
         <Column header="Jumlah Hadir">
           <template #body="{ data }">{{ jumlahHadir(data) }}</template>
@@ -1257,7 +1290,7 @@ const defaultTab = computed(() => {
             />
           </template>
         </Column>
-        <template #empty>Tidak ada data pegawai.</template>
+        <template #empty>{{ rekapSearch.trim() ? 'Tidak ada pegawai yang cocok dengan pencarian.' : 'Tidak ada data pegawai.' }}</template>
       </DataTable>
     </div>
     </TabPanel>
