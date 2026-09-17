@@ -186,7 +186,14 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
 		return
 	}
+	// Keterangan sekarang WAJIB diisi (dulu opsional) -- diisi lewat dropdown
+	// pilihan tetap di frontend (lihat composables/keteranganSurat.js), atau
+	// teks bebas kalau pilihan "Lainnya".
 	keterangan := strings.TrimSpace(r.FormValue("keterangan"))
+	if keterangan == "" {
+		utils.Error(w, http.StatusBadRequest, "keterangan wajib diisi")
+		return
+	}
 
 	// Pola hari kerja dihitung PER PEGAWAI dari status dinas/sekolahnya (lihat
 	// sixDayWeekForPegawai/isSekolahPegawai di pengajuan_cuti.go): pegawai

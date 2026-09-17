@@ -800,6 +800,15 @@ async function submitKolektif() {
     toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Pilih minimal satu pegawai, jenis surat, dan berkasnya', life: 4000 })
     return
   }
+  if (!kolektifForm.keterangan.trim()) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Periksa kembali',
+      detail: kolektifKeteranganPilihan.value === KETERANGAN_LAINNYA ? 'Isi keterangan sesuai surat' : 'Pilih keterangan',
+      life: 4000,
+    })
+    return
+  }
   submittingKolektif.value = true
   try {
     const fd = new FormData()
@@ -1452,7 +1461,7 @@ const defaultTab = computed(() => {
         </div>
 
         <div class="kolektif-span">
-          <label class="field-label">Keterangan (opsional)</label>
+          <label class="field-label">Keterangan</label>
           <Select
             v-model="kolektifKeteranganPilihan"
             :options="KETERANGAN_SURAT_DROPDOWN"

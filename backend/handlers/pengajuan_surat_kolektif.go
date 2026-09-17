@@ -202,6 +202,16 @@ func buatPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *gorm
 		return
 	}
 
+	// Keterangan sekarang WAJIB diisi (dulu opsional) -- diisi lewat dropdown
+	// pilihan tetap di frontend (lihat composables/keteranganSurat.js), atau
+	// teks bebas kalau pilihan "Lainnya" -- keduanya sama-sama dikirim lewat
+	// field "keterangan" ini, jadi validasinya cukup satu baris di sini.
+	keterangan := strings.TrimSpace(r.FormValue("keterangan"))
+	if keterangan == "" {
+		utils.Error(w, http.StatusBadRequest, "keterangan wajib diisi")
+		return
+	}
+
 	var invalid []string
 	for _, t := range tanggalList {
 		if ok, reason := tanggalTerlewatValid(db, pegawai, t, 0); !ok {
@@ -248,7 +258,7 @@ func buatPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *gorm
 		Label:      jenisSurat.Nama,
 		NamaFile:   fh.Filename,
 		File:       fileData,
-		Keterangan: strings.TrimSpace(r.FormValue("keterangan")),
+		Keterangan: keterangan,
 		Status:     models.PengajuanSuratKolektifMenunggu,
 	}
 	item.SetTanggalList(tanggalStr)
@@ -312,6 +322,13 @@ func updatePengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *go
 		utils.Error(w, http.StatusBadRequest, "pilih minimal satu tanggal terlewat")
 		return
 	}
+	// Keterangan wajib diisi -- lihat komentar yang sama pada
+	// buatPengajuanSuratKolektif.
+	keterangan := strings.TrimSpace(r.FormValue("keterangan"))
+	if keterangan == "" {
+		utils.Error(w, http.StatusBadRequest, "keterangan wajib diisi")
+		return
+	}
 	var invalid []string
 	for _, t := range tanggalList {
 		if ok, reason := tanggalTerlewatValid(db, pegawai, t, item.ID); !ok {
@@ -352,7 +369,7 @@ func updatePengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *go
 	}
 	item.Jenis = jenisSurat.Slug
 	item.Label = jenisSurat.Nama
-	item.Keterangan = strings.TrimSpace(r.FormValue("keterangan"))
+	item.Keterangan = keterangan
 	item.SetTanggalList(tanggalStr)
 	item.Status = models.PengajuanSuratKolektifMenunggu
 	item.CatatanVerifikasi = ""

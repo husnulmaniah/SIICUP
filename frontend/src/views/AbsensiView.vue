@@ -240,6 +240,15 @@ async function submitKolektifSelf() {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih berkas surat', life: 4000 })
     return
   }
+  if (!kolektifSelfForm.value.keterangan.trim()) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Belum lengkap',
+      detail: kolektifSelfKeteranganPilihan.value === KETERANGAN_LAINNYA ? 'Isi keterangan sesuai surat' : 'Pilih keterangan',
+      life: 4000,
+    })
+    return
+  }
   submittingKolektifSelf.value = true
   try {
     const fd = new FormData()
@@ -303,6 +312,15 @@ function closeEditPengajuan() {
 async function submitEditPengajuan() {
   if (!editPengajuanForm.value.tanggal.length || !editPengajuanForm.value.jenis) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih tanggal & jenis surat', life: 4000 })
+    return
+  }
+  if (!editPengajuanForm.value.keterangan.trim()) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Belum lengkap',
+      detail: editPengajuanKeteranganPilihan.value === KETERANGAN_LAINNYA ? 'Isi keterangan sesuai surat' : 'Pilih keterangan',
+      life: 4000,
+    })
     return
   }
   submittingEditPengajuan.value = true
@@ -1141,7 +1159,7 @@ async function downloadDokumen(item) {
             />
           </div>
           <div class="field">
-            <label>Keterangan (opsional)</label>
+            <label>Keterangan</label>
             <Select
               v-model="kolektifSelfKeteranganPilihan"
               :options="KETERANGAN_SURAT_DROPDOWN"
@@ -1352,7 +1370,7 @@ async function downloadDokumen(item) {
         />
       </div>
       <div class="field">
-        <label>Keterangan (opsional)</label>
+        <label>Keterangan</label>
         <Select
           v-model="editPengajuanKeteranganPilihan"
           :options="KETERANGAN_SURAT_DROPDOWN"
