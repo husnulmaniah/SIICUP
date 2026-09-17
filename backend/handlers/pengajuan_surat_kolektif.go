@@ -386,8 +386,21 @@ func listPengajuanSuratKolektifSaya(w http.ResponseWriter, r *http.Request, db *
 // listPengajuanSuratKolektifAdmin menangani GET /api/pengajuan-surat-kolektif
 // -- daftar SEMUA pengajuan (default hanya "menunggu", ?status=semua untuk
 // semua status) untuk administrator/akun IsAdminVerifikasi memverifikasi.
+//
+// Riwayat "siapa yang memverifikasi" (Verifikator, berisi nama akun) HANYA
+// dikirim kalau requester-nya benar-benar role "administrator" -- akun
+// IsAdminVerifikasi lain yang sama-sama boleh menyetujui/mengembalikan
+// pengajuan lewat tab ini TIDAK ikut melihat siapa (akun mana) yang
+// memverifikasi pengajuan lain, hanya administrator yang bisa audit. Baik
+// field objek (Verifikator) maupun ID mentahnya (IDVerifikator) disembunyikan
+// bersamaan supaya tidak bisa ditebak lewat ID-nya sendiri.
 func listPengajuanSuratKolektifAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
-	query := db.Omit("file").Preload("Pegawai").Preload("Verifikator")
+	claims, _ := middleware.GetClaims(r)
+	isAdministrator := claims != nil && claims.RoleName == "administrator"
+	query := db.Omit("file").Preload("Pegawai")
+	if isAdministrator {
+		query = query.Preload("Verifikator")
+	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	if status != "" && status != "semua" {
 		query = query.Where("status = ?", status)
@@ -398,6 +411,10 @@ func listPengajuanSuratKolektifAdmin(w http.ResponseWriter, r *http.Request, db 
 	query.Order("created_at desc").Find(&items)
 	out := make([]pengajuanSuratKolektifOut, 0, len(items))
 	for _, it := range items {
+		if !isAdministrator {
+			it.Verifikator = nil
+			it.IDVerifikator = nil
+		}
 		out = append(out, toPengajuanSuratKolektifOut(it))
 	}
 	utils.Success(w, "ok", out)

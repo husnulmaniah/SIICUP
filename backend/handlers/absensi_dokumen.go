@@ -91,6 +91,10 @@ func canAccessAbsensiDokumen(claims *utils.Claims, item models.AbsensiDokumen) b
 // Kalau untuk (pegawai, tanggal) tertentu sudah ada dokumen sebelumnya, baris
 // itu DIPERBARUI (bukan dibuat lagi) supaya tidak dobel.
 func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	// claims.UserID dicatat sebagai IDDiinputOleh pada setiap baris yang
+	// dibuat/ditimpa di bawah -- lihat komentar IDDiinputOleh pada
+	// models.AbsensiDokumen untuk alasan & siapa yang boleh melihatnya.
+	claims, _ := middleware.GetClaims(r)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return
@@ -230,6 +234,10 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 			existing.NamaFile = fh.Filename
 			existing.File = fileData
 			existing.Keterangan = keterangan
+			if claims != nil {
+				userID := claims.UserID
+				existing.IDDiinputOleh = &userID
+			}
 			if found {
 				db.Save(&existing)
 			} else {
@@ -273,11 +281,20 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	utils.Created(w, pesan, nil)
 }
 
-// listAbsensiDokumenAdmin dipakai administrator/admin untuk melihat/mengelola
-// semua surat yang sudah diinput pada satu bulan (opsional filter
-// id_pegawai) -- dipakai di halaman Rekap Absen supaya admin tahu surat apa
-// yang sudah ada sebelum menginput lagi, dan bisa menghapusnya bila salah.
+// listAbsensiDokumenAdmin dipakai administrator/admin/IsAdminAbsensi untuk
+// melihat/mengelola semua surat yang sudah diinput pada satu bulan (opsional
+// filter id_pegawai) -- dipakai di halaman Rekap Absen supaya admin tahu
+// surat apa yang sudah ada sebelum menginput lagi, dan bisa menghapusnya
+// bila salah.
+//
+// Riwayat "siapa yang menginput" (DiinputOleh) HANYA di-preload & dikirim
+// kalau requester-nya benar-benar role "administrator" -- lihat komentar
+// IDDiinputOleh pada models.AbsensiDokumen. Akun admin/IsAdminAbsensi lain
+// yang mengakses endpoint yang sama TIDAK ikut menerima field ini sama
+// sekali (bukan cuma disembunyikan di frontend, supaya tidak bisa dilihat
+// juga lewat DevTools/panggilan API langsung).
 func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
 	now := absensiNow()
 	bulan := int(now.Month())
 	tahun := now.Year()
@@ -292,6 +309,10 @@ func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	end := start.AddDate(0, 1, -1)
 
 	query := db.Omit("file").Where("tanggal BETWEEN ? AND ?", start, end).Preload("Pegawai")
+	isAdministrator := claims != nil && claims.RoleName == "administrator"
+	if isAdministrator {
+		query = query.Preload("DiinputOleh")
+	}
 	if idStr := strings.TrimSpace(r.URL.Query().Get("id_pegawai")); idStr != "" {
 		query = query.Where("id_pegawai = ?", idStr)
 	}
@@ -299,6 +320,18 @@ func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	if err := query.Order("tanggal desc").Find(&items).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data")
 		return
+	}
+	if !isAdministrator {
+		// pengaman ganda -- pastikan field ini benar-benar nil (jadi ikut
+		// dihilangkan dari JSON lewat "omitempty") walau suatu saat ada baris
+		// yang preloaded dari jalur lain. IDDiinputOleh (angka mentahnya) ikut
+		// disembunyikan juga, bukan cuma DiinputOleh (objek nama) -- supaya
+		// akun non-administrator tidak bisa menebak siapa penginputnya lewat
+		// ID-nya sendiri (mis. dicocokkan manual ke menu Pengguna).
+		for i := range items {
+			items[i].DiinputOleh = nil
+			items[i].IDDiinputOleh = nil
+		}
 	}
 	utils.Success(w, "ok", items)
 }

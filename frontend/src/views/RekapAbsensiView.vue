@@ -1429,6 +1429,14 @@ const defaultTab = computed(() => {
           <template #body="{ data }"><Tag :value="kodeDokumen(data.jenis)" /></template>
         </Column>
         <Column field="keterangan" header="Keterangan" />
+        <!-- Diinput Oleh: HANYA tampil untuk role administrator -- data.diinput_oleh
+             sendiri memang hanya dikirim backend untuk administrator (lihat
+             listAbsensiDokumenAdmin, handlers/absensi_dokumen.go), v-if di sini
+             cuma lapis tampilan tambahan, bukan satu-satunya pengaman. Baris
+             lama (sebelum kolom id_diinput_oleh ada) tampil "-". -->
+        <Column v-if="auth.isAdministrator" header="Diinput Oleh">
+          <template #body="{ data }">{{ data.diinput_oleh?.nama || '-' }}</template>
+        </Column>
         <Column header="Aksi">
           <template #body="{ data }">
             <Button icon="pi pi-trash" size="small" text rounded severity="danger" title="Hapus" @click="confirmHapusDokumenAdmin(data)" />
@@ -1470,6 +1478,15 @@ const defaultTab = computed(() => {
         </Column>
         <Column v-if="verifikasiStatusFilter !== 'menunggu'" header="Catatan Verifikasi">
           <template #body="{ data }">{{ data.catatan_verifikasi || '-' }}</template>
+        </Column>
+        <!-- Diverifikasi Oleh: HANYA tampil untuk role administrator, sama
+             seperti "Diinput Oleh" pada tab Surat Kolektif di atas --
+             data.verifikator sendiri memang hanya dikirim backend untuk
+             administrator (lihat listPengajuanSuratKolektifAdmin,
+             handlers/pengajuan_surat_kolektif.go). Cuma relevan begitu
+             pengajuan sudah diproses (bukan status "menunggu"). -->
+        <Column v-if="auth.isAdministrator && verifikasiStatusFilter !== 'menunggu'" header="Diverifikasi Oleh">
+          <template #body="{ data }">{{ data.verifikator?.nama || '-' }}</template>
         </Column>
         <Column header="Aksi">
           <template #body="{ data }">

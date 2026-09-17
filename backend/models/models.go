@@ -648,7 +648,18 @@ type AbsensiDokumen struct {
 	NamaFile   string    `json:"nama_file" gorm:"column:nama_file;size:255"`
 	File       []byte    `json:"-" gorm:"column:file;type:bytea"`
 	Keterangan string    `json:"keterangan" gorm:"column:keterangan;size:255"`
-	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime"`
+	// IDDiinputOleh/DiinputOleh: akun (user) yang menekan "Input Surat" lewat
+	// inputAbsensiDokumenKolektif (menu Rekap Absen -> tab "Surat Kolektif").
+	// Baris lama (sebelum kolom ini ada) akan bernilai nil -- ditampilkan
+	// sebagai "-" di frontend, bukan error. Riwayat siapa yang menginput ini
+	// SENGAJA hanya diekspos ke akun ber-role "administrator" (lihat
+	// listAbsensiDokumenAdmin di handlers/absensi_dokumen.go) -- akun admin/
+	// IsAdminAbsensi lain yang sama-sama boleh menginput surat lewat menu ini
+	// TIDAK ikut melihat riwayat ini, supaya bukan sesama admin yang saling
+	// mengawasi, hanya administrator yang bisa audit.
+	IDDiinputOleh *uint     `json:"id_diinput_oleh,omitempty" gorm:"column:id_diinput_oleh"`
+	DiinputOleh   *User     `json:"diinput_oleh,omitempty" gorm:"foreignKey:IDDiinputOleh;references:ID"`
+	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 
 func (AbsensiDokumen) TableName() string { return "absensi_dokumen" }
