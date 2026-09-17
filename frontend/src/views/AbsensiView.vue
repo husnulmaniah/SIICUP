@@ -543,19 +543,31 @@ function getLocationOnce() {
 }
 
 // cekLokasiKantor mencari titik koordinat pegawai lalu memeriksanya terhadap
-// titik koordinat kantor (kalau sudah diatur administrator). Kamera hanya
-// dibuka kalau lolos -- kalau di luar radius atau lokasi tidak terdeteksi
-// (padahal geofence aktif), kamera TIDAK dibuka dan peringatan ditampilkan
-// (lihat locationBlocked di template).
+// titik koordinat ACUAN untuk pegawai yang bersangkutan (titik_lat/titik_lng/
+// titik_radius pada /absensi/pengaturan -- lihat TitikLat pada
+// pengaturanAbsensiOut & resolveGeofenceTarget di backend absensi.go).
+// SEBELUMNYA fungsi ini memakai kantor_lat/kantor_lng (titik kantor pusat
+// TUNGGAL) langsung, tanpa memperhitungkan titik koordinat unit kerja/
+// sekolah pegawai sendiri -- akibatnya pegawai di sekolah yang titik
+// koordinatnya sendiri sudah benar diisi admin tetap ditolak di sini
+// (SEBELUM request sempat dikirim ke backend sama sekali, jadi perbaikan di
+// absensiCekRadius backend tidak pernah kelihatan), karena jaraknya
+// dihitung ke kantor pusat yang jauh. Sekarang memakai titik yang sudah
+// "resolved" oleh backend, sama seperti yang dipakai validasi akhir di
+// server, supaya kedua validasi ini selalu konsisten. Kamera hanya dibuka
+// kalau lolos -- kalau di luar radius atau lokasi tidak terdeteksi (padahal
+// geofence aktif), kamera TIDAK dibuka dan peringatan ditampilkan (lihat
+// locationBlocked di template).
 async function cekLokasiKantor() {
   locationChecking.value = true
   geoStatus.value = 'mencari titik koordinat...'
   const pos = await getLocationOnce()
   locationChecking.value = false
 
-  const kantorLat = pengaturan.value?.kantor_lat
-  const kantorLng = pengaturan.value?.kantor_lng
-  const radius = pengaturan.value?.radius_meter || 20
+  const kantorLat = pengaturan.value?.titik_lat
+  const kantorLng = pengaturan.value?.titik_lng
+  const radius = pengaturan.value?.titik_radius || 20
+  const sumberTitik = pengaturan.value?.titik_sumber || 'kantor'
   const geofenceAktif = kantorLat != null && kantorLng != null
 
   if (!pos) {
@@ -592,7 +604,7 @@ async function cekLokasiKantor() {
   if (jarakEfektif > radius) {
     locationBlocked.value = true
     const infoAkurasi = pos.accuracy > 0 ? ` (akurasi GPS perangkat Anda saat ini sekitar ${Math.round(pos.accuracy)} meter)` : ''
-    locationBlockedMsg.value = `Anda berada di luar radius kantor (jarak sekitar ${Math.round(jarak)} meter, maksimal ${radius} meter dari titik kantor)${infoAkurasi}. Absen tidak dapat dilakukan dari lokasi ini.`
+    locationBlockedMsg.value = `Anda berada di luar radius ${sumberTitik} (jarak sekitar ${Math.round(jarak)} meter, maksimal ${radius} meter dari titik acuan)${infoAkurasi}. Absen tidak dapat dilakukan dari lokasi ini.`
     return false
   }
   return true

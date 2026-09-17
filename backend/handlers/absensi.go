@@ -269,10 +269,17 @@ const toleransiAkurasiMinimum = 30.0
 // manapun -- dengan ID & alasan eksplisit di pesan, administrator bisa
 // langsung tahu penyebabnya dari screenshot error tanpa perlu investigasi
 // database manual lagi.
-func absensiCekRadius(setting models.PengaturanAbsensi, unitKerja *models.UnitKerja, lat, lng, akurasi *float64) (ok bool, pesan string) {
-	var targetLat, targetLng *float64
-	radius := setting.RadiusMeter
-	sumberTitik := "kantor pusat"
+// resolveGeofenceTarget menentukan titik koordinat & radius ACUAN yang
+// berlaku untuk seorang pegawai (dipakai bersama oleh absensiCekRadius di
+// backend DAN getPengaturanAbsensiHandler, yang mengirim titik ini ke
+// AbsensiView.vue supaya validasi pra-kamera di browser memakai titik yang
+// SAMA PERSIS dengan yang dipakai backend -- lihat komentar panjang pada
+// absensiCekRadius untuk urutan prioritasnya). targetLat/targetLng nil
+// berarti geofence belum aktif untuk pegawai ini (absen diperbolehkan tanpa
+// validasi jarak).
+func resolveGeofenceTarget(setting models.PengaturanAbsensi, unitKerja *models.UnitKerja) (targetLat, targetLng *float64, radius int, sumberTitik string) {
+	radius = setting.RadiusMeter
+	sumberTitik = "kantor pusat"
 	switch {
 	case unitKerja != nil && unitKerja.Lat != nil && unitKerja.Lng != nil:
 		targetLat, targetLng = unitKerja.Lat, unitKerja.Lng
@@ -297,11 +304,16 @@ func absensiCekRadius(setting models.PengaturanAbsensi, unitKerja *models.UnitKe
 		targetLat, targetLng = setting.KantorLat, setting.KantorLng
 		sumberTitik = fmt.Sprintf("kantor pusat (unit kerja \"%s\" ID #%d belum diberi titik koordinat sendiri & tidak/belum berkategori Sekolah)", unitKerja.Unit, unitKerja.ID)
 	}
-	if targetLat == nil || targetLng == nil {
-		return true, ""
-	}
 	if radius <= 0 {
 		radius = 20
+	}
+	return targetLat, targetLng, radius, sumberTitik
+}
+
+func absensiCekRadius(setting models.PengaturanAbsensi, unitKerja *models.UnitKerja, lat, lng, akurasi *float64) (ok bool, pesan string) {
+	targetLat, targetLng, radius, sumberTitik := resolveGeofenceTarget(setting, unitKerja)
+	if targetLat == nil || targetLng == nil {
+		return true, ""
 	}
 	if lat == nil || lng == nil {
 		return false, "lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi pada perangkat/browser Anda dan izinkan akses lokasi, lalu coba lagi."
@@ -463,6 +475,26 @@ type pengaturanAbsensiOut struct {
 	KantorLng             *float64 `json:"kantor_lng"`
 	RadiusMeter           int      `json:"radius_meter"`
 	Eligible              bool     `json:"eligible"`
+	// TitikLat/TitikLng/TitikRadius: titik koordinat & radius ACUAN yang
+	// sudah "resolved" khusus untuk pegawai yang login (lihat
+	// resolveGeofenceTarget) -- BUKAN selalu sama dengan KantorLat/KantorLng
+	// di atas, karena pegawai di unit kerja/sekolah yang sudah punya titik
+	// koordinat sendiri harus divalidasi terhadap titik itu, bukan titik
+	// kantor pusat. AbsensiView.vue memakai field TitikLat/TitikLng/
+	// TitikRadius ini (bukan KantorLat/KantorLng/RadiusMeter) untuk validasi
+	// pra-kamera di browser, supaya hasilnya konsisten dengan validasi akhir
+	// di backend (absensiCekRadius) dan tidak lagi menolak pegawai sekolah
+	// yang titik koordinatnya sendiri sudah benar hanya karena jauh dari
+	// kantor pusat. TitikLat/TitikLng nil = geofence belum aktif untuk
+	// pegawai ini (kamera langsung dibuka tanpa validasi jarak). Hanya
+	// terisi kalau request datang dari akun pegawai/atasan yang punya
+	// id_pegawai (lihat getPengaturanAbsensiHandler); untuk role lain
+	// (administrator/admin melihat menu Pengaturan Absen) tetap nil/kosong,
+	// tidak relevan untuk mereka.
+	TitikLat    *float64 `json:"titik_lat"`
+	TitikLng    *float64 `json:"titik_lng"`
+	TitikRadius int      `json:"titik_radius"`
+	TitikSumber string   `json:"titik_sumber"`
 }
 
 func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut {
@@ -586,6 +618,18 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 		var pegawai models.Pegawai
 		if err := db.Preload("UnitKerja").First(&pegawai, *claims.IDPegawai).Error; err == nil {
 			out.Eligible = absensiEligible(item, pegawai)
+			// Titik acuan geofence yang sudah "resolved" khusus untuk pegawai
+			// ini -- lihat komentar TitikLat pada pengaturanAbsensiOut di
+			// atas untuk alasannya (AbsensiView.vue butuh titik yang SAMA
+			// dengan yang dipakai absensiCekRadius, bukan cuma titik kantor
+			// pusat, supaya validasi pra-kamera di browser tidak lagi
+			// menolak pegawai sekolah yang titik koordinat sekolahnya sendiri
+			// sudah benar).
+			tLat, tLng, tRadius, tSumber := resolveGeofenceTarget(item, pegawai.UnitKerja)
+			out.TitikLat = tLat
+			out.TitikLng = tLng
+			out.TitikRadius = tRadius
+			out.TitikSumber = tSumber
 			// Kalau pegawai yang bersangkutan bertugas di sekolah, timpa field
 			// jam_* (tanpa akhiran "_sekolah") dengan jam kerja sekolah supaya
 			// AbsensiView.vue (yang hanya membaca field jam_* biasa) otomatis
