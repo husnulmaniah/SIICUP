@@ -397,7 +397,10 @@ func listPengajuanSuratKolektifSaya(w http.ResponseWriter, r *http.Request, db *
 func listPengajuanSuratKolektifAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	isAdministrator := claims != nil && claims.RoleName == "administrator"
-	query := db.Omit("file").Preload("Pegawai")
+	// Preload("Pegawai.UnitKerja") -- supaya frontend bisa menyaring tabel
+	// Verifikasi lewat kotak pencarian nama/NIP/unit kerja yang sama seperti
+	// tab Rekap Absen/Surat Kolektif.
+	query := db.Omit("file").Preload("Pegawai.UnitKerja")
 	if isAdministrator {
 		query = query.Preload("Verifikator")
 	}
@@ -468,6 +471,21 @@ func setujuiPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *g
 		existing.NamaFile = item.NamaFile
 		existing.File = item.File
 		existing.Keterangan = item.Keterangan
+		// IDDiinputOleh diisi verifikator (claims.UserID) -- baris
+		// AbsensiDokumen di sini justru BARU tercatat/berubah lewat aksi
+		// menyetujui ini, bukan lewat inputAbsensiDokumenKolektif, jadi tanpa
+		// ini baris yang berasal dari pengajuan mandiri pegawai sekolah akan
+		// selalu tampil "Diinput Oleh: -" pada tab "Surat Kolektif" walau
+		// sudah tercatat -- padahal permintaan awal fitur ini eksplisit minta
+		// riwayat penginput di KEDUA menu (Input Surat Kolektif & Verifikasi
+		// Surat Kolektif Sekolah). Ini terpisah dari IDVerifikator pada
+		// PengajuanSuratKolektif itu sendiri (kolom "Diverifikasi Oleh" di
+		// tab Verifikasi) -- sama akunnya, tapi ditampilkan di tab yang
+		// berbeda.
+		if claims != nil {
+			userID := claims.UserID
+			existing.IDDiinputOleh = &userID
+		}
 		if found {
 			db.Save(&existing)
 		} else {

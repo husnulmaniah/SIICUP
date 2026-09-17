@@ -338,7 +338,10 @@ func listAbsensiDokumenAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	start := time.Date(tahun, time.Month(bulan), 1, 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 1, -1)
 
-	query := db.Omit("file").Where("tanggal BETWEEN ? AND ?", start, end).Preload("Pegawai")
+	// Preload("Pegawai.UnitKerja") (bukan cuma "Pegawai") -- supaya frontend
+	// bisa menyaring tabel "Surat yang Sudah Diinput Bulan Ini" lewat kotak
+	// pencarian nama/NIP/unit kerja yang sama seperti tab Rekap Absen.
+	query := db.Omit("file").Where("tanggal BETWEEN ? AND ?", start, end).Preload("Pegawai.UnitKerja")
 	isAdministrator := claims != nil && claims.RoleName == "administrator"
 	if isAdministrator {
 		query = query.Preload("DiinputOleh")

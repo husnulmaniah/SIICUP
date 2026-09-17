@@ -823,6 +823,28 @@ const loadingDokumenAdmin = ref(false)
 const dokumenPageSize = ref(10)
 const dokumenFirst = ref(0)
 
+// Pencarian bebas (nama/NIP/unit kerja) untuk tabel "Surat yang Sudah
+// Diinput Bulan Ini" -- pola & alasannya sama persis dengan rekapSearch/
+// rekapFiltered di atas (BROWSER, bukan ke server, karena satu bulan surat
+// sudah diambil sekaligus). Bulan sendiri TIDAK butuh computed terpisah --
+// dokumenAdminList sudah difilter bulan di SERVER lewat periodDate (lihat
+// watch(periodDate, loadDokumenAdmin) di bawah), jadi di sini cukup
+// menambah lapis pencarian teks di atasnya.
+const dokumenSearch = ref('')
+const dokumenFiltered = computed(() => {
+  const q = dokumenSearch.value.trim().toLowerCase()
+  if (!q) return dokumenAdminList.value
+  return dokumenAdminList.value.filter((item) => {
+    const nama = (item.pegawai?.nama || '').toLowerCase()
+    const nip = (item.pegawai?.nip || '').toLowerCase()
+    const unitKerja = (item.pegawai?.unit_kerja?.unit || '').toLowerCase()
+    return nama.includes(q) || nip.includes(q) || unitKerja.includes(q)
+  })
+})
+watch(dokumenSearch, () => {
+  dokumenFirst.value = 0
+})
+
 async function loadDokumenAdmin() {
   loadingDokumenAdmin.value = true
   try {
@@ -887,6 +909,40 @@ async function loadVerifikasiList() {
   }
 }
 watch(verifikasiStatusFilter, () => loadVerifikasiList())
+
+// Pemilihan bulan & pencarian (nama/NIP/unit kerja) untuk tab Verifikasi --
+// sama seperti tab Rekap Absen/Surat Kolektif, tapi dilakukan di BROWSER
+// (bukan lewat parameter ke server) karena satu pengajuan bisa memuat
+// banyak tanggal (tanggal_list) yang bisa saja melewati lebih dari satu
+// bulan sekaligus -- lebih aman & sederhana dicocokkan di sini daripada
+// lewat query SQL ke kolom teks JSON tanggal_list.
+//
+// Bulan HANYA dipakai untuk menyaring status "Disetujui"/"Dikembalikan"/
+// "Semua" (riwayat) -- SENGAJA tidak ikut membatasi status "Menunggu
+// Verifikasi", supaya pengajuan lama yang belum diproses tidak pernah
+// "hilang" dari pandangan cuma karena bulan yang sedang dipilih berbeda.
+// periodDate dipakai bersama (sinkron) dengan tab Rekap Absen/Surat
+// Kolektif -- ganti bulan di satu tab otomatis ikut di tab lain juga,
+// yang memang wajar karena sama-sama menyatakan "bulan yang sedang dilihat"
+// untuk seluruh halaman ini.
+const verifikasiSearch = ref('')
+const verifikasiFiltered = computed(() => {
+  const q = verifikasiSearch.value.trim().toLowerCase()
+  const bulan = periodDate.value.getMonth() + 1
+  const tahun = periodDate.value.getFullYear()
+  const prefix = `${tahun}-${String(bulan).padStart(2, '0')}`
+  return verifikasiList.value.filter((item) => {
+    if (verifikasiStatusFilter.value !== 'menunggu') {
+      const cocokBulan = (item.tanggal_list || []).some((t) => t.startsWith(prefix))
+      if (!cocokBulan) return false
+    }
+    if (!q) return true
+    const nama = (item.pegawai?.nama || '').toLowerCase()
+    const nip = (item.pegawai?.nip || '').toLowerCase()
+    const unitKerja = (item.pegawai?.unit_kerja?.unit || '').toLowerCase()
+    return nama.includes(q) || nip.includes(q) || unitKerja.includes(q)
+  })
+})
 
 async function downloadVerifikasiFile(item) {
   try {
@@ -1392,12 +1448,19 @@ const defaultTab = computed(() => {
       </div>
 
       <h4 style="margin-top: 1.75rem">Surat yang Sudah Diinput Bulan Ini</h4>
+      <div class="rekap-toolbar">
+        <DatePicker v-model="periodDate" view="month" dateFormat="MM yy" showIcon style="width: 180px" />
+        <IconField class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
+          <InputText v-model="dokumenSearch" placeholder="Cari nama, NIP, atau unit kerja..." style="width: 100%" />
+          <InputIcon class="pi pi-search" />
+        </IconField>
+      </div>
       <div class="entries-picker">
         <span class="entries-picker-label">Tampilkan</span>
         <Select v-model="dokumenPageSize" :options="entriesOptions" @change="dokumenFirst = 0" />
       </div>
       <DataTable
-        :value="dokumenAdminList"
+        :value="dokumenFiltered"
         :loading="loadingDokumenAdmin"
         paginator
         :rows="dokumenPageSize"
@@ -1439,7 +1502,7 @@ const defaultTab = computed(() => {
             <Button icon="pi pi-trash" size="small" text rounded severity="danger" title="Hapus" @click="confirmHapusDokumenAdmin(data)" />
           </template>
         </Column>
-        <template #empty>Belum ada surat yang diinput pada bulan ini.</template>
+        <template #empty>{{ dokumenSearch.trim() ? 'Tidak ada surat yang cocok dengan pencarian.' : 'Belum ada surat yang diinput pada bulan ini.' }}</template>
       </DataTable>
     </div>
     </TabPanel>
@@ -1452,11 +1515,22 @@ const defaultTab = computed(() => {
         terlewat. Setujui untuk membuat absen pegawai otomatis berubah jadi bersurat, atau kembalikan untuk direvisi
         (wajib isi catatan).
       </p>
+      <div class="rekap-toolbar">
+        <DatePicker v-model="periodDate" view="month" dateFormat="MM yy" showIcon style="width: 180px" />
+        <IconField class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
+          <InputText v-model="verifikasiSearch" placeholder="Cari nama, NIP, atau unit kerja..." style="width: 100%" />
+          <InputIcon class="pi pi-search" />
+        </IconField>
+      </div>
       <div class="entries-picker">
         <span class="entries-picker-label">Status</span>
         <Select v-model="verifikasiStatusFilter" :options="verifikasiStatusOptions" optionLabel="label" optionValue="value" />
       </div>
-      <DataTable :value="verifikasiList" :loading="loadingVerifikasi" size="small" stripedRows responsiveLayout="scroll">
+      <Message v-if="verifikasiStatusFilter === 'menunggu'" severity="info" :closable="false" style="margin-bottom: 1rem">
+        Filter bulan tidak berlaku untuk status "Menunggu Verifikasi" -- semua pengajuan yang belum diproses selalu
+        ditampilkan apa pun bulannya, supaya tidak ada yang tidak sengaja terlewat.
+      </Message>
+      <DataTable :value="verifikasiFiltered" :loading="loadingVerifikasi" size="small" stripedRows responsiveLayout="scroll">
         <Column header="Pegawai">
           <template #body="{ data }">{{ data.pegawai?.nama }}</template>
         </Column>
@@ -1494,7 +1568,7 @@ const defaultTab = computed(() => {
             </template>
           </template>
         </Column>
-        <template #empty>Tidak ada pengajuan pada status ini.</template>
+        <template #empty>{{ verifikasiSearch.trim() ? 'Tidak ada pengajuan yang cocok dengan pencarian.' : 'Tidak ada pengajuan pada status ini.' }}</template>
       </DataTable>
     </div>
     </TabPanel>
