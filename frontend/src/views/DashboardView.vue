@@ -45,6 +45,21 @@ async function onSkFileChosen(e) {
   }
 }
 
+// backend (handlers/pegawai.go, unduhDokumenPegawai) selalu mengirim
+// Content-Type: application/octet-stream untuk endpoint download dokumen --
+// itu cocok untuk mengunduh (nama file & isinya tetap benar), tapi kalau
+// blob-nya dibuka langsung di tab baru tanpa MIME type yang benar, browser
+// menampilkannya sebagai teks/kode mentah bukan me-render-nya sebagai
+// PDF/gambar. Jadi MIME type ditebak sendiri di sini dari ekstensi nama
+// filenya supaya "klik untuk melihat" benar-benar menampilkan dokumennya.
+function mimeTypeDariNamaFile(nama) {
+  const ext = (nama || '').split('.').pop()?.toLowerCase()
+  if (ext === 'pdf') return 'application/pdf'
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  if (ext === 'png') return 'image/png'
+  return 'application/octet-stream'
+}
+
 // melihat (preview) SK Terakhir yang SAAT INI sudah terupload -- dipakai
 // notifikasi "Permintaan SK" ketika pegawai ini sudah punya SK Terakhir
 // (administrator minta diperiksa ulang/diganti kalau kurang sesuai). Dibuka
@@ -53,11 +68,12 @@ async function onSkFileChosen(e) {
 const melihatSk = ref(false)
 async function lihatSkSaatIni() {
   const idPegawai = data.value?.permintaan_sk?.id_pegawai
+  const namaFile = data.value?.permintaan_sk?.pegawai?.sk_terakhir_nama
   if (!idPegawai) return
   melihatSk.value = true
   try {
     const res = await http.get(`/pegawai/${idPegawai}/dokumen/sk-terakhir`, { responseType: 'blob' })
-    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: mimeTypeDariNamaFile(namaFile) }))
     window.open(url, '_blank')
     setTimeout(() => window.URL.revokeObjectURL(url), 60000)
   } catch (err) {
