@@ -333,6 +333,12 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan dokumen: "+err.Error())
 		return
 	}
+	if jenis == "sk-terakhir" {
+		// selesaikan permintaan SK (menu Penerima TPP) yang masih menunggu
+		// untuk pegawai ini, kalau ada -- lihat fulfillPermintaanSk di
+		// handlers/tpp.go.
+		fulfillPermintaanSk(db, item.ID)
+	}
 	if jenis == "sk-pensiun" {
 		// Sama seperti pengajuan pensiun yang disetujui lewat alur
 		// persetujuan (lihat approvePengajuanPensiun di

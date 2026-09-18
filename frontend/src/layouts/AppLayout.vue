@@ -143,6 +143,7 @@ const navSections = computed(() => {
         { label: 'Data Pegawai', icon: 'pi pi-users', to: '/master/pegawai' },
         { label: 'Perubahan Data Pegawai', icon: 'pi pi-user-edit', to: '/perubahan-data' },
         { label: 'Pengajuan Pensiun', icon: 'pi pi-briefcase', to: '/pengajuan-pensiun' },
+        { label: 'Penerima TPP', icon: 'pi pi-money-bill', to: '/penerima-tpp' },
         { label: 'Jatah Cuti Tahunan', icon: 'pi pi-wallet', to: '/master/jatah-cuti' },
       ],
     })

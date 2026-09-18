@@ -5,11 +5,61 @@ import http from '../api/http'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
+import Message from 'primevue/message'
+import Button from 'primevue/button'
+import { useToast } from 'primevue/usetoast'
 import ProgressSpinner from 'primevue/progressspinner'
 
 const auth = useAuthStore()
+const toast = useToast()
 const data = ref(null)
 const loading = ref(true)
+
+// ------------------------------------------------------------
+// notifikasi "Permintaan SK" (menu Penerima TPP, lihat
+// handlers/tpp.go) -- muncul di dashboard pegawai selama
+// data.permintaan_sk masih terisi (status "menunggu").
+// ------------------------------------------------------------
+const skFileInputRef = ref(null)
+const uploadingSk = ref(false)
+
+function pickSkFile() {
+  skFileInputRef.value?.click()
+}
+
+async function onSkFileChosen(e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file) return
+  uploadingSk.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    await http.post('/tpp/upload-sk-saya', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'SK Terakhir berhasil diupload', life: 3000 })
+    await muatDashboard()
+  } catch (err) {
+    toast.add({ severity: 'error', summary: 'Gagal mengupload', detail: err.response?.data?.message || err.message, life: 5000 })
+  } finally {
+    uploadingSk.value = false
+  }
+}
+
+function formatTanggalPanjang(v) {
+  if (!v) return '-'
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return v
+  return d.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+async function muatDashboard() {
+  try {
+    const { data: res } = await http.get('/dashboard')
+    data.value = res.data
+  } finally {
+    loading.value = false
+  }
+}
 
 function statusSeverity(status) {
   if (status === 'disetujui') return 'success'
@@ -33,13 +83,8 @@ function namaBulanTahun(statistik) {
   return `${NAMA_BULAN[statistik.bulan] || ''} ${statistik.tahun}`
 }
 
-onMounted(async () => {
-  try {
-    const { data: res } = await http.get('/dashboard')
-    data.value = res.data
-  } finally {
-    loading.value = false
-  }
+onMounted(() => {
+  muatDashboard()
 })
 </script>
 
@@ -108,6 +153,21 @@ onMounted(async () => {
 
       <!-- pegawai -->
       <template v-else-if="data.role === 'pegawai'">
+        <Message v-if="data.permintaan_sk" severity="warn" :closable="false" style="margin-bottom: 1rem">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
+            <div>
+              <strong>Upload SK Terakhir untuk Penerima TPP</strong>
+              <div style="margin-top: 0.25rem">
+                Anda diminta mengupload dokumen SK Terakhir paling lambat tanggal
+                <strong>{{ formatTanggalPanjang(data.permintaan_sk.batas_tanggal) }}</strong> agar data Penerima TPP Anda
+                lengkap. Format PDF, JPG, atau PNG.
+              </div>
+            </div>
+            <Button label="Upload SK Terakhir" icon="pi pi-upload" size="small" :loading="uploadingSk" @click="pickSkFile" />
+            <input ref="skFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkFileChosen" />
+          </div>
+        </Message>
+
         <div class="stat-grid">
           <div class="stat-card"><div class="stat-value">{{ data.jatah_tahun_ini }}</div><div class="stat-label">Jatah Cuti Tahun Ini</div></div>
           <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.terpakai }}</div><div class="stat-label">Terpakai</div></div>

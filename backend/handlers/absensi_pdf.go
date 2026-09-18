@@ -272,6 +272,39 @@ func exportRekapAbsensiZIP(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 		return
 	}
 
+	// Download ZIP HANYA mengunduh pegawai yang benar-benar punya data pada
+	// menu Rekap Absensi periode ini (ada baris di tabel absensi ATAU
+	// absensi_dokumen) -- BUKAN seluruh pegawai di master data (bisa ribuan
+	// walau banyak yang belum pernah absen sama sekali pada periode ini),
+	// supaya ZIP tidak membengkak berisi PDF kosong untuk pegawai yang tidak
+	// relevan. Tabel di layar & tombol Export Excel tetap menampilkan
+	// SELURUH pegawai seperti sebelumnya -- filter ini khusus untuk ZIP.
+	ids := make([]uint, 0, len(pegawaiList))
+	for _, p := range pegawaiList {
+		ids = append(ids, p.ID)
+	}
+	adaData := map[uint]bool{}
+	var idsAbsensi, idsDokumen []uint
+	db.Model(&models.Absensi{}).Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", ids, start, end).Distinct().Pluck("id_pegawai", &idsAbsensi)
+	for _, id := range idsAbsensi {
+		adaData[id] = true
+	}
+	db.Model(&models.AbsensiDokumen{}).Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", ids, start, end).Distinct().Pluck("id_pegawai", &idsDokumen)
+	for _, id := range idsDokumen {
+		adaData[id] = true
+	}
+	dipersempit := make([]models.Pegawai, 0, len(pegawaiList))
+	for _, p := range pegawaiList {
+		if adaData[p.ID] {
+			dipersempit = append(dipersempit, p)
+		}
+	}
+	pegawaiList = dipersempit
+	if len(pegawaiList) == 0 {
+		utils.Error(w, http.StatusNotFound, "tidak ada pegawai dengan data rekap absensi (absen/surat) pada periode ini")
+		return
+	}
+
 	bulan := start.Month()
 	tahun := start.Year()
 

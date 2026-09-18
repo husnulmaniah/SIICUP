@@ -14,6 +14,7 @@ import PengajuanPensiunView from '../views/PengajuanPensiunView.vue'
 import AbsensiView from '../views/AbsensiView.vue'
 import RekapAbsensiView from '../views/RekapAbsensiView.vue'
 import TemplateSuratView from '../views/TemplateSuratView.vue'
+import PenerimaTppView from '../views/PenerimaTppView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -44,6 +45,7 @@ const routes = [
       { path: 'template-surat', name: 'template-surat', component: TemplateSuratView, meta: { roles: ['administrator', 'admin', 'pegawai', 'atasan'], requireTemplateSuratAccess: true } },
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'pengajuan-pensiun', name: 'pengajuan-pensiun', component: PengajuanPensiunView, meta: { roles: ['administrator', 'admin'] } },
+      { path: 'penerima-tpp', name: 'penerima-tpp', component: PenerimaTppView, meta: { roles: ['administrator', 'admin'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },

@@ -81,6 +81,16 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		db.Model(&models.PengajuanCuti{}).Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.StatusPending).Count(&totalPending)
 		db.Model(&models.PengajuanCuti{}).Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.StatusDisetuju).Count(&totalDisetujui)
 
+		// permintaanSk: kalau ada, tampilkan sebagai notifikasi "upload SK
+		// Terakhir untuk Penerima TPP" di DashboardView.vue -- lihat menu
+		// Penerima TPP & tombol "Kirim Permintaan SK" (handlers/tpp.go).
+		var permintaanSk *models.PermintaanSk
+		var psk models.PermintaanSk
+		if err := db.Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.StatusPermintaanSkMenunggu).
+			Order("created_at desc").First(&psk).Error; err == nil {
+			permintaanSk = &psk
+		}
+
 		utils.Success(w, "ok", map[string]interface{}{
 			"role":              claims.RoleName,
 			"jatah_tahun_ini":   jatah.JumlahHari,
@@ -90,6 +100,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			"total_disetujui":   totalDisetujui,
 			"riwayat_cuti":      riwayat,
 			"statistik_absensi": statistikAbsensiBulanIni(db, *claims.IDPegawai),
+			"permintaan_sk":     permintaanSk,
 		})
 
 	default:

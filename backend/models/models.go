@@ -403,6 +403,75 @@ func (PengaturanSurat) TableName() string { return "pengaturan_surat" }
 func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
 
 // ============================================================
+// PENERIMA TPP -- daftar pegawai & permintaan upload SK Terakhir
+// ============================================================
+
+// PenerimaTpp adalah daftar pegawai yang MASUK kategori penerima TPP. Menu
+// "Penerima TPP" TIDAK menampilkan seluruh pegawai secara otomatis -- hanya
+// pegawai yang sudah ditambahkan administrator/admin ke tabel ini, baik
+// satu-satu (pilih nama) maupun sekaligus (berdasarkan Jabatan & tahun TMT
+// "tahun pengangkatan", lihat handlers/tpp.go). Aktif=false berarti pegawai
+// ini sudah DIKELUARKAN dari daftar (mis. pensiun, mutasi) -- barisnya tetap
+// disimpan (bukan dihapus permanen) sebagai riwayat, hanya disembunyikan
+// dari daftar aktif.
+type PenerimaTpp struct {
+	ID                uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai         uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai           *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	Aktif             bool       `json:"aktif" gorm:"column:aktif;not null;default:true"`
+	AlasanNonaktif    string     `json:"alasan_nonaktif" gorm:"column:alasan_nonaktif;size:255"`
+	TglNonaktif       *time.Time `json:"tgl_nonaktif" gorm:"column:tgl_nonaktif"`
+	IDDitambahkanOleh *uint      `json:"id_ditambahkan_oleh" gorm:"column:id_ditambahkan_oleh"`
+	DitambahkanOleh   *User      `json:"ditambahkan_oleh,omitempty" gorm:"foreignKey:IDDitambahkanOleh;references:ID"`
+	CreatedAt         time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt         time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (PenerimaTpp) TableName() string { return "penerima_tpp" }
+
+// PengaturanTpp menyimpan batas tanggal upload SK Terakhir yang dipakai
+// sebagai nilai default/​terakhir dipakai setiap kali administrator/admin
+// mengirim "Permintaan SK" baru dari menu Penerima TPP (lihat
+// handlers/tpp.go). Selalu ada tepat satu baris (ID = 1), dibuat otomatis
+// (FirstOrCreate) begitu pertama kali diakses -- tidak perlu Ensure* khusus
+// di main.go seperti pengaturan lain.
+type PengaturanTpp struct {
+	ID                 uint      `json:"id" gorm:"primaryKey"`
+	BatasTanggalUpload time.Time `json:"batas_tanggal_upload" gorm:"column:batas_tanggal_upload;type:date"`
+}
+
+func (PengaturanTpp) TableName() string { return "pengaturan_tpp" }
+
+const (
+	StatusPermintaanSkMenunggu  = "menunggu"
+	StatusPermintaanSkTerpenuhi = "terpenuhi"
+)
+
+// PermintaanSk adalah satu permintaan upload SK Terakhir yang dikirim
+// administrator/admin ke SATU pegawai (penerima TPP yang kolom
+// sk_terakhir_nama-nya masih kosong) lewat menu Penerima TPP. Selama
+// statusnya masih "menunggu", permintaan ini muncul sebagai notifikasi pada
+// dashboard pegawai ybs (lihat dashboardHandler case "pegawai") berisi batas
+// tanggal upload. Begitu pegawai (atau administrator/admin atas nama
+// pegawai itu) mengupload dokumen SK Terakhir, statusnya otomatis berubah
+// "terpenuhi" (lihat fulfillPermintaanSk, dipanggil dari uploadDokumenPegawai
+// & uploadSkTerakhirSaya di handlers/tpp.go) sehingga notifikasinya hilang.
+type PermintaanSk struct {
+	ID            uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai     uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai       *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	BatasTanggal  time.Time  `json:"batas_tanggal" gorm:"column:batas_tanggal;type:date"`
+	Status        string     `json:"status" gorm:"column:status;size:20;not null;default:menunggu"`
+	IDDikirimOleh *uint      `json:"id_dikirim_oleh" gorm:"column:id_dikirim_oleh"`
+	DikirimOleh   *User      `json:"dikirim_oleh,omitempty" gorm:"foreignKey:IDDikirimOleh;references:ID"`
+	DipenuhiPada  *time.Time `json:"dipenuhi_pada" gorm:"column:dipenuhi_pada"`
+	CreatedAt     time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (PermintaanSk) TableName() string { return "permintaan_sk" }
+
+// ============================================================
 // PERUBAHAN DATA PEGAWAI (self-service edit request + approval workflow)
 // ============================================================
 
