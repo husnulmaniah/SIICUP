@@ -27,6 +27,8 @@ type pengaturanAbsensiPayload struct {
 	JamTutupPagi          string   `json:"jam_tutup_pagi"`
 	JamMulaiPulang        string   `json:"jam_mulai_pulang"`
 	JamTutupPulang        string   `json:"jam_tutup_pulang"`
+	JamMulaiPulangJumat   string   `json:"jam_mulai_pulang_jumat"`
+	JamTutupPulangJumat   string   `json:"jam_tutup_pulang_jumat"`
 	JamMulaiPagiSekolah   string   `json:"jam_mulai_pagi_sekolah"`
 	JamBatasPagiSekolah   string   `json:"jam_batas_pagi_sekolah"`
 	JamTutupPagiSekolah   string   `json:"jam_tutup_pagi_sekolah"`
@@ -52,6 +54,8 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		"jam tutup absen pagi":             p.JamTutupPagi,
 		"jam mulai absen pulang":           p.JamMulaiPulang,
 		"jam tutup absen pulang":           p.JamTutupPulang,
+		"jam mulai absen pulang (jumat)":   p.JamMulaiPulangJumat,
+		"jam tutup absen pulang (jumat)":   p.JamTutupPulangJumat,
 		"jam mulai absen pagi (sekolah)":   p.JamMulaiPagiSekolah,
 		"jam batas absen pagi (sekolah)":   p.JamBatasPagiSekolah,
 		"jam tutup absen pagi (sekolah)":   p.JamTutupPagiSekolah,
@@ -78,6 +82,12 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	}
 	if tutupPulangMin <= mulaiPulangMin {
 		utils.Error(w, http.StatusBadRequest, "jam tutup absen pulang (batas absen pulang otomatis ditutup) harus lebih besar dari jam mulai absen pulang")
+		return
+	}
+	mulaiPulangMinJumat, _ := parseJamToMinutes(p.JamMulaiPulangJumat)
+	tutupPulangMinJumat, _ := parseJamToMinutes(p.JamTutupPulangJumat)
+	if tutupPulangMinJumat <= mulaiPulangMinJumat {
+		utils.Error(w, http.StatusBadRequest, "jam tutup absen pulang (jumat) harus lebih besar dari jam mulai absen pulang (jumat)")
 		return
 	}
 
@@ -128,6 +138,8 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	item.JamTutupPagi = p.JamTutupPagi
 	item.JamMulaiPulang = p.JamMulaiPulang
 	item.JamTutupPulang = p.JamTutupPulang
+	item.JamMulaiPulangJumat = p.JamMulaiPulangJumat
+	item.JamTutupPulangJumat = p.JamTutupPulangJumat
 	item.JamMulaiPagiSekolah = p.JamMulaiPagiSekolah
 	item.JamBatasPagiSekolah = p.JamBatasPagiSekolah
 	item.JamTutupPagiSekolah = p.JamTutupPagiSekolah

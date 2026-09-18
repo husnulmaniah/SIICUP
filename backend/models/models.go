@@ -855,7 +855,16 @@ func (TemplateSurat) TableName() string { return "template_surat" }
 //     belum bisa absen pulang. Setelah JamTutupPulang absen pulang otomatis
 //     DITUTUP -- ditolak sama sekali walaupun pegawai sudah absen masuk dan
 //     belum sempat absen pulang hari itu (lihat absenPulang di
-//     handlers/absensi.go).
+//     handlers/absensi.go). Berlaku untuk hari SENIN-KAMIS -- untuk hari
+//     JUMAT lihat JamMulaiPulangJumat/JamTutupPulangJumat di bawah.
+//   - JamMulaiPulangJumat..JamTutupPulangJumat: jam pulang (DINAS/KANTOR)
+//     KHUSUS HARI JUMAT, karena pegawai Dinas/Kantor biasanya pulang lebih
+//     awal di hari itu dibanding Senin-Kamis. Artinya & cara kerjanya
+//     identik dengan JamMulaiPulang/JamTutupPulang, hanya dipakai kalau
+//     tanggal absen jatuh pada hari Jumat -- lihat jamAbsenUntukPegawai di
+//     handlers/absensi.go yang memilih otomatis set mana dipakai
+//     berdasarkan time.Weekday() dari tanggal berjalan. TIDAK berlaku untuk
+//     pegawai sekolah (set Sekolah tidak punya pengecualian Jumat sendiri).
 //   - JamMulaiPagiSekolah..JamTutupPulangSekolah: SET KEDUA, jam kerja penuh
 //     (mulai pagi s.d tutup pulang) khusus pegawai berstatus SEKOLAH (lihat
 //     isSekolahPegawai di handlers/pengajuan_cuti.go -- kategori Tempat
@@ -899,6 +908,13 @@ type PengaturanAbsensi struct {
 	JamTutupPagi   string `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5;default:'09:00'"`
 	JamMulaiPulang string `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5;default:'15:00'"`
 	JamTutupPulang string `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5;default:'20:00'"`
+	// Jam pulang Dinas/Kantor KHUSUS hari Jumat -- lihat komentar
+	// JamMulaiPulangJumat di atas struct. Default awal disamakan dengan
+	// JamMulaiPulang/JamTutupPulang biasa supaya tidak mengubah perilaku
+	// yang sudah berjalan sebelum administrator menyesuaikannya sendiri
+	// lewat menu Rekap Absen -> Pengaturan.
+	JamMulaiPulangJumat string `json:"jam_mulai_pulang_jumat" gorm:"column:jam_mulai_pulang_jumat;size:5;default:'15:00'"`
+	JamTutupPulangJumat string `json:"jam_tutup_pulang_jumat" gorm:"column:jam_tutup_pulang_jumat;size:5;default:'20:00'"`
 	// Set kedua jam absen khusus pegawai sekolah -- lihat komentar
 	// JamMulaiPagiSekolah di atas struct. Default sengaja dibuat berbeda dari
 	// set Dinas/Kantor (mengikuti pola jam sekolah pada umumnya), tapi tetap

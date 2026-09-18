@@ -45,6 +45,8 @@ const pengaturan = reactive({
   jam_tutup_pagi: '',
   jam_mulai_pulang: '',
   jam_tutup_pulang: '',
+  jam_mulai_pulang_jumat: '',
+  jam_tutup_pulang_jumat: '',
   jam_mulai_pagi_sekolah: '',
   jam_batas_pagi_sekolah: '',
   jam_tutup_pagi_sekolah: '',
@@ -247,6 +249,8 @@ const pengaturanValid = computed(
     jamValid(pengaturan.jam_tutup_pagi) &&
     jamValid(pengaturan.jam_mulai_pulang) &&
     jamValid(pengaturan.jam_tutup_pulang) &&
+    jamValid(pengaturan.jam_mulai_pulang_jumat) &&
+    jamValid(pengaturan.jam_tutup_pulang_jumat) &&
     jamValid(pengaturan.jam_mulai_pagi_sekolah) &&
     jamValid(pengaturan.jam_batas_pagi_sekolah) &&
     jamValid(pengaturan.jam_tutup_pagi_sekolah) &&
@@ -1143,16 +1147,24 @@ const defaultTab = computed(() => {
                   <InputText v-model="pengaturan.jam_tutup_pagi" placeholder="09:00" style="width: 100%" />
                 </div>
                 <div>
-                  <label class="field-label">Jam Mulai Absen Pulang</label>
+                  <label class="field-label">Jam Mulai Absen Pulang (Senin-Kamis)</label>
                   <InputText v-model="pengaturan.jam_mulai_pulang" placeholder="15:00" style="width: 100%" />
                 </div>
                 <div>
-                  <label class="field-label">Jam Tutup Absen Pulang (setelah ini otomatis ditutup)</label>
+                  <label class="field-label">Jam Tutup Absen Pulang (Senin-Kamis, setelah ini otomatis ditutup)</label>
                   <InputText v-model="pengaturan.jam_tutup_pulang" placeholder="20:00" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Mulai Absen Pulang (Jumat)</label>
+                  <InputText v-model="pengaturan.jam_mulai_pulang_jumat" placeholder="15:00" style="width: 100%" />
+                </div>
+                <div>
+                  <label class="field-label">Jam Tutup Absen Pulang (Jumat, setelah ini otomatis ditutup)</label>
+                  <InputText v-model="pengaturan.jam_tutup_pulang_jumat" placeholder="20:00" style="width: 100%" />
                 </div>
               </div>
               <Message severity="info" :closable="false" style="margin-top: 0.5rem">
-                Berlaku untuk pegawai berkategori Dinas/Kantor (lihat "Tempat Kerja" di menu Unit Kerja -- kalau unit kerja pegawai belum dikategorikan, dipakai tebakan otomatis dari kata "sekolah" pada Tempat Tugas). Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu. Absen pulang juga otomatis ditutup begitu lewat jam tutup absen pulang, walaupun pegawai sudah absen masuk dan belum sempat absen pulang.
+                Berlaku untuk pegawai berkategori Dinas/Kantor (lihat "Tempat Kerja" di menu Unit Kerja -- kalau unit kerja pegawai belum dikategorikan, dipakai tebakan otomatis dari kata "sekolah" pada Tempat Tugas). Jam masuk pagi sama untuk semua hari kerja, tapi jam pulang punya 2 pengaturan terpisah: Senin-Kamis dan Jumat (karena pegawai Dinas/Kantor biasanya pulang lebih awal di hari Jumat). Absen masuk otomatis ditutup (tidak bisa lagi absen masuk maupun pulang) begitu lewat jam tutup, walaupun pegawai belum absen masuk sama sekali hari itu. Absen pulang juga otomatis ditutup begitu lewat jam tutup absen pulang yang berlaku hari itu, walaupun pegawai sudah absen masuk dan belum sempat absen pulang.
               </Message>
             </div>
 

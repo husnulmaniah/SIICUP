@@ -150,12 +150,26 @@ func jamAbsenUntukPegawai(setting models.PengaturanAbsensi, pegawai models.Pegaw
 			TutupPulang: setting.JamTutupPulangSekolah,
 		}
 	}
+	// Pegawai Dinas/Kantor pulang lebih awal di hari Jumat -- kalau HARI INI
+	// Jumat dan kedua jam Jumat sudah diisi administrator, pakai set itu
+	// untuk jam pulang (jam masuk/pagi tetap sama seperti hari lain). Kalau
+	// belum diisi (mis. baru migrasi & belum diatur administrator), jatuh
+	// kembali ke JamMulaiPulang/JamTutupPulang biasa supaya tidak diam-diam
+	// membuka absen pulang tanpa batas waktu.
+	mulaiPulang := setting.JamMulaiPulang
+	tutupPulang := setting.JamTutupPulang
+	if absensiNow().Weekday() == time.Friday &&
+		strings.TrimSpace(setting.JamMulaiPulangJumat) != "" &&
+		strings.TrimSpace(setting.JamTutupPulangJumat) != "" {
+		mulaiPulang = setting.JamMulaiPulangJumat
+		tutupPulang = setting.JamTutupPulangJumat
+	}
 	return jamAbsenSet{
 		MulaiPagi:   setting.JamMulaiPagi,
 		BatasPagi:   setting.JamBatasPagi,
 		TutupPagi:   setting.JamTutupPagi,
-		MulaiPulang: setting.JamMulaiPulang,
-		TutupPulang: setting.JamTutupPulang,
+		MulaiPulang: mulaiPulang,
+		TutupPulang: tutupPulang,
 	}
 }
 
@@ -463,6 +477,8 @@ type pengaturanAbsensiOut struct {
 	JamTutupPagi          string   `json:"jam_tutup_pagi"`
 	JamMulaiPulang        string   `json:"jam_mulai_pulang"`
 	JamTutupPulang        string   `json:"jam_tutup_pulang"`
+	JamMulaiPulangJumat   string   `json:"jam_mulai_pulang_jumat"`
+	JamTutupPulangJumat   string   `json:"jam_tutup_pulang_jumat"`
 	JamMulaiPagiSekolah   string   `json:"jam_mulai_pagi_sekolah"`
 	JamBatasPagiSekolah   string   `json:"jam_batas_pagi_sekolah"`
 	JamTutupPagiSekolah   string   `json:"jam_tutup_pagi_sekolah"`
@@ -522,6 +538,8 @@ func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut 
 		JamTutupPagi:          item.JamTutupPagi,
 		JamMulaiPulang:        item.JamMulaiPulang,
 		JamTutupPulang:        item.JamTutupPulang,
+		JamMulaiPulangJumat:   item.JamMulaiPulangJumat,
+		JamTutupPulangJumat:   item.JamTutupPulangJumat,
 		JamMulaiPagiSekolah:   item.JamMulaiPagiSekolah,
 		JamBatasPagiSekolah:   item.JamBatasPagiSekolah,
 		JamTutupPagiSekolah:   item.JamTutupPagiSekolah,
