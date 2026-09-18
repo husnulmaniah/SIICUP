@@ -794,6 +794,7 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	utils.LimitBody(w, r, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 10MB)")
 		return
@@ -947,6 +948,7 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	utils.LimitBody(w, r, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 10MB)")
 		return

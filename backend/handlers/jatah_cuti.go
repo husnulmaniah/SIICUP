@@ -76,7 +76,7 @@ func jatahCutiExcelColumns(db *gorm.DB) []utils.ExcelColumn {
 
 func RegisterJatahCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
-		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole(roles...))
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 	// anyRole di sini sengaja TIDAK benar-benar "role apa saja" -- hanya 4
@@ -216,6 +216,7 @@ func exportJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 }
 
 func importJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	utils.LimitBody(w, r, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload")
 		return

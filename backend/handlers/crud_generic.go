@@ -40,7 +40,7 @@ func RegisterCrud[T any](mux *http.ServeMux, db *gorm.DB, base string, cfg CrudC
 		cfg.OrderBy = "id asc"
 	}
 	protect := func(h http.HandlerFunc) http.Handler {
-		return middleware.Chain(h, middleware.Auth, middleware.RequireRole(roles...))
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole(roles...))
 	}
 
 	mux.Handle("GET "+base, protect(func(w http.ResponseWriter, r *http.Request) { listCrud(w, r, db, cfg) }))
@@ -239,6 +239,7 @@ func templateCrud[T any](w http.ResponseWriter, cfg CrudConfig[T]) {
 }
 
 func importCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg CrudConfig[T]) {
+	utils.LimitBody(w, r, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload")
 		return

@@ -285,6 +285,7 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}
+	utils.LimitBody(w, r, 15<<20)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload (maksimal 15MB)")
 		return
@@ -433,6 +434,7 @@ func uploadFotoProfilPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses untuk mengubah foto profil ini")
 		return
 	}
+	utils.LimitBody(w, r, 8<<20)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload (maksimal 8MB)")
 		return
@@ -871,6 +873,7 @@ func deleteAllPegawaiCascade(db *gorm.DB) error {
 }
 
 func importPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	utils.LimitBody(w, r, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload")
 		return

@@ -213,8 +213,29 @@ const submittingKolektifSelf = ref(false)
 function pickKolektifSelfFile() {
   kolektifSelfFileInput.value?.click()
 }
+// Batas ukuran berkas HARUS sama dengan limit yang ditegakkan backend
+// (utils.LimitBody + r.ParseMultipartForm(15 << 20) di
+// buatPengajuanSuratKolektif, handlers/pengajuan_surat_kolektif.go) --
+// dicek di sini supaya pegawai langsung dapat pesan jelas "berkas terlalu
+// besar" begitu memilih file, bukan menunggu lama saat klik "Ajukan" lalu
+// baru gagal (atau, kalau koneksinya lambat/tidak stabil, malah terlihat
+// sebagai "Network Error" generik karena upload besar diputus paksa oleh
+// jaringan/proxy sebelum backend sempat membalas).
+const KOLEKTIF_SELF_MAX_FILE_BYTES = 15 * 1024 * 1024
 function onKolektifSelfFileChosen(e) {
-  kolektifSelfFile.value = e.target.files?.[0] || null
+  const file = e.target.files?.[0] || null
+  if (file && file.size > KOLEKTIF_SELF_MAX_FILE_BYTES) {
+    toast.add({
+      severity: 'error',
+      summary: 'Berkas terlalu besar',
+      detail: `Ukuran berkas ${(file.size / (1024 * 1024)).toFixed(1)}MB melebihi batas maksimal 15MB. Kompres berkas terlebih dahulu (mis. hasil foto kamera HP biasanya bisa langsung dikecilkan lewat aplikasi kompres foto/PDF).`,
+      life: 8000,
+    })
+    e.target.value = ''
+    kolektifSelfFile.value = null
+    return
+  }
+  kolektifSelfFile.value = file
 }
 
 // Keterangan sekarang dropdown (lihat composables/keteranganSurat.js) --
@@ -264,7 +285,16 @@ async function submitKolektifSelf() {
     kolektifSelfFile.value = null
     await Promise.all([loadPengajuanSaya(), loadRiwayat()])
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 7000 })
+    // e.response kosong (bukan pesan error dari backend) berarti request
+    // gagal total sebelum dapat balasan apapun -- axios melaporkannya
+    // sebagai "Network Error" generik. Penyebab paling umum: koneksi
+    // lambat/tidak stabil saat mengupload berkas, jadi pesannya diperjelas
+    // di sini alih-alih menampilkan teks "Network Error" mentah yang
+    // membingungkan pegawai.
+    const pesan = e.response?.data?.message || (e.message === 'Network Error'
+      ? 'Koneksi terputus saat mengirim data (biasanya karena sinyal/koneksi internet tidak stabil saat mengupload berkas). Periksa koneksi internet Anda lalu coba ajukan ulang.'
+      : e.message)
+    toast.add({ severity: 'error', summary: 'Gagal', detail: pesan, life: 8000 })
   } finally {
     submittingKolektifSelf.value = false
   }

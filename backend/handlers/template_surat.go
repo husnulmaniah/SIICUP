@@ -92,6 +92,7 @@ func buatTemplateSurat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "hanya administrator yang bisa menambah template surat")
 		return
 	}
+	utils.LimitBody(w, r, 20<<20)
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal 20MB)")
 		return
@@ -150,6 +151,7 @@ func updateTemplateSurat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusNotFound, "template surat tidak ditemukan")
 		return
 	}
+	utils.LimitBody(w, r, 20<<20)
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal 20MB)")
 		return

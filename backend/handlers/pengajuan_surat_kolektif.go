@@ -180,6 +180,7 @@ func buatPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *gorm
 		return
 	}
 
+	utils.LimitBody(w, r, 15<<20)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return
@@ -301,6 +302,7 @@ func updatePengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *go
 		return
 	}
 
+	utils.LimitBody(w, r, 15<<20)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return

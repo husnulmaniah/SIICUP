@@ -508,6 +508,7 @@ type pengajuanPayload struct {
 // without attaching any document.
 func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
+	utils.LimitBody(w, r, 20<<20)
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 20MB)")
 		return
@@ -666,6 +667,7 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	isMultipart := strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data")
 	var p pengajuanPayload
 	if isMultipart {
+		utils.LimitBody(w, r, 20<<20)
 		if err := r.ParseMultipartForm(20 << 20); err != nil {
 			utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 20MB)")
 			return
@@ -1174,6 +1176,7 @@ func exportPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 }
 
 func importPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	utils.LimitBody(w, r, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload")
 		return

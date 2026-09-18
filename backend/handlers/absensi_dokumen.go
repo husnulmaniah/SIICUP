@@ -107,6 +107,7 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	// dibuat/ditimpa di bawah -- lihat komentar IDDiinputOleh pada
 	// models.AbsensiDokumen untuk alasan & siapa yang boleh melihatnya.
 	claims, _ := middleware.GetClaims(r)
+	utils.LimitBody(w, r, 15<<20)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return

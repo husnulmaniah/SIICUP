@@ -1089,6 +1089,7 @@ func uploadFormSigned(w http.ResponseWriter, r *http.Request, db *gorm.DB, jenis
 		utils.Error(w, http.StatusBadRequest, "berkas bertanda tangan hanya bisa diupload setelah pengajuan disetujui")
 		return
 	}
+	utils.LimitBody(w, r, 15<<20)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas (maksimal 15MB)")
 		return

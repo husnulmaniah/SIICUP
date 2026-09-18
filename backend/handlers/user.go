@@ -235,6 +235,7 @@ func exportUsers(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 }
 
 func importUsers(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	utils.LimitBody(w, r, 10<<20)
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload")
 		return

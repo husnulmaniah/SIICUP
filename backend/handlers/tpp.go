@@ -495,6 +495,7 @@ func uploadSkTerakhirSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	utils.LimitBody(w, r, 15<<20)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload (maksimal 15MB)")
 		return
