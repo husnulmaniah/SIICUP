@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"archive/zip"
 	"fmt"
 	"math"
 	"net/http"
@@ -100,6 +101,61 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 		limit = today
 	}
 
+	jenisLookup := jenisSuratLookup(db)
+
+	doc := utils.NewPDFDoc()
+	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyiapkan logo: "+err.Error())
+		return
+	}
+
+	holidaySet := holidaySetInRange(db, start, limit)
+	baris, ringkasan := hitungBarisRingkasanPDF(db, doc, pegawai, start, end, limit, jenisLookup, holidaySet)
+
+	pdfBytes, err := buildRekapAbsensiPDF(doc, pegawai, bulan, tahun, baris, ringkasan)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal membuat PDF: "+err.Error())
+		return
+	}
+
+	nip := strings.TrimSpace(pegawai.NIP)
+	if nip == "" {
+		nip = "-"
+	}
+	namaFile := fmt.Sprintf("%s-%s.pdf", nip, slugNamaFile(pegawai.Nama))
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", namaFile))
+	w.Write(pdfBytes)
+}
+
+// slugNamaFile membersihkan nama pegawai supaya aman dipakai sebagai nama
+// berkas (spasi/tanda baca jadi garis bawah).
+func slugNamaFile(nama string) string {
+	var b strings.Builder
+	for _, r := range nama {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+// hitungBarisRingkasanPDF menghitung baris tabel & ringkasan rekap absensi
+// untuk SATU pegawai pada rentang start..end (limit = batas hari kerja yang
+// dihitung, biasanya min(end, hari ini)). Dipakai bersama oleh
+// exportRekapAbsensiPegawaiPDF (satu PDF) dan exportRekapAbsensiZIP (banyak
+// PDF sekaligus dalam satu ZIP) supaya logikanya tidak dobel.
+func hitungBarisRingkasanPDF(
+	db *gorm.DB,
+	doc *utils.PDFDoc,
+	pegawai models.Pegawai,
+	start, end, limit time.Time,
+	jenisLookup map[string]models.JenisSurat,
+	holidaySet map[string]bool,
+) ([]barisRekapPDF, ringkasanRekapPDF) {
 	// baris absen (BESERTA fotonya -- dipakai sebagai bukti di PDF) & surat
 	// pendukung pada bulan yang diminta
 	absensiRows := []models.Absensi{}
@@ -115,17 +171,9 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 	for _, d := range dokumenRows {
 		dokumenByTanggal[d.Tanggal.Format("2006-01-02")] = d
 	}
-	jenisLookup := jenisSuratLookup(db)
-
-	doc := utils.NewPDFDoc()
-	if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
-		utils.Error(w, http.StatusInternalServerError, "gagal menyiapkan logo: "+err.Error())
-		return
-	}
 
 	// Hari kerja mengikuti pola pegawai (sekolah 6 hari, kantor dinas 5 hari)
 	// dan melewati tanggal merah -- sama seperti perhitungan rekap di layar.
-	holidaySet := holidaySetInRange(db, start, limit)
 	hariKerja := workingDaysWithHolidaySet(start, limit, sixDayWeekForPegawai(pegawai), holidaySet)
 
 	var baris []barisRekapPDF
@@ -205,35 +253,73 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 		baris = append(baris, row)
 	}
 
-	pdfBytes, err := buildRekapAbsensiPDF(doc, pegawai, bulan, tahun, baris, ringkasan)
-	if err != nil {
-		utils.Error(w, http.StatusInternalServerError, "gagal membuat PDF: "+err.Error())
+	return baris, ringkasan
+}
+
+// exportRekapAbsensiZIP menangani GET /api/absensi/rekap/zip
+// ?bulan=..&tahun=..&id_pegawai=.. -- mengunduh rekap absensi SEMUA pegawai
+// (atau satu pegawai saja kalau id_pegawai diisi) sebagai berkas PDF
+// masing-masing, dibungkus dalam satu ZIP. Nama tiap berkas di dalam ZIP
+// adalah "<no urut>-<NIP>-<nama>.pdf" mengikuti urutan yang sama dengan
+// tabel Rekap Absen di layar (Order("nama asc") lewat rekapPeriode).
+// Endpoint ini khusus role administrator (lihat middleware administratorOnly
+// di absensi.go) karena bisa memproses ribuan pegawai sekaligus dan cukup
+// berat -- Export Excel & unduh PDF per-baris tetap terbuka untuk admin biasa.
+func exportRekapAbsensiZIP(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	pegawaiList, start, end, limit := rekapPeriode(r, db)
+	if len(pegawaiList) == 0 {
+		utils.Error(w, http.StatusNotFound, "tidak ada data pegawai untuk periode ini")
 		return
 	}
 
-	nip := strings.TrimSpace(pegawai.NIP)
-	if nip == "" {
-		nip = "-"
-	}
-	namaFile := fmt.Sprintf("%s-%s.pdf", nip, slugNamaFile(pegawai.Nama))
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", namaFile))
-	w.Write(pdfBytes)
-}
+	bulan := start.Month()
+	tahun := start.Year()
 
-// slugNamaFile membersihkan nama pegawai supaya aman dipakai sebagai nama
-// berkas (spasi/tanda baca jadi garis bawah).
-func slugNamaFile(nama string) string {
-	var b strings.Builder
-	for _, r := range nama {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
+	// jenisLookup & holidaySet tidak bergantung pegawai tertentu, cukup
+	// dihitung sekali di luar loop supaya tidak query berulang-ulang untuk
+	// ribuan pegawai.
+	jenisLookup := jenisSuratLookup(db)
+	holidaySet := holidaySetInRange(db, start, limit)
+
+	namaZip := fmt.Sprintf("rekap_absensi_%s_%d.zip", strings.ToLower(bulanIndo[int(bulan)]), tahun)
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", namaZip))
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	flusher, _ := w.(http.Flusher)
+
+	for i, pegawai := range pegawaiList {
+		doc := utils.NewPDFDoc()
+		if err := doc.RegisterImage("logo", assets.LogoPNG); err != nil {
+			continue
+		}
+
+		baris, ringkasan := hitungBarisRingkasanPDF(db, doc, pegawai, start, end, limit, jenisLookup, holidaySet)
+		pdfBytes, err := buildRekapAbsensiPDF(doc, pegawai, bulan, tahun, baris, ringkasan)
+		if err != nil {
+			// satu pegawai gagal dibuat PDF-nya (data tidak wajar dll) tidak
+			// membatalkan seluruh ZIP -- lewati saja & lanjut ke pegawai
+			// berikutnya.
+			continue
+		}
+
+		nip := strings.TrimSpace(pegawai.NIP)
+		if nip == "" {
+			nip = "-"
+		}
+		namaEntri := fmt.Sprintf("%d-%s-%s.pdf", i+1, nip, slugNamaFile(pegawai.Nama))
+		entri, err := zw.Create(namaEntri)
+		if err != nil {
+			continue
+		}
+		entri.Write(pdfBytes)
+
+		if flusher != nil {
+			flusher.Flush()
 		}
 	}
-	return strings.Trim(b.String(), "_")
 }
 
 // buildRekapAbsensiPDF menggambar seluruh halaman PDF-nya. Tabel dipecah

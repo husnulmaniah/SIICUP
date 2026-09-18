@@ -605,6 +605,9 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/absensi/rekap", manage(func(w http.ResponseWriter, r *http.Request) { rekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/export", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/pdf", pdfOnly(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensiPegawaiPDF(w, r, db) }))
+	// Download ZIP rekap semua pegawai (satu PDF per pegawai) -- khusus role
+	// administrator karena bisa memproses ribuan pegawai sekaligus.
+	mux.Handle("GET /api/absensi/rekap/zip", administratorOnly(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensiZIP(w, r, db) }))
 }
 
 func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

@@ -489,6 +489,37 @@ async function exportExcel() {
   }
 }
 
+// ------------------------------------------------------------
+// unduh ZIP berisi PDF rekap SEMUA pegawai (satu PDF per pegawai, nama
+// berkas "No urut-NIP-Nama.pdf") -- khusus administrator, lihat
+// exportRekapAbsensiZIP di handlers/absensi_pdf.go. Bisa makan waktu cukup
+// lama kalau jumlah pegawainya banyak, jadi ada indikator loading terpisah.
+// ------------------------------------------------------------
+
+const unduhZipLoading = ref(false)
+
+async function unduhZipRekap() {
+  unduhZipLoading.value = true
+  try {
+    const params = { bulan: periodDate.value.getMonth() + 1, tahun: periodDate.value.getFullYear() }
+    if (selectedPegawai.value) params.id_pegawai = selectedPegawai.value
+    const res = await http.get('/absensi/rekap/zip', { params, responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/zip' }))
+    const link = document.createElement('a')
+    link.href = url
+    const bulanStr = String(params.bulan).padStart(2, '0')
+    link.download = `rekap_absensi_${params.tahun}-${bulanStr}.zip`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh ZIP', detail: await pesanErrorBlob(e), life: 5000 })
+  } finally {
+    unduhZipLoading.value = false
+  }
+}
+
 // ============================================================
 // detail per pegawai (dialog)
 // ============================================================
@@ -1265,6 +1296,15 @@ const defaultTab = computed(() => {
           <InputIcon class="pi pi-search" />
         </IconField>
         <Button label="Export Excel" icon="pi pi-file-excel" severity="success" outlined @click="exportExcel" />
+        <Button
+          v-if="auth.isAdministrator"
+          label="Download ZIP"
+          icon="pi pi-file-pdf"
+          severity="help"
+          outlined
+          :loading="unduhZipLoading"
+          @click="unduhZipRekap"
+        />
       </div>
 
       <div class="entries-picker">
