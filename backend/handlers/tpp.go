@@ -34,6 +34,7 @@ func RegisterTppRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/tpp/penerima", manage(func(w http.ResponseWriter, r *http.Request) { listPenerimaTpp(w, r, db) }))
 	mux.Handle("POST /api/tpp/penerima", manage(func(w http.ResponseWriter, r *http.Request) { tambahPenerimaTpp(w, r, db) }))
 	mux.Handle("POST /api/tpp/penerima/by-kriteria", manage(func(w http.ResponseWriter, r *http.Request) { tambahPenerimaTppKriteria(w, r, db) }))
+	mux.Handle("GET /api/tpp/tahun-tmt", manage(func(w http.ResponseWriter, r *http.Request) { listTahunTmtPegawai(w, r, db) }))
 	mux.Handle("DELETE /api/tpp/penerima/{id}", manage(func(w http.ResponseWriter, r *http.Request) { hapusPenerimaTpp(w, r, db) }))
 	mux.Handle("GET /api/tpp/calon-pegawai", manage(func(w http.ResponseWriter, r *http.Request) { listCalonPegawaiTpp(w, r, db) }))
 
@@ -220,33 +221,37 @@ func tambahPenerimaTpp(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 }
 
 type tambahPenerimaTppKriteriaPayload struct {
-	IDJabatan         uint `json:"id_jabatan"`
-	TahunPengangkatan int  `json:"tahun_pengangkatan"` // 0 = tidak difilter tahun, cocokkan seluruh tahun TMT
+	IDJabatan         []uint `json:"id_jabatan"`         // WAJIB, minimal 1 -- boleh beberapa jabatan sekaligus
+	TahunPengangkatan []int  `json:"tahun_pengangkatan"` // kosong = tidak difilter tahun, cocokkan seluruh tahun TMT; kalau diisi, boleh beberapa tahun sekaligus
 }
 
 // tambahPenerimaTppKriteria menangani POST /api/tpp/penerima/by-kriteria --
-// menambahkan SEKALIGUS semua pegawai dengan Jabatan tertentu (WAJIB) dan,
-// kalau diisi, tahun TMT ("tahun pengangkatan") tertentu, sebagai anggota
-// Penerima TPP. Pegawai yang sudah menjadi anggota aktif dilewati begitu
-// saja (tidak dobel).
+// menambahkan SEKALIGUS semua pegawai dengan salah satu Jabatan terpilih
+// (WAJIB, boleh pilih beberapa jabatan) dan, kalau diisi, salah satu tahun
+// TMT ("tahun pengangkatan") terpilih (boleh pilih beberapa tahun -- lihat
+// listTahunTmtPegawai untuk daftar tahun yang tersedia dari data pegawai),
+// sebagai anggota Penerima TPP. Pegawai yang sudah menjadi anggota aktif
+// dilewati begitu saja (tidak dobel).
 func tambahPenerimaTppKriteria(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p tambahPenerimaTppKriteriaPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
 		return
 	}
-	if p.IDJabatan == 0 {
-		utils.Error(w, http.StatusBadRequest, "pilih jabatan terlebih dahulu")
+	if len(p.IDJabatan) == 0 {
+		utils.Error(w, http.StatusBadRequest, "pilih minimal satu jabatan terlebih dahulu")
 		return
 	}
-	if p.TahunPengangkatan != 0 && (p.TahunPengangkatan < 1950 || p.TahunPengangkatan > time.Now().Year()+1) {
-		utils.Error(w, http.StatusBadRequest, "tahun pengangkatan tidak valid")
-		return
+	for _, tahun := range p.TahunPengangkatan {
+		if tahun < 1950 || tahun > time.Now().Year()+1 {
+			utils.Error(w, http.StatusBadRequest, "tahun pengangkatan tidak valid")
+			return
+		}
 	}
 
-	query := db.Model(&models.Pegawai{}).Where("id_jabatan = ?", p.IDJabatan)
-	if p.TahunPengangkatan != 0 {
-		query = query.Where("tmt IS NOT NULL AND EXTRACT(YEAR FROM tmt) = ?", p.TahunPengangkatan)
+	query := db.Model(&models.Pegawai{}).Where("id_jabatan IN ?", p.IDJabatan)
+	if len(p.TahunPengangkatan) > 0 {
+		query = query.Where("tmt IS NOT NULL AND EXTRACT(YEAR FROM tmt) IN ?", p.TahunPengangkatan)
 	}
 	var calon []models.Pegawai
 	if err := query.Find(&calon).Error; err != nil {
@@ -274,6 +279,24 @@ func tambahPenerimaTppKriteria(w http.ResponseWriter, r *http.Request, db *gorm.
 		msg += " (" + strconv.Itoa(dilewati) + " lainnya dilewati karena sudah menjadi anggota)"
 	}
 	utils.Success(w, msg, map[string]interface{}{"ditambahkan": ditambahkan, "dilewati": dilewati})
+}
+
+// listTahunTmtPegawai menangani GET /api/tpp/tahun-tmt -- daftar tahun TMT
+// ("tahun pengangkatan") yang BENAR-BENAR ADA pada data pegawai saat ini
+// (bukan rentang tahun bebas), diurutkan terbaru dulu. Dipakai untuk mengisi
+// pilihan tahun pada dialog "Tambah dari Jabatan & Tahun" di menu Penerima
+// TPP, supaya administrator memilih dari tahun yang memang tersedia alih-
+// alih mengetik tahun bebas yang mungkin tidak cocok dengan data siapa pun.
+func listTahunTmtPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	var tahun []int
+	if err := db.Raw(`SELECT DISTINCT EXTRACT(YEAR FROM tmt)::int AS tahun FROM pegawai WHERE tmt IS NOT NULL ORDER BY tahun DESC`).Scan(&tahun).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil daftar tahun TMT")
+		return
+	}
+	if tahun == nil {
+		tahun = []int{}
+	}
+	utils.Success(w, "ok", tahun)
 }
 
 // tambahkanKePenerimaTpp adalah inti penambahan anggota Penerima TPP yang

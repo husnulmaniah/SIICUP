@@ -12,7 +12,6 @@ import Checkbox from 'primevue/checkbox'
 import Tag from 'primevue/tag'
 import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
-import InputNumber from 'primevue/inputnumber'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import DatePicker from 'primevue/datepicker'
@@ -245,13 +244,17 @@ async function submitTambah() {
 }
 
 // ------------------------------------------------------------
-// dialog "Tambah dari Jabatan & Tahun Pengangkatan" (bulk)
+// dialog "Tambah dari Jabatan & Tahun Pengangkatan" (bulk) -- boleh pilih
+// BEBERAPA jabatan & BEBERAPA tahun sekaligus (multi-select), tahun dipilih
+// dari daftar tahun TMT yang benar-benar ada pada data pegawai (bukan input
+// bebas) lewat endpoint /tpp/tahun-tmt.
 // ------------------------------------------------------------
 const tambahKriteriaDialog = ref(false)
 const tambahKriteriaLoading = ref(false)
 const refJabatan = ref([])
-const kriteriaJabatan = ref(null)
-const kriteriaTahun = ref(null)
+const refTahunTmt = ref([])
+const kriteriaJabatan = ref([])
+const kriteriaTahun = ref([])
 
 async function loadRefJabatan() {
   try {
@@ -262,23 +265,33 @@ async function loadRefJabatan() {
   }
 }
 
+async function loadRefTahunTmt() {
+  try {
+    const { data } = await http.get('/tpp/tahun-tmt')
+    refTahunTmt.value = data.data || []
+  } catch {
+    refTahunTmt.value = []
+  }
+}
+
 function bukaTambahKriteriaDialog() {
-  kriteriaJabatan.value = null
-  kriteriaTahun.value = null
+  kriteriaJabatan.value = []
+  kriteriaTahun.value = []
   if (refJabatan.value.length === 0) loadRefJabatan()
+  if (refTahunTmt.value.length === 0) loadRefTahunTmt()
   tambahKriteriaDialog.value = true
 }
 
 async function submitTambahKriteria() {
-  if (!kriteriaJabatan.value) {
-    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih jabatan terlebih dahulu', life: 4000 })
+  if (!kriteriaJabatan.value || kriteriaJabatan.value.length === 0) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih minimal satu jabatan terlebih dahulu', life: 4000 })
     return
   }
   tambahKriteriaLoading.value = true
   try {
     const { data: res } = await http.post('/tpp/penerima/by-kriteria', {
       id_jabatan: kriteriaJabatan.value,
-      tahun_pengangkatan: kriteriaTahun.value || 0,
+      tahun_pengangkatan: kriteriaTahun.value || [],
     })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: res.message, life: 5000 })
     tambahKriteriaDialog.value = false
@@ -502,29 +515,36 @@ onMounted(() => {
     <!-- Tambah dari Jabatan & Tahun Pengangkatan -->
     <Dialog v-model:visible="tambahKriteriaDialog" header="Tambah dari Jabatan & Tahun Pengangkatan" modal style="width: 28rem">
       <p style="margin-top: 0">
-        Semua pegawai dengan jabatan ini (dan tahun pengangkatan/TMT ini, kalau diisi) akan ditambahkan sekaligus ke
-        Penerima TPP.
+        Semua pegawai dengan salah satu jabatan terpilih (dan salah satu tahun pengangkatan/TMT terpilih, kalau
+        dipilih) akan ditambahkan sekaligus ke Penerima TPP. Boleh pilih lebih dari satu jabatan dan lebih dari satu
+        tahun.
       </p>
-      <label class="field-label">Jabatan</label>
-      <Select
+      <label class="field-label">Jabatan (boleh pilih lebih dari satu)</label>
+      <MultiSelect
         v-model="kriteriaJabatan"
         :options="refJabatan"
         optionLabel="jabatan"
         optionValue="id"
         filter
         showClear
+        display="chip"
         placeholder="Pilih jabatan..."
         style="width: 100%"
       />
-      <label class="field-label">Tahun Pengangkatan (TMT) -- opsional</label>
-      <InputNumber
+      <label class="field-label">Tahun Pengangkatan (TMT) -- opsional, boleh pilih lebih dari satu</label>
+      <MultiSelect
         v-model="kriteriaTahun"
-        :useGrouping="false"
-        :min="1950"
-        :max="2100"
+        :options="refTahunTmt"
+        filter
+        showClear
+        display="chip"
         placeholder="Kosongkan untuk semua tahun"
         style="width: 100%"
       />
+      <Message v-if="refTahunTmt.length === 0" severity="info" :closable="false" style="margin-top: 0.5rem">
+        Tidak ada data TMT (tanggal mulai tugas) pada data pegawai, jadi pilihan tahun kosong -- filter tahun akan
+        dilewati (semua tahun dianggap cocok).
+      </Message>
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="tambahKriteriaDialog = false" />
         <Button label="Tambahkan" icon="pi pi-sitemap" :loading="tambahKriteriaLoading" @click="submitTambahKriteria" />
