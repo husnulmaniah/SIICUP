@@ -369,10 +369,13 @@ type kirimPermintaanSkPayload struct {
 
 // kirimPermintaanSk menangani POST /api/tpp/permintaan-sk -- dipanggil
 // administrator/admin saat klik tombol "Kirim Permintaan SK" untuk satu
-// atau beberapa anggota Penerima TPP terpilih sekaligus (yang SK
-// Terakhir-nya kosong). Batas tanggal yang dikirim SEKALIGUS disimpan
-// sebagai PengaturanTpp (dipakai sebagai nilai default saat mengirim
-// permintaan berikutnya).
+// atau beberapa anggota Penerima TPP terpilih sekaligus. BOLEH dikirim ke
+// pegawai yang SK Terakhir-nya SUDAH ADA sekalipun -- dipakai untuk minta
+// pegawai memeriksa ulang/mengganti SK yang sudah terupload kalau ternyata
+// kurang sesuai (lihat dashboardHandler case "pegawai" & DashboardView.vue,
+// yang membedakan tampilan notifikasinya berdasarkan ada/tidaknya SK saat
+// ini). Batas tanggal yang dikirim SEKALIGUS disimpan sebagai PengaturanTpp
+// (dipakai sebagai nilai default saat mengirim permintaan berikutnya).
 func kirimPermintaanSk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p kirimPermintaanSkPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -408,9 +411,10 @@ func kirimPermintaanSk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		if err := db.First(&pegawai, "id = ?", idPegawai).Error; err != nil {
 			continue // pegawai tidak ditemukan, lewati
 		}
-		if strings.TrimSpace(pegawai.SkTerakhirNama) != "" {
-			continue // sudah ada SK, tidak perlu diminta lagi
-		}
+		// SENGAJA tidak lagi melewati pegawai yang SK Terakhir-nya sudah ada
+		// -- administrator boleh mengirim permintaan ke pegawai ini juga,
+		// mis. untuk minta diperiksa ulang/diganti kalau SK yang ada kurang
+		// sesuai (lihat komentar fungsi ini).
 
 		var existing models.PermintaanSk
 		found := db.Where("id_pegawai = ? AND status = ?", idPegawai, models.StatusPermintaanSkMenunggu).First(&existing).Error == nil
@@ -433,7 +437,7 @@ func kirimPermintaanSk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	if terkirim == 0 {
-		utils.Error(w, http.StatusBadRequest, "tidak ada permintaan yang dikirim -- pegawai terpilih sudah memiliki SK Terakhir")
+		utils.Error(w, http.StatusBadRequest, "tidak ada permintaan yang dikirim -- data pegawai terpilih tidak ditemukan")
 		return
 	}
 	utils.Success(w, "permintaan SK berhasil dikirim ke "+strconv.Itoa(terkirim)+" pegawai", map[string]interface{}{"terkirim": terkirim})

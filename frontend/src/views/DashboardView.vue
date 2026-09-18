@@ -45,6 +45,28 @@ async function onSkFileChosen(e) {
   }
 }
 
+// melihat (preview) SK Terakhir yang SAAT INI sudah terupload -- dipakai
+// notifikasi "Permintaan SK" ketika pegawai ini sudah punya SK Terakhir
+// (administrator minta diperiksa ulang/diganti kalau kurang sesuai). Dibuka
+// di tab baru (bukan didownload otomatis) supaya benar-benar "klik untuk
+// melihat" dulu sebelum memutuskan perlu upload ulang atau tidak.
+const melihatSk = ref(false)
+async function lihatSkSaatIni() {
+  const idPegawai = data.value?.permintaan_sk?.id_pegawai
+  if (!idPegawai) return
+  melihatSk.value = true
+  try {
+    const res = await http.get(`/pegawai/${idPegawai}/dokumen/sk-terakhir`, { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    window.open(url, '_blank')
+    setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+  } catch (err) {
+    toast.add({ severity: 'error', summary: 'Gagal membuka', detail: err.response?.data?.message || err.message, life: 4000 })
+  } finally {
+    melihatSk.value = false
+  }
+}
+
 function formatTanggalPanjang(v) {
   if (!v) return '-'
   const d = new Date(v)
@@ -153,7 +175,7 @@ onMounted(() => {
 
       <!-- pegawai -->
       <template v-else-if="data.role === 'pegawai'">
-        <Message v-if="data.permintaan_sk" severity="warn" :closable="false" style="margin-bottom: 1rem">
+        <Message v-if="data.permintaan_sk && !data.permintaan_sk.pegawai?.sk_terakhir_nama" severity="warn" :closable="false" style="margin-bottom: 1rem">
           <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
             <div>
               <strong>Upload SK Terakhir untuk Penerima TPP</strong>
@@ -164,6 +186,35 @@ onMounted(() => {
               </div>
             </div>
             <Button label="Upload SK Terakhir" icon="pi pi-upload" size="small" :loading="uploadingSk" @click="pickSkFile" />
+            <input ref="skFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkFileChosen" />
+          </div>
+        </Message>
+
+        <!-- pegawai ini SUDAH punya SK Terakhir, tapi administrator minta
+        diperiksa ulang (lihat menu Penerima TPP -> Kirim Permintaan SK) --
+        tampilkan SK yang saat ini terupload sebagai tautan yang bisa
+        diklik untuk dilihat, plus opsi upload ulang kalau ternyata kurang
+        sesuai. -->
+        <Message v-if="data.permintaan_sk && data.permintaan_sk.pegawai?.sk_terakhir_nama" severity="warn" :closable="false" style="margin-bottom: 1rem">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
+            <div>
+              <strong>Periksa Kembali SK Terakhir untuk Penerima TPP</strong>
+              <div style="margin-top: 0.25rem">
+                Administrator meminta Anda memeriksa kembali dokumen SK Terakhir yang saat ini terupload paling lambat
+                tanggal <strong>{{ formatTanggalPanjang(data.permintaan_sk.batas_tanggal) }}</strong>. SK Anda saat ini:
+                <a href="#" @click.prevent="lihatSkSaatIni" style="font-weight: 600">{{ data.permintaan_sk.pegawai.sk_terakhir_nama }}</a>
+                &mdash; klik untuk melihat. Jika SK tersebut tidak sesuai/sudah tidak berlaku, silakan upload ulang
+                dengan SK yang benar (format PDF, JPG, atau PNG).
+              </div>
+            </div>
+            <Button
+              label="Upload Ulang SK Terakhir"
+              icon="pi pi-upload"
+              size="small"
+              severity="secondary"
+              :loading="uploadingSk"
+              @click="pickSkFile"
+            />
             <input ref="skFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkFileChosen" />
           </div>
         </Message>

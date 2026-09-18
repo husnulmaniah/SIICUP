@@ -84,9 +84,16 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		// permintaanSk: kalau ada, tampilkan sebagai notifikasi "upload SK
 		// Terakhir untuk Penerima TPP" di DashboardView.vue -- lihat menu
 		// Penerima TPP & tombol "Kirim Permintaan SK" (handlers/tpp.go).
+		// Preload Pegawai (TANPA kolom byte dokumennya, lihat
+		// dokumenFileFields) supaya frontend tahu APAKAH pegawai ini sudah
+		// punya SK Terakhir atau belum (psk.Pegawai.SkTerakhirNama) --
+		// menentukan tampilan notifikasinya: "silakan upload" (belum ada SK)
+		// vs. "SK Anda saat ini ... klik untuk melihat, upload ulang kalau
+		// tidak sesuai" (SK sudah ada, administrator minta diperiksa ulang).
 		var permintaanSk *models.PermintaanSk
 		var psk models.PermintaanSk
-		if err := db.Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.StatusPermintaanSkMenunggu).
+		if err := db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).
+			Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.StatusPermintaanSkMenunggu).
 			Order("created_at desc").First(&psk).Error; err == nil {
 			permintaanSk = &psk
 		}

@@ -82,11 +82,13 @@ function onPage(e) {
 }
 
 // ------------------------------------------------------------
-// seleksi baris (hanya pegawai dengan SK Terakhir kosong yang boleh
-// dipilih -- dicek langsung di checkbox template, bukan pakai fitur
-// seleksi bawaan DataTable, supaya baris yang SK-nya sudah ada tidak bisa
-// dipilih sama sekali). Kunci seleksi adalah ID PEGAWAI (row.id_pegawai),
-// BUKAN row.id (yang sekarang adalah ID baris keanggotaan Penerima TPP).
+// seleksi baris -- boleh mencentang SIAPA SAJA (bukan cuma yang SK-nya
+// kosong): administrator juga boleh mengirim permintaan SK ke pegawai yang
+// SK Terakhir-nya SUDAH ADA, mis. minta diperiksa ulang/diganti kalau
+// ternyata kurang sesuai (lihat kirimPermintaanSk di handlers/tpp.go &
+// notifikasi dashboard pegawai yang membedakan tampilannya). Kunci seleksi
+// adalah ID PEGAWAI (row.id_pegawai), BUKAN row.id (yang sekarang adalah ID
+// baris keanggotaan Penerima TPP).
 // ------------------------------------------------------------
 const selectedIds = ref(new Set())
 
@@ -95,10 +97,22 @@ function skKosong(row) {
 }
 
 function toggleSelect(row) {
-  if (!skKosong(row)) return
   const s = new Set(selectedIds.value)
   if (s.has(row.id_pegawai)) s.delete(row.id_pegawai)
   else s.add(row.id_pegawai)
+  selectedIds.value = s
+}
+
+// centang semua / kosongkan semua baris pada HALAMAN yang sedang tampil
+// (dipakai checkbox pada header kolom "Pilih").
+const semuaTerpilihHalIni = computed(() => rows.value.length > 0 && rows.value.every((r) => selectedIds.value.has(r.id_pegawai)))
+function toggleSemuaHalIni() {
+  const s = new Set(selectedIds.value)
+  if (semuaTerpilihHalIni.value) {
+    for (const r of rows.value) s.delete(r.id_pegawai)
+  } else {
+    for (const r of rows.value) s.add(r.id_pegawai)
+  }
   selectedIds.value = s
 }
 
@@ -374,7 +388,7 @@ onMounted(() => {
           @click="pilihSemuaKosongHalIni"
         />
         <Button
-          v-if="kosongCount > 0"
+          v-if="total > 0"
           :label="`Kirim Permintaan SK${jumlahTerpilih ? ' (' + jumlahTerpilih + ')' : ''}`"
           icon="pi pi-send"
           severity="warn"
@@ -385,7 +399,9 @@ onMounted(() => {
 
       <Message v-if="kosongCount > 0" severity="warn" :closable="false" style="margin-bottom: 1rem">
         Ada {{ kosongCount }} pegawai Penerima TPP yang SK Terakhir-nya belum diupload. Centang pegawai yang ingin
-        diminta pada kolom "Pilih" lalu klik "Kirim Permintaan SK".
+        diminta pada kolom "Pilih" (atau centang kolom header untuk memilih semua di halaman ini) lalu klik "Kirim
+        Permintaan SK". Pegawai yang SK-nya sudah ada juga boleh dicentang & diminta lagi, misalnya untuk minta
+        diperiksa ulang atau diganti kalau kurang sesuai.
       </Message>
 
       <div v-if="loading" style="display: flex; justify-content: center; padding: 2rem">
@@ -398,15 +414,16 @@ onMounted(() => {
             Belum ada pegawai yang ditambahkan ke Penerima TPP. Klik "Tambah Pegawai" atau "Tambah dari Jabatan &amp;
             Tahun" di atas untuk menambahkan.
           </template>
-          <Column header="Pilih" style="width: 4rem">
-            <template #body="{ data: row }">
-              <Checkbox
-                :modelValue="selectedIds.has(row.id_pegawai)"
-                :disabled="!skKosong(row)"
-                binary
-                @update:modelValue="toggleSelect(row)"
-              />
+          <Column style="width: 4rem">
+            <template #header>
+              <Checkbox :modelValue="semuaTerpilihHalIni" binary @update:modelValue="toggleSemuaHalIni" />
             </template>
+            <template #body="{ data: row }">
+              <Checkbox :modelValue="selectedIds.has(row.id_pegawai)" binary @update:modelValue="toggleSelect(row)" />
+            </template>
+          </Column>
+          <Column header="No" style="width: 3.5rem">
+            <template #body="{ index }">{{ (page - 1) * pageSize + index + 1 }}</template>
           </Column>
           <Column field="nip" header="NIP" />
           <Column field="nama" header="Nama" />
@@ -432,7 +449,11 @@ onMounted(() => {
           </Column>
           <Column header="Status Permintaan">
             <template #body="{ data: row }">
-              <Tag v-if="row.permintaan_sk" severity="warn" :value="`Menunggu upload (batas ${formatTanggal(row.permintaan_sk.batas_tanggal)})`" />
+              <Tag
+                v-if="row.permintaan_sk"
+                severity="warn"
+                :value="`Menunggu ${skKosong(row) ? 'upload' : 'verifikasi ulang'} (batas ${formatTanggal(row.permintaan_sk.batas_tanggal)})`"
+              />
               <span v-else>-</span>
             </template>
           </Column>
@@ -513,8 +534,9 @@ onMounted(() => {
     <!-- Kirim Permintaan SK -->
     <Dialog v-model:visible="kirimDialog" header="Kirim Permintaan SK" modal style="width: 28rem">
       <p>
-        Permintaan upload SK Terakhir akan dikirim ke <strong>{{ jumlahTerpilih }}</strong> pegawai terpilih. Permintaan
-        ini akan muncul sebagai notifikasi pada dashboard akun pegawai yang bersangkutan.
+        Permintaan SK Terakhir akan dikirim ke <strong>{{ jumlahTerpilih }}</strong> pegawai terpilih dan muncul sebagai
+        notifikasi pada dashboard akun masing-masing. Pegawai yang belum punya SK akan diminta mengupload, sedangkan
+        yang sudah punya SK akan diminta memeriksa ulang (bisa upload ulang kalau SK yang ada kurang sesuai).
       </p>
       <label class="field-label">Batas Tanggal Upload</label>
       <DatePicker v-model="batasTanggal" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
