@@ -4,7 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 import { useProfilePhoto } from '../composables/useProfilePhoto'
-import { jenisJabatanLabels } from '../config/tables'
+import { jenisJabatanLabels, tempatKerjaOptions, tempatKerjaLabels } from '../config/tables'
 import { hitungKelayakanKenaikan } from '../utils/date'
 
 import Button from 'primevue/button'
@@ -389,13 +389,28 @@ const hasSkTerakhir = computed(() => !!profile.value?.sk_terakhir_nama)
 const hasSkKgb = computed(() => !!profile.value?.sk_kgb_nama)
 const hasSkPangkat = computed(() => !!profile.value?.sk_pangkat_nama)
 
+// normalizeTempatTgs mencocokkan nilai Tempat Tugas LAMA (dulu teks bebas,
+// mis. "SEKOLAH" huruf besar atau "Kantor Cabang Utara") ke salah satu
+// pilihan dropdown "Dinas/Kantor"/"Sekolah" yang baru, supaya form
+// pengajuan tidak tampil kosong begitu saja untuk pegawai yang datanya
+// masih dalam format lama -- aturan pencocokannya sama persis dengan
+// isSekolahFromTempatTgs di backend (handlers/pengajuan_cuti.go): mengandung
+// kata "sekolah" (tanpa peduli huruf besar/kecil) dianggap Sekolah, selain
+// itu dianggap Dinas/Kantor.
+function normalizeTempatTgs(v) {
+  if (!v) return null
+  const lower = String(v).toLowerCase()
+  if (lower === 'dinas' || lower === 'sekolah') return lower
+  return lower.includes('sekolah') ? 'sekolah' : 'dinas'
+}
+
 function openAjukan() {
   if (!profile.value) return
   form.nama = profile.value.nama || ''
   form.id_jabatan = profile.value.id_jabatan || null
   form.id_unit_kerja = profile.value.id_unit_kerja || null
   form.id_pangkat_gol = profile.value.id_pangkat_gol || null
-  form.tempat_tgs = profile.value.tempat_tgs || ''
+  form.tempat_tgs = normalizeTempatTgs(profile.value.tempat_tgs)
   form.tmt = profile.value.tmt ? new Date(profile.value.tmt) : null
   form.tgl_lahir = profile.value.tgl_lahir ? new Date(profile.value.tgl_lahir) : null
   form.tgl_kenaikan_gaji_berkala_terakhir = profile.value.tgl_kenaikan_gaji_berkala_terakhir ? new Date(profile.value.tgl_kenaikan_gaji_berkala_terakhir) : null
@@ -684,7 +699,7 @@ function formatDate(v) {
             <span class="detail-label">Pangkat / Golongan</span>
             <div>{{ profile.pangkat_gol?.pangkat?.pangkat || '-' }} / {{ profile.pangkat_gol?.gol?.gol || '-' }}</div>
           </div>
-          <div><span class="detail-label">Tempat Tugas</span><div>{{ profile.tempat_tgs || '-' }}</div></div>
+          <div><span class="detail-label">Tempat Tugas</span><div>{{ tempatKerjaLabels[profile.tempat_tgs] || profile.tempat_tgs || '-' }}</div></div>
           <div><span class="detail-label">TMT</span><div>{{ formatDate(profile.tmt) }}</div></div>
           <div>
             <span class="detail-label">Tanggal Lahir</span>
@@ -923,7 +938,7 @@ function formatDate(v) {
         </div>
         <div class="col-12 md:col-6">
           <label class="field-label">Tempat Tugas</label>
-          <InputText v-model="form.tempat_tgs" style="width: 100%" />
+          <Select v-model="form.tempat_tgs" :options="tempatKerjaOptions" optionLabel="label" optionValue="id" showClear style="width: 100%" placeholder="Pilih..." />
         </div>
         <div class="col-12 md:col-6">
           <label class="field-label">TMT</label>

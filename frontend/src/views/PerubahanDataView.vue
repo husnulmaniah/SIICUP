@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
+import { tempatKerjaLabels } from '../config/tables'
 
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -115,7 +116,7 @@ function diffRows(row) {
     { key: 'id_jabatan', label: 'Jabatan', fmt: jabatanLabel },
     { key: 'id_unit_kerja', label: 'Unit Kerja', fmt: unitKerjaLabel },
     { key: 'id_pangkat_gol', label: 'Pangkat / Golongan', fmt: pangkatGolLabel },
-    { key: 'tempat_tgs', label: 'Tempat Tugas' },
+    { key: 'tempat_tgs', label: 'Tempat Tugas', fmt: (v) => tempatKerjaLabels[v] || v || '-' },
     { key: 'tmt', label: 'TMT', fmt: (v) => (v ? formatDate(v) : '-') },
     { key: 'tgl_lahir', label: 'Tanggal Lahir', fmt: (v) => (v ? formatDate(v) : '-') },
     { key: 'tgl_kenaikan_gaji_berkala_terakhir', label: 'Kenaikan Gaji Berkala Terakhir', fmt: (v) => (v ? formatDate(v) : '-') },
