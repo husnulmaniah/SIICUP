@@ -109,24 +109,77 @@ type jamAbsenSet struct {
 	TutupPagi   string
 	MulaiPulang string
 	TutupPulang string
+	// Libur: true kalau HARI INI adalah hari libur menurut Shift Kerja yang
+	// terpasang pada unit kerja pegawai (ShiftKerjaHari.Aktif=false untuk
+	// hari ini) -- kamera absen masuk & pulang HARUS ditutup penuh untuk
+	// pegawai ini hari ini, TIDAK BOLEH dianggap "tidak ada batasan" hanya
+	// karena field jam_* di atas kosong (lihat pengecekan eksplisit pada
+	// absenMasuk, absenPulang & getPengaturanAbsensiHandler).
+	Libur bool
+}
+
+// shiftKerjaUntukUnitKerja mencari Shift Kerja yang terpasang pada satu unit
+// kerja (kalau ada) lengkap dengan HariList-nya -- dipakai jamAbsenUntukPegawai
+// sebagai PRIORITAS PALING UTAMA, mengalahkan jam kerja lawas yang ditempel
+// langsung di kolom UnitKerja.Jam*/fallback Sekolah-Dinas di bawah (lihat
+// komentar models.ShiftKerja).
+func shiftKerjaUntukUnitKerja(db *gorm.DB, idUnitKerja uint) *models.ShiftKerja {
+	if idUnitKerja == 0 {
+		return nil
+	}
+	var shift models.ShiftKerja
+	if err := db.Preload("HariList").Where("id_unit_kerja = ?", idUnitKerja).First(&shift).Error; err != nil {
+		return nil
+	}
+	return &shift
 }
 
 // jamAbsenUntukPegawai memilih set jendela waktu absen yang berlaku untuk
-// seorang pegawai, dengan urutan prioritas: (1) jam kerja KHUSUS unit kerja/
-// sekolah pegawai (UnitKerja.JamMulaiPagi dkk, hanya dipakai kalau KELIMA
-// field itu diisi lengkap -- lihat komentar pada models.UnitKerja), lalu
-// (2) fallback ke set Sekolah "global" di PengaturanAbsensi kalau pegawai ini
-// berstatus sekolah (lihat isSekolahPegawai di handlers/pengajuan_cuti.go --
-// PRIORITAS UTAMA-nya kategori Tempat Kerja pada Unit Kerja pegawai, fallback
-// ke tebakan dari kata "sekolah" pada Tempat Tugas untuk data lama), atau
-// (3) set Dinas/Kantor "global" untuk pegawai lainnya. Dengan ini tiap
-// sekolah bisa mengatur jam masuk/terlambat/pulang/tutup sendiri-sendiri
-// lewat menu Master Data -> Unit Kerja, sekaligus tetap kompatibel dengan
-// unit kerja yang belum diberi jam khusus (jatuh kembali ke default
-// sekolah/dinas seperti sebelumnya). Dipakai di absenMasuk/absenPulang
-// (untuk validasi) dan getPengaturanAbsensiHandler (untuk ditampilkan ke
-// pegawai yang bersangkutan lewat AbsensiView.vue).
-func jamAbsenUntukPegawai(setting models.PengaturanAbsensi, pegawai models.Pegawai) jamAbsenSet {
+// seorang pegawai, dengan urutan prioritas: (1) Shift Kerja yang terpasang
+// pada unit kerja pegawai (menu Master Data -> Shift Kerja, jam per hari
+// bisa berbeda-beda -- lihat models.ShiftKerja/ShiftKerjaHari), lalu kalau
+// unit kerjanya belum dipasangi Shift Kerja sama sekali, (2) jam kerja
+// KHUSUS unit kerja/sekolah pegawai (UnitKerja.JamMulaiPagi dkk, cara lama,
+// hanya dipakai kalau KELIMA field itu diisi lengkap -- lihat komentar pada
+// models.UnitKerja), lalu (3) fallback ke set Sekolah "global" di
+// PengaturanAbsensi kalau pegawai ini berstatus sekolah (lihat
+// isSekolahPegawai di handlers/pengajuan_cuti.go -- PRIORITAS UTAMA-nya
+// kategori Tempat Kerja pada Unit Kerja pegawai, fallback ke tebakan dari
+// kata "sekolah" pada Tempat Tugas untuk data lama), atau (4) set
+// Dinas/Kantor "global" untuk pegawai lainnya. Dengan ini tiap unit kerja
+// bisa mengatur jam kerja PENUH per hari (bukan cuma satu pengecualian
+// Jumat) lewat menu Shift Kerja, sekaligus tetap kompatibel dengan unit
+// kerja yang belum dimigrasikan (jatuh kembali ke cara lama seperti
+// sebelumnya). Dipakai di absenMasuk/absenPulang (untuk validasi) dan
+// getPengaturanAbsensiHandler (untuk ditampilkan ke pegawai yang
+// bersangkutan lewat AbsensiView.vue).
+func jamAbsenUntukPegawai(db *gorm.DB, setting models.PengaturanAbsensi, pegawai models.Pegawai) jamAbsenSet {
+	if pegawai.IDUnitKerja != nil {
+		if shift := shiftKerjaUntukUnitKerja(db, *pegawai.IDUnitKerja); shift != nil {
+			today := int(absensiNow().Weekday())
+			for _, h := range shift.HariList {
+				if h.Hari != today {
+					continue
+				}
+				if !h.Aktif {
+					return jamAbsenSet{Libur: true}
+				}
+				return jamAbsenSet{
+					MulaiPagi:   h.JamMulaiPagi,
+					BatasPagi:   h.JamBatasPagi,
+					TutupPagi:   h.JamTutupPagi,
+					MulaiPulang: h.JamMulaiPulang,
+					TutupPulang: h.JamTutupPulang,
+				}
+			}
+			// Shift terpasang tapi entah kenapa baris hari ini tidak
+			// ditemukan (seharusnya tidak terjadi -- validasi create/update
+			// mewajibkan ketujuh hari terisi). Anggap libur (fail CLOSED,
+			// bukan fail open) supaya tidak diam-diam membuka absen tanpa
+			// batasan jam sama sekali.
+			return jamAbsenSet{Libur: true}
+		}
+	}
 	if uk := pegawai.UnitKerja; uk != nil &&
 		uk.JamMulaiPagi != nil && *uk.JamMulaiPagi != "" &&
 		uk.JamBatasPagi != nil && *uk.JamBatasPagi != "" &&
@@ -510,7 +563,14 @@ type pengaturanAbsensiOut struct {
 	TitikLat    *float64 `json:"titik_lat"`
 	TitikLng    *float64 `json:"titik_lng"`
 	TitikRadius int      `json:"titik_radius"`
-	TitikSumber string   `json:"titik_sumber"`
+	// HariLiburShift: true kalau HARI INI libur menurut Shift Kerja yang
+	// terpasang di unit kerja pegawai yang login (lihat jamAbsenSet.Libur) --
+	// hanya terisi untuk request dari akun pegawai/atasan (sama seperti
+	// TitikLat/TitikLng di atas). AbsensiView.vue memakai field ini untuk
+	// menutup kamera absen sepenuhnya & menampilkan keterangan "hari libur"
+	// tanpa pegawai perlu tahu jam berapa pun.
+	HariLiburShift bool   `json:"hari_libur_shift"`
+	TitikSumber    string `json:"titik_sumber"`
 }
 
 func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut {
@@ -657,12 +717,13 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 			// menampilkan & memvalidasi jam kerja yang sesuai untuknya, tanpa
 			// perlu tahu soal pembagian dinas/sekolah sama sekali -- lihat
 			// jamAbsenUntukPegawai dan komentar pada models.PengaturanAbsensi.
-			jam := jamAbsenUntukPegawai(item, pegawai)
+			jam := jamAbsenUntukPegawai(db, item, pegawai)
 			out.JamMulaiPagi = jam.MulaiPagi
 			out.JamBatasPagi = jam.BatasPagi
 			out.JamTutupPagi = jam.TutupPagi
 			out.JamMulaiPulang = jam.MulaiPulang
 			out.JamTutupPulang = jam.TutupPulang
+			out.HariLiburShift = jam.Libur
 		}
 	}
 	utils.Success(w, "ok", out)
@@ -763,9 +824,13 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
 		return
 	}
-	// jam kerja yang berlaku untuk pegawai ini (dinas/kantor vs sekolah) --
-	// lihat jamAbsenUntukPegawai.
-	jam := jamAbsenUntukPegawai(setting, pegawaiSelf)
+	// jam kerja yang berlaku untuk pegawai ini (Shift Kerja unit kerjanya,
+	// atau fallback dinas/kantor vs sekolah) -- lihat jamAbsenUntukPegawai.
+	jam := jamAbsenUntukPegawai(db, setting, pegawaiSelf)
+	if jam.Libur {
+		utils.Error(w, http.StatusBadRequest, "hari ini bukan hari kerja sesuai shift kerja unit kerja anda, absen tidak tersedia")
+		return
+	}
 
 	now := absensiNow()
 	today := absensiToday()
@@ -922,9 +987,13 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
 		return
 	}
-	// jam kerja yang berlaku untuk pegawai ini (dinas/kantor vs sekolah) --
-	// lihat jamAbsenUntukPegawai.
-	jam := jamAbsenUntukPegawai(setting, pegawaiSelf)
+	// jam kerja yang berlaku untuk pegawai ini (Shift Kerja unit kerjanya,
+	// atau fallback dinas/kantor vs sekolah) -- lihat jamAbsenUntukPegawai.
+	jam := jamAbsenUntukPegawai(db, setting, pegawaiSelf)
+	if jam.Libur {
+		utils.Error(w, http.StatusBadRequest, "hari ini bukan hari kerja sesuai shift kerja unit kerja anda, absen tidak tersedia")
+		return
+	}
 
 	now := absensiNow()
 	today := absensiToday()

@@ -117,6 +117,97 @@ type UnitKerja struct {
 	JamTutupPulang *string    `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5"`
 }
 
+// ============================================================
+// SHIFT KERJA (menu Master Data -> Shift Kerja)
+// ============================================================
+
+// ShiftKerja adalah master data shift kerja yang dipasang ke SATU Unit Kerja
+// (IDUnitKerja unik -- satu unit hanya boleh dipasangi satu shift). Begitu
+// terpasang, SEMUA pegawai yang tempat kerjanya (Pegawai.IDUnitKerja) unit
+// tsb OTOMATIS mengikuti jam & jendela kamera absen shift ini tanpa perlu
+// diatur satu per satu -- lihat jamAbsenUntukPegawai di handlers/absensi.go,
+// yang mengecek Shift Kerja ini SEBAGAI PRIORITAS PALING UTAMA, mengalahkan
+// jam kerja lawas yang ditempel langsung di kolom Jam* UnitKerja di atas
+// (field lawas itu tetap dipertahankan sebagai fallback untuk unit kerja
+// yang belum dipasangi Shift Kerja, supaya pengaturan lama tidak mendadak
+// berubah).
+//
+// KategoriShift (lihat ShiftKategoriPilihan) murni label pengelompokan untuk
+// memudahkan administrator membaca daftar shift -- TIDAK memengaruhi
+// perhitungan jam ataupun status hari kerja/libur apa pun; hari kerja/libur
+// ditentukan sepenuhnya lewat HariList[].Aktif per hari.
+type ShiftKerja struct {
+	ID            uint             `json:"id" gorm:"primaryKey"`
+	NamaShift     string           `json:"nama_shift" gorm:"column:nama_shift;size:100;not null"`
+	KategoriShift string           `json:"kategori_shift" gorm:"column:kategori_shift;size:30;not null"`
+	IDUnitKerja   uint             `json:"id_unit_kerja" gorm:"column:id_unit_kerja;not null;uniqueIndex"`
+	UnitKerja     *UnitKerja       `json:"unit_kerja,omitempty" gorm:"foreignKey:IDUnitKerja;references:ID"`
+	HariList      []ShiftKerjaHari `json:"hari_list,omitempty" gorm:"foreignKey:IDShift;references:ID"`
+	CreatedAt     time.Time        `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (ShiftKerja) TableName() string { return "shift_kerja" }
+
+// ShiftKategoriPilihan adalah daftar TETAP pilihan kategori_shift yang boleh
+// disimpan (lihat validasi pada handlers/shift_kerja.go) -- dicocokkan persis
+// (case-sensitive) seperti tertulis di sini supaya selalu sinkron dengan
+// pilihan Select di frontend (ShiftKerjaView.vue).
+var ShiftKategoriPilihan = []string{
+	"5 Hari Kerja",
+	"6 Hari Kerja",
+	"Shift Pagi",
+	"Shift Siang",
+	"Shift Malam",
+}
+
+// ShiftKerjaHari menyimpan ketentuan jam kerja untuk SATU hari dalam
+// seminggu pada satu Shift Kerja -- field Hari memakai urutan time.Weekday
+// bawaan Go (0=Minggu, 1=Senin, 2=Selasa, ... 6=Sabtu) supaya gampang
+// dicocokkan langsung dengan int(time.Now().Weekday()) tanpa tabel konversi
+// tambahan. Dengan satu baris per hari, jam kerja/istirahat/pulang BOLEH
+// berbeda-beda tiap hari (mis. Jumat pulang lebih awal, Sabtu libur untuk
+// shift "5 Hari Kerja") -- jauh lebih fleksibel dibanding pengaturan lama
+// yang cuma mengenal satu pengecualian tetap (Jumat) untuk seluruh Dinas/
+// Kantor (lihat JamMulaiPulangJumat pada PengaturanAbsensi).
+//
+// Field jam_* mengikuti pola & arti PERSIS SAMA seperti PengaturanAbsensi
+// (JamMulaiPagi = kamera absen masuk mulai dibuka, JamBatasPagi = batas
+// waktu masih dianggap TEPAT WAKTU/belum terlambat, JamTutupPagi = kamera
+// absen masuk OTOMATIS DITUTUP; begitu juga JamMulaiPulang/JamTutupPulang
+// untuk kamera absen pulang) -- lihat jamAbsenUntukPegawai, absenMasuk &
+// absenPulang di handlers/absensi.go untuk bagaimana kelima field ini
+// dipakai menggerbang kamera. JamIstirahatMulai/JamIstirahatSelesai murni
+// informasi jadwal kerja (ditampilkan ke pegawai), TIDAK ikut menutup kamera
+// absen -- istirahat bukan berarti jam pulang.
+//
+// Kalau Aktif=false, hari itu dianggap LIBUR untuk shift ini: kamera absen
+// masuk & pulang otomatis tertutup penuh untuk pegawai di unit kerja
+// tersebut pada hari itu, terlepas dari isi field jam_* (lihat pengecekan
+// Libur pada jamAbsenSet).
+type ShiftKerjaHari struct {
+	ID      uint `json:"id" gorm:"primaryKey"`
+	IDShift uint `json:"id_shift" gorm:"column:id_shift;not null;index"`
+	Hari    int  `json:"hari" gorm:"column:hari;not null"`
+	// PENTING: sengaja TIDAK diberi tag `default:true`. GORM melewati
+	// (skip) kolom yang punya tag `default` setiap kali nilai Go-nya sama
+	// dengan zero-value tipe tsb (false untuk bool) -- akibatnya create
+	// dengan Aktif=false akan diam-diam ditimpa jadi true oleh default
+	// kolom di database. Karena hariListDariPayload selalu mengisi ketujuh
+	// hari secara eksplisit (lihat validasiShiftKerjaPayload), default DB
+	// tidak pernah benar-benar dibutuhkan -- lebih aman dihapus daripada
+	// berisiko salah menutup/membuka kamera absen.
+	Aktif               bool   `json:"aktif" gorm:"column:aktif"`
+	JamMulaiPagi        string `json:"jam_mulai_pagi" gorm:"column:jam_mulai_pagi;size:5"`
+	JamBatasPagi        string `json:"jam_batas_pagi" gorm:"column:jam_batas_pagi;size:5"`
+	JamTutupPagi        string `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5"`
+	JamIstirahatMulai   string `json:"jam_istirahat_mulai" gorm:"column:jam_istirahat_mulai;size:5"`
+	JamIstirahatSelesai string `json:"jam_istirahat_selesai" gorm:"column:jam_istirahat_selesai;size:5"`
+	JamMulaiPulang      string `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5"`
+	JamTutupPulang      string `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5"`
+}
+
+func (ShiftKerjaHari) TableName() string { return "shift_kerja_hari" }
+
 func (UnitKerja) TableName() string { return "unit_kerja" }
 
 type Status struct {

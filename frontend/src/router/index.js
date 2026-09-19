@@ -15,6 +15,7 @@ import AbsensiView from '../views/AbsensiView.vue'
 import RekapAbsensiView from '../views/RekapAbsensiView.vue'
 import TemplateSuratView from '../views/TemplateSuratView.vue'
 import PenerimaTppView from '../views/PenerimaTppView.vue'
+import ShiftKerjaView from '../views/ShiftKerjaView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -46,6 +47,7 @@ const routes = [
       { path: 'perubahan-data', name: 'perubahan-data', component: PerubahanDataView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'pengajuan-pensiun', name: 'pengajuan-pensiun', component: PengajuanPensiunView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'penerima-tpp', name: 'penerima-tpp', component: PenerimaTppView, meta: { roles: ['administrator', 'admin'] } },
+      { path: 'shift-kerja', name: 'shift-kerja', component: ShiftKerjaView, meta: { roles: ['administrator'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },

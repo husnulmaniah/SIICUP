@@ -91,7 +91,10 @@ const masukTertutup = computed(() => {
   return tutup != null && minutesNow() > tutup
 })
 const canMasuk = computed(() => {
-  if (!pengaturan.value?.aktif || sudahMasuk.value || masukTertutup.value) return false
+  // hari_libur_shift: hari ini libur menurut Shift Kerja yang terpasang di
+  // unit kerja pegawai (lihat menu Master Data -> Shift Kerja) -- kamera
+  // absen tertutup PENUH hari ini, terlepas dari jam berapa pun.
+  if (!pengaturan.value?.aktif || pengaturan.value?.hari_libur_shift || sudahMasuk.value || masukTertutup.value) return false
   const mulai = parseJam(pengaturan.value?.jam_mulai_pagi)
   return mulai == null || minutesNow() >= mulai
 })
@@ -108,7 +111,7 @@ const canPulang = computed(() => {
   // absen pulang cuma tersedia kalau sudah absen masuk hari ini -- tidak
   // boleh lagi merekam kepulangan tanpa jam masuk sama sekali (lihat
   // pengecekan yang sama di backend, absenPulang di absensi.go).
-  if (!pengaturan.value?.aktif || sudahPulang.value || !sudahMasuk.value || pulangTertutup.value) return false
+  if (!pengaturan.value?.aktif || pengaturan.value?.hari_libur_shift || sudahPulang.value || !sudahMasuk.value || pulangTertutup.value) return false
   const mulai = parseJam(pengaturan.value?.jam_mulai_pulang)
   return mulai == null || minutesNow() >= mulai
 })
@@ -966,6 +969,15 @@ async function downloadDokumen(item) {
     <template v-else-if="pengaturan && pengaturan.eligible === false">
       <Message severity="warn" :closable="false">
         Menu ini bukan untuk Anda. Hubungi administrator/admin jika menurut Anda ini tidak sesuai.
+      </Message>
+    </template>
+
+    <!-- hari_libur_shift: hari ini ditandai LIBUR pada Shift Kerja yang
+         terpasang di unit kerja Anda (menu Master Data -> Shift Kerja) --
+         kamera absen tertutup penuh untuk hari ini. -->
+    <template v-else-if="pengaturan && pengaturan.hari_libur_shift">
+      <Message severity="info" :closable="false">
+        Hari ini libur menurut shift kerja unit kerja Anda. Absen masuk &amp; pulang tidak tersedia hari ini.
       </Message>
     </template>
 
