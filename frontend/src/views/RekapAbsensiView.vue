@@ -1031,6 +1031,29 @@ const verifikasiFiltered = computed(() => {
   })
 })
 
+// Karena request berkas di bawah pakai responseType: 'blob', axios TIDAK
+// mem-parse body error (JSON) yang dikirim backend saat status bukan 2xx --
+// e.response.data akan berupa objek Blob, bukan objek JSON, sehingga
+// e.response?.data?.message selalu undefined dan pesan asli dari backend
+// tersembunyi di balik pesan generik axios ("Request failed with status
+// code 404"). Fungsi ini membaca isi Blob tsb sebagai teks lalu mem-parse-
+// nya sebagai JSON agar pesan asli backend bisa ditampilkan ke user.
+async function extractErrorMessage(e) {
+  const data = e?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      const parsed = JSON.parse(text)
+      if (parsed?.message) return parsed.message
+    } catch {
+      // isi blob bukan JSON valid -- pakai fallback di bawah
+    }
+  } else if (data?.message) {
+    return data.message
+  }
+  return e?.message || 'terjadi kesalahan tidak diketahui'
+}
+
 async function downloadVerifikasiFile(item) {
   try {
     const res = await http.get(`/pengajuan-surat-kolektif/${item.id}/file`, { responseType: 'blob' })
@@ -1043,8 +1066,31 @@ async function downloadVerifikasiFile(item) {
     link.remove()
     URL.revokeObjectURL(url)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: await extractErrorMessage(e), life: 4000 })
   }
+}
+
+// ---- lihat (pratinjau) berkas surat kolektif sekolah sebelum diunduh ----
+const previewVerifikasiDialog = ref(false)
+const previewVerifikasiUrl = ref('')
+const previewVerifikasiType = ref('pdf')
+const previewVerifikasiNamaFile = ref('')
+
+async function previewVerifikasiFile(item) {
+  try {
+    const res = await http.get(`/pengajuan-surat-kolektif/${item.id}/file`, { params: { inline: 1 }, responseType: 'blob' })
+    const ext = (item.nama_file || '').split('.').pop().toLowerCase()
+    previewVerifikasiType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
+    previewVerifikasiUrl.value = window.URL.createObjectURL(res.data)
+    previewVerifikasiNamaFile.value = item.nama_file || 'surat'
+    previewVerifikasiDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
+  }
+}
+function closePreviewVerifikasi() {
+  if (previewVerifikasiUrl.value) window.URL.revokeObjectURL(previewVerifikasiUrl.value)
+  previewVerifikasiUrl.value = ''
 }
 
 function confirmSetujuiVerifikasi(item) {
@@ -1685,6 +1731,7 @@ const defaultTab = computed(() => {
         </Column>
         <Column header="Aksi">
           <template #body="{ data }">
+            <Button icon="pi pi-eye" size="small" text rounded title="Lihat berkas" @click="previewVerifikasiFile(data)" />
             <Button icon="pi pi-download" size="small" text rounded title="Unduh berkas" @click="downloadVerifikasiFile(data)" />
             <template v-if="data.status === 'menunggu'">
               <Button icon="pi pi-check" size="small" text rounded severity="success" title="Setujui" @click="confirmSetujuiVerifikasi(data)" />
@@ -1865,6 +1912,29 @@ const defaultTab = computed(() => {
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeKembalikanDialog" />
         <Button label="Kembalikan" icon="pi pi-undo" severity="danger" :loading="submittingKembalikan" @click="submitKembalikan" />
+      </template>
+    </Dialog>
+
+    <!-- ================= dialog lihat (pratinjau) berkas surat kolektif sekolah ================= -->
+    <Dialog
+      v-model:visible="previewVerifikasiDialog"
+      modal
+      :header="previewVerifikasiNamaFile || 'Pratinjau Berkas'"
+      :style="{ width: '95vw', maxWidth: '62rem' }"
+      :breakpoints="{ '640px': '96vw' }"
+      @hide="closePreviewVerifikasi"
+    >
+      <div v-if="previewVerifikasiType === 'pdf'" style="width: 100%; height: 75vh">
+        <iframe :src="previewVerifikasiUrl" style="width: 100%; height: 100%; border: none" title="Pratinjau berkas"></iframe>
+      </div>
+      <div v-else-if="previewVerifikasiType === 'image'" style="text-align: center">
+        <img :src="previewVerifikasiUrl" style="max-width: 100%; max-height: 75vh" alt="Pratinjau berkas" />
+      </div>
+      <Message v-else severity="warn" :closable="false">
+        Jenis berkas ini tidak bisa ditampilkan langsung -- silakan unduh berkasnya untuk membukanya.
+      </Message>
+      <template #footer>
+        <Button label="Tutup" severity="secondary" outlined @click="previewVerifikasiDialog = false" />
       </template>
     </Dialog>
   </div>
