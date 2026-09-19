@@ -31,6 +31,39 @@ type CrudConfig[T any] struct {
 	// triggering a recalculation of every still-active pengajuan cuti's
 	// jumlah_hari (see master_routes.go / resyncActivePengajuanDays).
 	AfterChange func(db *gorm.DB)
+	// ExtraFilters: filter tambahan lewat query param di luar kotak cari
+	// bebas (q) & di luar filter berbasis foreign key yang sudah ditangani
+	// handler khusus (mis. Data Pegawai) -- dipakai untuk filter berbasis
+	// KONDISI kolom, bukan sekadar pencocokan ID, misalnya
+	// /unit-kerja?koordinat=diatur|belum untuk menyaring berdasarkan sudah/
+	// belum diisinya titik koordinat absen (lihat master_routes.go). Ikut
+	// diterapkan ke countQuery supaya total & paginasi tetap konsisten
+	// dengan daftar yang ditampilkan.
+	ExtraFilters []CrudExtraFilter
+	// ExtraCounts: hitungan tambahan yang disertakan di meta respons list,
+	// dihitung dari base query (pencarian q diterapkan, tapi ExtraFilters
+	// TIDAK) supaya tetap mencerminkan jumlah sebenarnya walau daftar yang
+	// ditampilkan sedang difilter -- dipakai mis. menampilkan "X dari Y unit
+	// kerja sudah diatur titik koordinatnya" di atas tabel.
+	ExtraCounts []CrudExtraCount
+}
+
+// CrudExtraFilter adalah satu filter tambahan berbasis query param (lihat
+// CrudConfig.ExtraFilters) -- Apply menerima query yang sedang dibangun
+// beserta nilai mentah dari query param, mengembalikan query baru dengan
+// kondisi WHERE tambahan (atau query apa adanya kalau value tidak
+// dikenali/tidak perlu memfilter apa-apa).
+type CrudExtraFilter struct {
+	Param string
+	Apply func(db *gorm.DB, value string) *gorm.DB
+}
+
+// CrudExtraCount adalah satu hitungan tambahan (lihat CrudConfig.ExtraCounts)
+// -- Apply menerima base query (Model + pencarian q, tanpa ExtraFilters) dan
+// mengembalikan query yang sudah ditambahi kondisi WHERE untuk dihitung.
+type CrudExtraCount struct {
+	Key   string
+	Apply func(db *gorm.DB) *gorm.DB
 }
 
 // RegisterCrud wires up GET (list+search+pagination), GET/{id}, POST, PUT/{id},
@@ -72,22 +105,37 @@ func listCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg Cr
 	}
 	search := strings.TrimSpace(q.Get("q"))
 
+	// baseQuery membangun query dasar (Model + pencarian bebas q) dari nol
+	// setiap dipanggil -- dipakai berkali-kali (list, count, & tiap
+	// ExtraCounts) supaya tidak saling mewarisi kondisi WHERE satu sama lain
+	// lewat method chaining GORM yang stateful.
+	baseQuery := func() *gorm.DB {
+		qq := db.Model(new(T))
+		if search != "" && len(cfg.SearchFields) > 0 {
+			var clauses []string
+			var args []interface{}
+			for _, f := range cfg.SearchFields {
+				clauses = append(clauses, fmt.Sprintf("%s ILIKE ?", f))
+				args = append(args, "%"+search+"%")
+			}
+			qq = qq.Where(strings.Join(clauses, " OR "), args...)
+		}
+		return qq
+	}
+
 	var items []T
 	var total int64
 
-	query := applyPreloads(db.Model(new(T)), cfg.Preloads)
-	countQuery := db.Model(new(T))
+	query := applyPreloads(baseQuery(), cfg.Preloads)
+	countQuery := baseQuery()
 
-	if search != "" && len(cfg.SearchFields) > 0 {
-		var clauses []string
-		var args []interface{}
-		for _, f := range cfg.SearchFields {
-			clauses = append(clauses, fmt.Sprintf("%s ILIKE ?", f))
-			args = append(args, "%"+search+"%")
+	for _, ef := range cfg.ExtraFilters {
+		v := strings.TrimSpace(q.Get(ef.Param))
+		if v == "" {
+			continue
 		}
-		cond := strings.Join(clauses, " OR ")
-		query = query.Where(cond, args...)
-		countQuery = countQuery.Where(cond, args...)
+		query = ef.Apply(query, v)
+		countQuery = ef.Apply(countQuery, v)
 	}
 
 	countQuery.Count(&total)
@@ -97,11 +145,28 @@ func listCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg Cr
 		return
 	}
 
-	utils.SuccessMeta(w, "berhasil mengambil data", items, map[string]interface{}{
+	meta := map[string]interface{}{
 		"page":     page,
 		"pageSize": pageSize,
 		"total":    total,
-	})
+	}
+	// total_keseluruhan: total baris yang cocok dengan pencarian q TANPA ikut
+	// ExtraFilters -- dipakai frontend menampilkan "X dari Y" (mis. "6 dari
+	// 12 unit kerja sudah diatur") supaya angka Y tidak ikut menyusut saat
+	// dropdown filter koordinat sedang aktif. Hanya dihitung kalau tabel ini
+	// memang punya ExtraFilters (tidak relevan untuk tabel lain).
+	if len(cfg.ExtraFilters) > 0 {
+		var totalKeseluruhan int64
+		baseQuery().Count(&totalKeseluruhan)
+		meta["total_keseluruhan"] = totalKeseluruhan
+	}
+	for _, ec := range cfg.ExtraCounts {
+		var c int64
+		ec.Apply(baseQuery()).Count(&c)
+		meta[ec.Key] = c
+	}
+
+	utils.SuccessMeta(w, "berhasil mengambil data", items, meta)
 }
 
 func getCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg CrudConfig[T]) {

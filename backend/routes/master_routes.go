@@ -148,6 +148,36 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 		FileBaseName: "unit_kerja",
 		SearchFields: []string{"unit"},
 		Preloads:     []string{"Kecamatan"},
+		// ExtraFilters "koordinat": menyaring daftar berdasarkan status titik
+		// koordinat absen unit kerja -- "diatur" (lat & lng sudah keduanya
+		// terisi) atau "belum" (salah satu/kedua kosong), dipakai dropdown
+		// filter "Titik Koordinat Absen" di ShiftKerjaView/MasterDataView
+		// (lihat config.filters pada tableConfigs['unit-kerja'] di
+		// frontend/src/config/tables.js). ExtraCounts "koordinat_sudah_diatur"
+		// menghitung jumlah yang sudah diatur TANPA ikut filter di atas,
+		// supaya tetap menunjukkan angka sebenarnya walau tabel sedang
+		// difilter -- ditampilkan sebagai "X dari Y unit kerja sudah diatur".
+		ExtraFilters: []handlers.CrudExtraFilter{
+			{
+				Param: "koordinat",
+				Apply: func(db *gorm.DB, value string) *gorm.DB {
+					switch value {
+					case "diatur":
+						return db.Where("lat IS NOT NULL AND lng IS NOT NULL")
+					case "belum":
+						return db.Where("lat IS NULL OR lng IS NULL")
+					default:
+						return db
+					}
+				},
+			},
+		},
+		ExtraCounts: []handlers.CrudExtraCount{
+			{
+				Key:   "koordinat_sudah_diatur",
+				Apply: func(db *gorm.DB) *gorm.DB { return db.Where("lat IS NOT NULL AND lng IS NOT NULL") },
+			},
+		},
 		Columns: []utils.ExcelColumn{
 			{Header: "Unit Kerja", Required: true, Example: "Bidang Pelayanan",
 				Get: func(i interface{}) string { return i.(models.UnitKerja).Unit },

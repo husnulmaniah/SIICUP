@@ -41,6 +41,15 @@ export const jenisSuratKodeOptions = [
 ]
 export const jenisSuratKodeLabels = jenisSuratKodeOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
 
+// Pilihan status "Titik Koordinat Absen" (statis) -- dipakai filter dropdown
+// pada tableConfigs['unit-kerja'] di bawah, dikirim sebagai query param
+// ?koordinat=diatur|belum ke backend (lihat ExtraFilters "koordinat" pada
+// /api/unit-kerja di backend/routes/master_routes.go).
+export const koordinatStatusOptions = [
+  { id: 'diatur', label: 'Sudah diatur' },
+  { id: 'belum', label: 'Belum diatur' },
+]
+
 export const tableConfigs = {
   role: {
     title: 'Role',
@@ -99,6 +108,14 @@ export const tableConfigs = {
       { field: 'tempat_kerja', header: 'Tempat Kerja', type: 'lookup', map: tempatKerjaLabels, width: '130px' },
       { field: 'lat', header: 'Titik Koordinat Absen', type: 'coords', latField: 'lat', lngField: 'lng', width: '160px' },
     ],
+    // filters: dropdown "Titik Koordinat Absen" (Semua/Sudah diatur/Belum
+    // diatur) di atas tabel -- lihat ExtraFilters "koordinat" pada
+    // /api/unit-kerja di backend. metaStats menampilkan hitungan "X dari Y
+    // unit kerja sudah diatur" di atas tabel, diambil dari meta.
+    // koordinat_sudah_diatur yang dikirim backend (ExtraCounts, lihat
+    // master_routes.go) -- dihitung terlepas dari filter yang sedang aktif.
+    filters: [{ field: 'koordinat', label: 'Titik Koordinat Absen', type: 'select', staticOptions: koordinatStatusOptions, optionLabel: 'label' }],
+    metaStats: [{ key: 'koordinat_sudah_diatur', label: 'unit kerja sudah diatur titik koordinat absennya' }],
     formFields: [
       { field: 'unit', label: 'Unit Kerja / Sekolah', type: 'text', required: true },
       {

@@ -38,6 +38,12 @@ const entriesOptions = [5, 10, 25, 50, 100]
 
 const items = ref([])
 const total = ref(0)
+// metaExtra menyimpan field tambahan di meta respons list DI LUAR
+// page/pageSize/total -- mis. total_keseluruhan & koordinat_sudah_diatur
+// pada tabel Unit Kerja (lihat ExtraCounts di backend/handlers/
+// crud_generic.go) -- dipakai menampilkan baris statistik "X dari Y" lewat
+// config.metaStats (lihat tables.js).
+const metaExtra = reactive({})
 const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
@@ -527,6 +533,8 @@ async function fetchList() {
     })
     items.value = data.data || []
     total.value = data.meta?.total ?? items.value.length
+    Object.keys(metaExtra).forEach((k) => delete metaExtra[k])
+    Object.assign(metaExtra, data.meta || {})
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat data', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
@@ -952,6 +960,15 @@ const canManage = computed(() => true) // route guard already restricts page acc
           />
         </div>
         <Button v-if="hasActiveFilter" label="Bersihkan Filter" icon="pi pi-filter-slash" size="small" text severity="secondary" @click="clearFilters" />
+      </div>
+
+      <div v-if="config.metaStats && config.metaStats.length" style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem">
+        <Tag
+          v-for="s in config.metaStats"
+          :key="s.key"
+          severity="info"
+          :value="`${metaExtra[s.key] ?? 0} dari ${metaExtra.total_keseluruhan ?? total} ${s.label}`"
+        />
       </div>
 
       <div class="responsive-table-wrap">
