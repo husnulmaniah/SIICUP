@@ -123,6 +123,13 @@ func buatTemplateSurat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
 		return
 	}
+	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+	// foto/dokumen dari WhatsApp/Google Photos/cloud belum selesai diunduh
+	// ke perangkat saat dipilih lewat file picker.
+	if len(fileData) == 0 {
+		utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+		return
+	}
 
 	item := models.TemplateSurat{
 		Judul:    judul,
@@ -177,6 +184,13 @@ func updateTemplateSurat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		f.Close()
 		if err != nil {
 			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
+			return
+		}
+		// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi
+		// kalau foto/dokumen dari WhatsApp/Google Photos/cloud belum selesai
+		// diunduh ke perangkat saat dipilih lewat file picker.
+		if len(fileData) == 0 {
+			utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
 			return
 		}
 		item.NamaFile = fh.Filename

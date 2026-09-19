@@ -1245,6 +1245,9 @@ async function downloadDokumen(item) {
         <h3>Surat Pendukung (Diinput Administrator)</h3>
         <p class="text-muted">Surat berikut diinput oleh administrator/admin untuk melengkapi tanggal absen Anda.</p>
         <DataTable :value="dokumenList" size="small" stripedRows responsiveLayout="scroll">
+          <Column header="No" style="width: 3.5rem">
+            <template #body="{ index }">{{ index + 1 }}</template>
+          </Column>
           <Column header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
           </Column>

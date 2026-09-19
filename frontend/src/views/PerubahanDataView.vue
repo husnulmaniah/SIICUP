@@ -203,6 +203,30 @@ const previewDialog = ref(false)
 const previewUrl = ref('')
 const previewType = ref('pdf')
 
+// Karena request dokumen di bawah pakai responseType: 'blob', axios TIDAK
+// mem-parse body error (JSON) yang dikirim backend saat status bukan 2xx --
+// e.response.data akan berupa objek Blob, bukan objek JSON, sehingga
+// e.response?.data?.message selalu undefined dan pesan asli dari backend
+// (mis. "data tidak ditemukan" vs "dokumen tidak ditemukan") tersembunyi di
+// balik pesan generik axios ("Request failed with status code 404"). Fungsi
+// ini membaca isi Blob tsb sebagai teks lalu mem-parse-nya sebagai JSON agar
+// pesan asli backend bisa ditampilkan ke user.
+async function extractErrorMessage(e) {
+  const data = e?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      const parsed = JSON.parse(text)
+      if (parsed?.message) return parsed.message
+    } catch {
+      // isi blob bukan JSON valid -- pakai fallback di bawah
+    }
+  } else if (data?.message) {
+    return data.message
+  }
+  return e?.message || 'terjadi kesalahan tidak diketahui'
+}
+
 async function previewSk(row) {
   try {
     const res = await http.get(`/perubahan-data/${row.id}/dokumen`, { params: { inline: 1 }, responseType: 'blob' })
@@ -211,7 +235,7 @@ async function previewSk(row) {
     previewUrl.value = window.URL.createObjectURL(res.data)
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 function closePreview() {
@@ -230,7 +254,7 @@ async function downloadSk(row) {
     link.remove()
     window.URL.revokeObjectURL(blobUrl)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 
@@ -244,7 +268,7 @@ async function previewSkKgb(row) {
     previewUrl.value = window.URL.createObjectURL(res.data)
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 async function downloadSkKgb(row) {
@@ -259,7 +283,7 @@ async function downloadSkKgb(row) {
     link.remove()
     window.URL.revokeObjectURL(blobUrl)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 
@@ -273,7 +297,7 @@ async function previewSkPangkat(row) {
     previewUrl.value = window.URL.createObjectURL(res.data)
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 async function downloadSkPangkat(row) {
@@ -288,7 +312,7 @@ async function downloadSkPangkat(row) {
     link.remove()
     window.URL.revokeObjectURL(blobUrl)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 

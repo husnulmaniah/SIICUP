@@ -247,6 +247,13 @@ func buatPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *gorm
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
 		return
 	}
+	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+	// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
+	// perangkat saat dipilih lewat file picker.
+	if len(fileData) == 0 {
+		utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+		return
+	}
 
 	tanggalStr := make([]string, 0, len(tanggalList))
 	for _, t := range tanggalList {
@@ -361,6 +368,13 @@ func updatePengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *go
 			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
 			return
 		}
+		// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi
+		// kalau foto dari WhatsApp/Google Photos di HP belum selesai
+		// diunduh ke perangkat saat dipilih lewat file picker.
+		if len(fileData) == 0 {
+			utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+			return
+		}
 		item.NamaFile = fh.Filename
 		item.File = fileData
 	}
@@ -440,6 +454,22 @@ func listPengajuanSuratKolektifAdmin(w http.ResponseWriter, r *http.Request, db 
 		out = append(out, toPengajuanSuratKolektifOut(it))
 	}
 	utils.Success(w, "ok", out)
+}
+
+// countPengajuanSuratKolektifMenunggu menangani GET
+// /api/pengajuan-surat-kolektif/count-menunggu -- jumlah pengajuan surat
+// kolektif sekolah yang berstatus "menunggu" verifikasi, INDEPENDEN dari
+// filter status apapun yang sedang dipilih administrator/admin verifikasi
+// pada tabel tab "Verifikasi Surat Kolektif Sekolah" (menu Rekap Absen).
+// Dipakai untuk menampilkan badge angka pada label tab itu sendiri (lihat
+// RekapAbsensiView.vue) supaya administrator/admin verifikasi langsung tahu
+// ada berapa banyak pengajuan baru tanpa perlu membuka tabnya dulu.
+func countPengajuanSuratKolektifMenunggu(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	var jumlah int64
+	db.Model(&models.PengajuanSuratKolektif{}).
+		Where("status = ?", models.PengajuanSuratKolektifMenunggu).
+		Count(&jumlah)
+	utils.Success(w, "ok", map[string]interface{}{"menunggu": jumlah})
 }
 
 // setujuiPengajuanSuratKolektif menangani PUT
@@ -644,6 +674,7 @@ func RegisterPengajuanSuratKolektifRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/pengajuan-surat-kolektif/{id}", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { updatePengajuanSuratKolektif(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-surat-kolektif/saya", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { listPengajuanSuratKolektifSaya(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-surat-kolektif", verifikasi(func(w http.ResponseWriter, r *http.Request) { listPengajuanSuratKolektifAdmin(w, r, db) }))
+	mux.Handle("GET /api/pengajuan-surat-kolektif/count-menunggu", verifikasi(func(w http.ResponseWriter, r *http.Request) { countPengajuanSuratKolektifMenunggu(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-surat-kolektif/{id}/setujui", verifikasi(func(w http.ResponseWriter, r *http.Request) { setujuiPengajuanSuratKolektif(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-surat-kolektif/{id}/kembalikan", verifikasi(func(w http.ResponseWriter, r *http.Request) { kembalikanPengajuanSuratKolektif(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-surat-kolektif/{id}/file", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadPengajuanSuratKolektif(w, r, db) }))

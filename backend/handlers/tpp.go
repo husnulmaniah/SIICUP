@@ -517,6 +517,13 @@ func uploadSkTerakhirSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal membaca isi file")
 		return
 	}
+	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+	// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
+	// perangkat saat dipilih lewat file picker.
+	if len(data) == 0 {
+		utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+		return
+	}
 
 	if err := db.Model(&item).Updates(map[string]interface{}{
 		"sk_terakhir_nama": header.Filename,

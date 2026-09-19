@@ -307,6 +307,15 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal membaca isi file")
 		return
 	}
+	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+	// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
+	// perangkat saat dipilih lewat file picker. Tanpa pengecekan ini,
+	// dokumen tersimpan dengan nama benar tapi isi kosong dan baru ketahuan
+	// gagal ("dokumen tidak ditemukan") saat nanti dibuka/diunduh.
+	if len(data) == 0 {
+		utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+		return
+	}
 
 	updates := map[string]interface{}{}
 	switch jenis {

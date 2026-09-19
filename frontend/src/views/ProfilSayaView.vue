@@ -21,6 +21,31 @@ import Textarea from 'primevue/textarea'
 const toast = useToast()
 const confirm = useConfirm()
 
+// Karena request dokumen (preview/unduh SK) di bawah pakai
+// responseType: 'blob', axios TIDAK mem-parse body error (JSON) yang
+// dikirim backend saat status bukan 2xx -- e.response.data akan berupa
+// objek Blob, bukan objek JSON, sehingga e.response?.data?.message selalu
+// undefined dan pesan asli dari backend (mis. "data tidak ditemukan" vs
+// "dokumen tidak ditemukan") tersembunyi di balik pesan generik axios
+// ("Request failed with status code 404"). Fungsi ini membaca isi Blob
+// tsb sebagai teks lalu mem-parse-nya sebagai JSON agar pesan asli
+// backend bisa ditampilkan ke user.
+async function extractErrorMessage(e) {
+  const data = e?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      const parsed = JSON.parse(text)
+      if (parsed?.message) return parsed.message
+    } catch {
+      // isi blob bukan JSON valid -- pakai fallback di bawah
+    }
+  } else if (data?.message) {
+    return data.message
+  }
+  return e?.message || 'terjadi kesalahan tidak diketahui'
+}
+
 const loading = ref(true)
 const profile = ref(null)
 
@@ -292,7 +317,7 @@ async function previewSkPensiun(row) {
     previewTitle.value = 'Berkas SK / Usulan Pensiun'
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 async function downloadSkPensiun(row) {
@@ -307,7 +332,7 @@ async function downloadSkPensiun(row) {
     link.remove()
     window.URL.revokeObjectURL(blobUrl)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 
@@ -395,7 +420,7 @@ async function previewSkKgbSaatIni() {
     previewTitle.value = 'Berkas SK Kenaikan Gaji Berkala Saat Ini'
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 
@@ -409,7 +434,7 @@ async function previewSkPangkatSaatIni() {
     previewTitle.value = 'Berkas SK Kenaikan Pangkat Saat Ini'
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 
@@ -423,29 +448,64 @@ async function previewSkTerakhirSaatIni() {
     previewTitle.value = 'Berkas SK Terakhir Saat Ini'
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
+}
+
+// Berkas dengan size 0 byte sering lolos terpilih di file picker HP padahal
+// isinya kosong -- paling sering karena foto dari WhatsApp/Google Photos
+// belum selesai diunduh sepenuhnya ke perangkat saat itu. Kalau dibiarkan,
+// pengajuan tetap terkirim dengan nama berkas yang benar tapi tanpa isi, dan
+// baru ketahuan gagal ("dokumen tidak ditemukan") saat administrator
+// membukanya nanti. Dicegah di sini supaya pegawai langsung tahu saat itu
+// juga (backend juga sudah menolak hal yang sama sebagai jaring pengaman).
+function berkasKosong(file) {
+  if (file && file.size === 0) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Berkas kosong',
+      detail: `Berkas "${file.name}" berukuran 0 byte (kosong). Ini sering terjadi kalau foto dari WhatsApp/Google Photos belum selesai diunduh ke HP -- coba buka dulu berkasnya di galeri, lalu pilih ulang.`,
+      life: 6000,
+    })
+    return true
+  }
+  return false
 }
 
 function pickSkFile() {
   skFileInputRef.value?.click()
 }
 function onSkFileChosen(e) {
-  skFile.value = e.target.files[0] || null
+  const file = e.target.files[0] || null
+  if (berkasKosong(file)) {
+    e.target.value = ''
+    return
+  }
+  skFile.value = file
 }
 
 function pickSkKgbFile() {
   skKgbFileInputRef.value?.click()
 }
 function onSkKgbFileChosen(e) {
-  skKgbFile.value = e.target.files[0] || null
+  const file = e.target.files[0] || null
+  if (berkasKosong(file)) {
+    e.target.value = ''
+    return
+  }
+  skKgbFile.value = file
 }
 
 function pickSkPangkatFile() {
   skPangkatFileInputRef.value?.click()
 }
 function onSkPangkatFileChosen(e) {
-  skPangkatFile.value = e.target.files[0] || null
+  const file = e.target.files[0] || null
+  if (berkasKosong(file)) {
+    e.target.value = ''
+    return
+  }
+  skPangkatFile.value = file
 }
 
 function toDateStr(d) {
@@ -537,7 +597,7 @@ async function previewSk(row) {
     previewTitle.value = 'Berkas SK Terakhir'
     previewDialog.value = true
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: e.response?.data?.message || e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 function closePreview() {
@@ -556,7 +616,7 @@ async function downloadSk(row) {
     link.remove()
     window.URL.revokeObjectURL(blobUrl)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: e.message, life: 4000 })
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh berkas', detail: await extractErrorMessage(e), life: 4000 })
   }
 }
 

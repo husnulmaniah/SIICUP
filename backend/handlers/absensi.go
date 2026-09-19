@@ -815,6 +815,12 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca foto")
 		return
 	}
+	// Foto 0 byte lolos dari io.ReadAll tanpa error -- bisa terjadi kalau
+	// upload dari HP terputus/gagal sebagian di tengah jalan.
+	if len(fotoBytes) == 0 {
+		utils.Error(w, http.StatusBadRequest, "foto yang dikirim kosong (0 byte) -- coba ambil ulang fotonya")
+		return
+	}
 
 	kedipanOk := r.FormValue("kedipan_ok") != "false"
 	lat := parseFloatForm(r, "lat")
@@ -967,6 +973,12 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	f.Close()
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca foto")
+		return
+	}
+	// Foto 0 byte lolos dari io.ReadAll tanpa error -- bisa terjadi kalau
+	// upload dari HP terputus/gagal sebagian di tengah jalan.
+	if len(fotoBytes) == 0 {
+		utils.Error(w, http.StatusBadRequest, "foto yang dikirim kosong (0 byte) -- coba ambil ulang fotonya")
 		return
 	}
 

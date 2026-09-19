@@ -103,6 +103,17 @@ func optionalSkFile(w http.ResponseWriter, r *http.Request, field, label string)
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas "+label)
 		return "", nil, false
 	}
+	// Berkas 0 byte biasanya BUKAN kesalahan pembacaan (io.ReadAll di atas
+	// tidak error), melainkan berkas yang dipilih memang kosong -- sering
+	// terjadi kalau foto dari WhatsApp/Google Photos di HP belum selesai
+	// diunduh sepenuhnya saat dipilih lewat file picker. Tanpa pengecekan
+	// ini, pengajuan tetap tersimpan dengan nama file yang benar tapi tanpa
+	// isi, sehingga baru ketahuan gagal ("dokumen tidak ditemukan") saat
+	// nanti dibuka/diunduh administrator.
+	if len(data) == 0 {
+		utils.Error(w, http.StatusBadRequest, "berkas "+label+" yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+		return "", nil, false
+	}
 	return fh.Filename, data, true
 }
 
@@ -283,6 +294,13 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		f.Close()
 		if err != nil {
 			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas SK terakhir")
+			return
+		}
+		// Lihat komentar pada optionalSkFile soal berkas 0 byte -- kasus
+		// paling sering dilaporkan: pegawai memilih foto WhatsApp/cloud yang
+		// belum selesai diunduh ke HP, sehingga terpilih tapi isinya kosong.
+		if len(fileData) == 0 {
+			utils.Error(w, http.StatusBadRequest, "berkas SK terakhir yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
 			return
 		}
 		skNamaFile = fh.Filename

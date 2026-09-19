@@ -600,6 +600,13 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			problems = append(problems, "gagal membaca berkas '"+req.Label+"'")
 			continue
 		}
+		// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi
+		// kalau foto dari WhatsApp/Google Photos di HP belum selesai
+		// diunduh ke perangkat saat dipilih lewat file picker.
+		if len(data) == 0 {
+			problems = append(problems, "berkas '"+req.Label+"' yang dipilih kosong (0 byte) -- coba pilih ulang")
+			continue
+		}
 		pending = append(pending, pendingDoc{req: req, name: fh.Filename, data: data})
 	}
 	if len(problems) > 0 {
@@ -738,6 +745,13 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			f.Close()
 			if err != nil {
 				utils.Error(w, http.StatusBadRequest, "gagal membaca berkas '"+d.Label+"'")
+				return
+			}
+			// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering
+			// terjadi kalau foto dari WhatsApp/Google Photos di HP belum
+			// selesai diunduh ke perangkat saat dipilih lewat file picker.
+			if len(data) == 0 {
+				utils.Error(w, http.StatusBadRequest, "berkas '"+d.Label+"' yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
 				return
 			}
 			replacements = append(replacements, docReplace{id: d.ID, name: fh.Filename, data: data})

@@ -28,6 +28,7 @@ import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
 import TabPanels from 'primevue/tabpanels'
 import TabPanel from 'primevue/tabpanel'
+import Badge from 'primevue/badge'
 
 const toast = useToast()
 const confirm = useConfirm()
@@ -444,8 +445,11 @@ onMounted(async () => {
   // otomatis DITUTUP (lihat absenPulangSudahTutup), bukan cuma dipakai
   // kartu Pengaturan.
   const tugasAdminOnly = auth.isAdministrator ? [loadTempatTugasOptions(), loadJabatanOptions(), loadKecamatanOptions()] : []
-  const verifikasiOnly = auth.isAdministrator || auth.isAdminVerifikasi ? [loadVerifikasiList()] : []
+  const verifikasiOnly = auth.isAdministrator || auth.isAdminVerifikasi ? [loadVerifikasiList(), loadJumlahMenungguVerifikasi()] : []
   await Promise.all([loadPegawaiOptions(), loadPengaturan(), loadJenisSuratOptions(), ...tugasAdminOnly, ...verifikasiOnly])
+  if (auth.isAdministrator || auth.isAdminVerifikasi) {
+    verifikasiCountInterval = setInterval(loadJumlahMenungguVerifikasi, 30000)
+  }
   // loadRekap/loadDokumenAdmin dipakai tab "Rekap Absen" & "Surat Kolektif",
   // yang endpoint-nya (GET /absensi/rekap, /absensi/dokumen/rekap) memang
   // hanya boleh diakses administrator/admin/IsAdminAbsensi (manage() di
@@ -732,7 +736,10 @@ function thumbUrl(row, jenis) {
   return thumbUrls.value[`${row.id}-${jenis}`] || ''
 }
 
-onBeforeUnmount(() => revokeThumbnails())
+onBeforeUnmount(() => {
+  revokeThumbnails()
+  if (verifikasiCountInterval) clearInterval(verifikasiCountInterval)
+})
 
 const fotoDialog = ref(false)
 const fotoDialogUrl = ref('')
@@ -968,6 +975,28 @@ async function loadVerifikasiList() {
 }
 watch(verifikasiStatusFilter, () => loadVerifikasiList())
 
+// ------------------------------------------------------------
+// badge jumlah "menunggu" pada label tab "Verifikasi Surat Kolektif
+// Sekolah" itu sendiri -- SENGAJA query terpisah dari verifikasiList/
+// verifikasiStatusFilter di atas (yang cuma berisi hasil sesuai filter
+// status yang sedang aktif di dropdown), supaya badge ini selalu
+// menunjukkan jumlah "menunggu" yang sesungguhnya walaupun administrator
+// sedang melihat filter lain (mis. "Disetujui"/"Semua"). Di-poll berkala
+// (mengikuti pola lonceng notifikasi global di AppLayout.vue) supaya tetap
+// akurat walau administrator berlama-lama di tab lain (Rekap Absen/
+// Pengaturan/Surat Kolektif) tanpa perlu me-refresh halaman.
+// ------------------------------------------------------------
+const jumlahMenungguVerifikasi = ref(0)
+let verifikasiCountInterval = null
+async function loadJumlahMenungguVerifikasi() {
+  try {
+    const { data } = await http.get('/pengajuan-surat-kolektif/count-menunggu')
+    jumlahMenungguVerifikasi.value = data.data?.menunggu || 0
+  } catch {
+    // non-kritikal -- badge cukup dilewati kalau gagal, tidak perlu toast
+  }
+}
+
 // Pemilihan bulan & pencarian (nama/NIP/unit kerja) untuk tab Verifikasi --
 // sama seperti tab Rekap Absen/Surat Kolektif, tapi dilakukan di BROWSER
 // (bukan lewat parameter ke server) karena satu pengajuan bisa memuat
@@ -1029,7 +1058,7 @@ function confirmSetujuiVerifikasi(item) {
       try {
         const { data } = await http.put(`/pengajuan-surat-kolektif/${item.id}/setujui`)
         toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
-        await loadVerifikasiList()
+        await Promise.all([loadVerifikasiList(), loadJumlahMenungguVerifikasi()])
       } catch (e) {
         toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
       }
@@ -1065,7 +1094,7 @@ async function submitKembalikan() {
     const { data } = await http.put(`/pengajuan-surat-kolektif/${kembalikanItem.value.id}/kembalikan`, fd)
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
     closeKembalikanDialog()
-    await loadVerifikasiList()
+    await Promise.all([loadVerifikasiList(), loadJumlahMenungguVerifikasi()])
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
@@ -1111,6 +1140,13 @@ const defaultTab = computed(() => {
         <Tab v-if="auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi" value="surat"><i class="pi pi-file" style="margin-right: 0.4rem"></i> Surat Kolektif</Tab>
         <Tab v-if="auth.isAdministrator || auth.isAdminVerifikasi" value="verifikasi-sekolah">
           <i class="pi pi-check-square" style="margin-right: 0.4rem"></i> Verifikasi Surat Kolektif Sekolah
+          <Badge
+            v-if="jumlahMenungguVerifikasi > 0"
+            :value="jumlahMenungguVerifikasi"
+            severity="danger"
+            style="margin-left: 0.4rem"
+            :title="`${jumlahMenungguVerifikasi} pengajuan menunggu verifikasi`"
+          />
         </Tab>
       </TabList>
       <TabPanels>

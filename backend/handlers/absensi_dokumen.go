@@ -187,6 +187,13 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
 		return
 	}
+	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+	// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
+	// perangkat saat dipilih lewat file picker.
+	if len(fileData) == 0 {
+		utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+		return
+	}
 	// Keterangan sekarang WAJIB diisi (dulu opsional) -- diisi lewat dropdown
 	// pilihan tetap di frontend (lihat composables/keteranganSurat.js), atau
 	// teks bebas kalau pilihan "Lainnya".

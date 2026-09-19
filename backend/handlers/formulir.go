@@ -1115,6 +1115,13 @@ func uploadFormSigned(w http.ResponseWriter, r *http.Request, db *gorm.DB, jenis
 		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
 		return
 	}
+	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+	// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
+	// perangkat saat dipilih lewat file picker.
+	if len(data) == 0 {
+		utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+		return
+	}
 
 	var existing models.PengajuanDokumen
 	if err := db.Where("id_pengajuan = ? AND jenis = ?", item.ID, jenis).First(&existing).Error; err == nil {
