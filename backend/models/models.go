@@ -121,16 +121,24 @@ type UnitKerja struct {
 // SHIFT KERJA (menu Master Data -> Shift Kerja)
 // ============================================================
 
-// ShiftKerja adalah master data shift kerja yang dipasang ke SATU Unit Kerja
-// (IDUnitKerja unik -- satu unit hanya boleh dipasangi satu shift). Begitu
-// terpasang, SEMUA pegawai yang tempat kerjanya (Pegawai.IDUnitKerja) unit
-// tsb OTOMATIS mengikuti jam & jendela kamera absen shift ini tanpa perlu
-// diatur satu per satu -- lihat jamAbsenUntukPegawai di handlers/absensi.go,
-// yang mengecek Shift Kerja ini SEBAGAI PRIORITAS PALING UTAMA, mengalahkan
-// jam kerja lawas yang ditempel langsung di kolom Jam* UnitKerja di atas
-// (field lawas itu tetap dipertahankan sebagai fallback untuk unit kerja
-// yang belum dipasangi Shift Kerja, supaya pengaturan lama tidak mendadak
-// berubah).
+// ShiftKerja adalah master data shift kerja yang bisa dipasang ke BANYAK
+// Unit Kerja sekaligus (lihat ShiftKerjaUnitKerja) -- tapi satu Unit Kerja
+// tetap hanya boleh dipasangi SATU shift (constraint unik ada di kolom
+// IDUnitKerja pada tabel penghubung, bukan di sini). Begitu terpasang,
+// SEMUA pegawai yang tempat kerjanya (Pegawai.IDUnitKerja) salah satu unit
+// yang terdaftar OTOMATIS mengikuti jam & jendela kamera absen shift ini
+// tanpa perlu diatur satu per satu -- lihat jamAbsenUntukPegawai di
+// handlers/absensi.go, yang mengecek Shift Kerja ini SEBAGAI PRIORITAS
+// PALING UTAMA, mengalahkan jam kerja lawas yang ditempel langsung di kolom
+// Jam* UnitKerja di atas (field lawas itu tetap dipertahankan sebagai
+// fallback untuk unit kerja yang belum dipasangi Shift Kerja, supaya
+// pengaturan lama tidak mendadak berubah).
+//
+// UnitKerjaList TIDAK dipetakan lewat gorm many2many bawaan (butuh kolom
+// unik non-standar di tabel penghubung untuk menjaga aturan "satu unit
+// kerja satu shift") -- diberi tag `gorm:"-"` supaya GORM mengabaikannya
+// sepenuhnya, dan diisi manual oleh handler (lihat isiUnitKerjaList di
+// handlers/shift_kerja.go) setelah query.
 //
 // KategoriShift (lihat ShiftKategoriPilihan) murni label pengelompokan untuk
 // memudahkan administrator membaca daftar shift -- TIDAK memengaruhi
@@ -140,13 +148,28 @@ type ShiftKerja struct {
 	ID            uint             `json:"id" gorm:"primaryKey"`
 	NamaShift     string           `json:"nama_shift" gorm:"column:nama_shift;size:100;not null"`
 	KategoriShift string           `json:"kategori_shift" gorm:"column:kategori_shift;size:30;not null"`
-	IDUnitKerja   uint             `json:"id_unit_kerja" gorm:"column:id_unit_kerja;not null;uniqueIndex"`
-	UnitKerja     *UnitKerja       `json:"unit_kerja,omitempty" gorm:"foreignKey:IDUnitKerja;references:ID"`
+	UnitKerjaList []UnitKerja      `json:"unit_kerja_list" gorm:"-"`
 	HariList      []ShiftKerjaHari `json:"hari_list,omitempty" gorm:"foreignKey:IDShift;references:ID"`
 	CreatedAt     time.Time        `json:"created_at" gorm:"autoCreateTime"`
 }
 
 func (ShiftKerja) TableName() string { return "shift_kerja" }
+
+// ShiftKerjaUnitKerja adalah tabel penghubung shift_kerja <-> unit_kerja:
+// SATU shift boleh dipasang ke BANYAK unit kerja (baris IDShift boleh
+// berulang), tapi SATU unit kerja hanya boleh muncul di SATU baris manapun
+// (uniqueIndex di IDUnitKerja, BUKAN di pasangan IDShift+IDUnitKerja) --
+// itulah yang menjaga aturan "satu unit kerja hanya boleh punya satu shift"
+// tetap berlaku walau sekarang satu shift bisa mencakup banyak unit kerja.
+// Lihat validasiShiftKerjaPayload di handlers/shift_kerja.go untuk validasi
+// aplikasi yang memberi pesan error ramah sebelum constraint DB ini kena.
+type ShiftKerjaUnitKerja struct {
+	ID          uint `json:"id" gorm:"primaryKey"`
+	IDShift     uint `json:"id_shift" gorm:"column:id_shift;not null;index"`
+	IDUnitKerja uint `json:"id_unit_kerja" gorm:"column:id_unit_kerja;not null;uniqueIndex"`
+}
+
+func (ShiftKerjaUnitKerja) TableName() string { return "shift_kerja_unit_kerja" }
 
 // ShiftKategoriPilihan adalah daftar TETAP pilihan kategori_shift yang boleh
 // disimpan (lihat validasi pada handlers/shift_kerja.go) -- dicocokkan persis

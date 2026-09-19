@@ -10,6 +10,7 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
+import MultiSelect from 'primevue/multiselect'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
 import Message from 'primevue/message'
@@ -73,9 +74,15 @@ onMounted(() => {
 
 // unit kerja yang boleh dipilih di dropdown: yang belum dipasangi shift lain,
 // DITAMBAH unit kerja milik shift yang sedang diedit (supaya tetap muncul di
-// dropdown walau sudah "terpakai" oleh dirinya sendiri).
+// dropdown walau sudah "terpakai" oleh dirinya sendiri). Satu shift sekarang
+// boleh mencakup BANYAK unit kerja sekaligus (checkbox multi-pilih), tapi
+// satu unit kerja tetap hanya boleh dipasangi satu shift.
 const unitKerjaOptions = computed(() => {
-  const idTerpakai = new Set(shiftList.value.filter((s) => s.id !== form.id).map((s) => s.id_unit_kerja))
+  const idTerpakai = new Set(
+    shiftList.value
+      .filter((s) => s.id !== form.id)
+      .flatMap((s) => (s.unit_kerja_list || []).map((u) => u.id))
+  )
   return unitKerjaList.value.filter((u) => !idTerpakai.has(u.id))
 })
 
@@ -109,14 +116,14 @@ const form = reactive({
   id: null,
   nama_shift: '',
   kategori_shift: null,
-  id_unit_kerja: null,
+  id_unit_kerja_list: [],
   hari_list: hariKosong(),
 })
 
 function bukaTambah() {
   dialogMode.value = 'tambah'
   formErrors.value = ''
-  Object.assign(form, { id: null, nama_shift: '', kategori_shift: null, id_unit_kerja: null, hari_list: hariKosong() })
+  Object.assign(form, { id: null, nama_shift: '', kategori_shift: null, id_unit_kerja_list: [], hari_list: hariKosong() })
   dialogVisible.value = true
 }
 
@@ -129,7 +136,7 @@ function bukaUbah(item) {
     id: item.id,
     nama_shift: item.nama_shift,
     kategori_shift: item.kategori_shift,
-    id_unit_kerja: item.id_unit_kerja,
+    id_unit_kerja_list: (item.unit_kerja_list || []).map((u) => u.id),
     hari_list: URUTAN_HARI_TAMPILAN.map((hari) => {
       const h = hariTersimpan[hari]
       return h
@@ -171,7 +178,7 @@ function jamValid(v) {
 function validasiForm() {
   if (!form.nama_shift?.trim()) return 'Nama shift wajib diisi'
   if (!form.kategori_shift) return 'Kategori shift wajib dipilih'
-  if (!form.id_unit_kerja) return 'Unit kerja wajib dipilih'
+  if (!form.id_unit_kerja_list?.length) return 'Minimal satu unit kerja wajib dipilih'
   for (const h of form.hari_list) {
     if (!h.aktif) continue
     const label = NAMA_HARI[h.hari]
@@ -204,7 +211,7 @@ async function submitForm() {
   const payload = {
     nama_shift: form.nama_shift.trim(),
     kategori_shift: form.kategori_shift,
-    id_unit_kerja: form.id_unit_kerja,
+    id_unit_kerja_list: form.id_unit_kerja_list,
     hari_list: form.hari_list.map((h) => ({ ...h })),
   }
   try {
@@ -224,9 +231,13 @@ async function submitForm() {
   }
 }
 
+function namaUnitKerjaList(item) {
+  return (item.unit_kerja_list || []).map((u) => u.unit).join(', ') || '-'
+}
+
 function konfirmasiHapus(item) {
   confirm.require({
-    message: `Hapus shift kerja "${item.nama_shift}"? Pegawai di unit kerja "${item.unit_kerja?.unit || '-'}" akan otomatis kembali memakai jam kerja lama (jam unit kerja atau default sekolah/dinas).`,
+    message: `Hapus shift kerja "${item.nama_shift}"? Pegawai di unit kerja "${namaUnitKerjaList(item)}" akan otomatis kembali memakai jam kerja lama (jam unit kerja atau default sekolah/dinas).`,
     header: 'Konfirmasi Hapus',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: 'Ya, Hapus',
@@ -251,10 +262,11 @@ function konfirmasiHapus(item) {
       <div>
         <h2 style="margin: 0 0 0.35rem 0">Shift Kerja</h2>
         <p class="text-muted" style="max-width: 60rem">
-          Atur jam masuk, istirahat & pulang per hari untuk satu Unit Kerja. Begitu shift dipasang ke sebuah unit
-          kerja, SEMUA pegawai yang tempat kerjanya unit tersebut otomatis mengikuti jam & jendela kamera absen shift
-          ini -- tidak perlu diatur satu per satu per pegawai. Di luar jam yang ditetapkan (atau di hari yang ditandai
-          libur untuk shift ini), kamera absen otomatis tertutup.
+          Atur jam masuk, istirahat & pulang per hari untuk satu atau beberapa Unit Kerja sekaligus. Begitu shift
+          dipasang ke suatu unit kerja, SEMUA pegawai yang tempat kerjanya unit tersebut otomatis mengikuti jam &
+          jendela kamera absen shift ini -- tidak perlu diatur satu per satu per pegawai. Satu unit kerja tetap hanya
+          boleh dipasangi satu shift. Di luar jam yang ditetapkan (atau di hari yang ditandai libur untuk shift ini),
+          kamera absen otomatis tertutup.
         </p>
       </div>
       <Button label="Tambah Shift Kerja" icon="pi pi-plus" @click="bukaTambah" />
@@ -265,7 +277,7 @@ function konfirmasiHapus(item) {
       <Column field="nama_shift" header="Nama Shift" />
       <Column field="kategori_shift" header="Kategori" />
       <Column header="Unit Kerja">
-        <template #body="{ data }">{{ data.unit_kerja?.unit || '-' }}</template>
+        <template #body="{ data }">{{ namaUnitKerjaList(data) }}</template>
       </Column>
       <Column header="Hari Kerja">
         <template #body="{ data }">
@@ -302,16 +314,17 @@ function konfirmasiHapus(item) {
         </div>
         <div>
           <div class="field-label">Unit Kerja</div>
-          <Select
-            v-model="form.id_unit_kerja"
+          <MultiSelect
+            v-model="form.id_unit_kerja_list"
             :options="unitKerjaOptions"
             optionLabel="unit"
             optionValue="id"
             filter
-            placeholder="Pilih unit kerja"
+            display="chip"
+            placeholder="Pilih unit kerja (bisa lebih dari satu)"
             style="width: 100%"
           />
-          <small class="text-muted">Hanya unit kerja yang belum dipasangi shift lain yang muncul di sini.</small>
+          <small class="text-muted">Bisa pilih lebih dari satu unit kerja. Hanya unit kerja yang belum dipasangi shift lain yang muncul di sini.</small>
         </div>
       </div>
 

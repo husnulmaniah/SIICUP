@@ -127,8 +127,15 @@ func shiftKerjaUntukUnitKerja(db *gorm.DB, idUnitKerja uint) *models.ShiftKerja 
 	if idUnitKerja == 0 {
 		return nil
 	}
+	// Shift Kerja sekarang bisa dipasang ke banyak unit kerja sekaligus
+	// (lihat models.ShiftKerjaUnitKerja) -- cari dulu lewat tabel
+	// penghubung untuk tahu shift mana yang mencakup unit kerja ini.
+	var join models.ShiftKerjaUnitKerja
+	if err := db.Where("id_unit_kerja = ?", idUnitKerja).First(&join).Error; err != nil {
+		return nil
+	}
 	var shift models.ShiftKerja
-	if err := db.Preload("HariList").Where("id_unit_kerja = ?", idUnitKerja).First(&shift).Error; err != nil {
+	if err := db.Preload("HariList").First(&shift, join.IDShift).Error; err != nil {
 		return nil
 	}
 	return &shift
