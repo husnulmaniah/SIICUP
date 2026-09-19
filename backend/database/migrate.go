@@ -67,6 +67,37 @@ func Migrate(db *gorm.DB) {
 		}
 	}
 
+	// Shift Kerja tadinya (rilis pertama fitur ini) dipasang ke SATU unit
+	// kerja lewat kolom shift_kerja.id_unit_kerja (NOT NULL). Fitur ini lalu
+	// diubah supaya SATU shift bisa dipasang ke BANYAK unit kerja lewat
+	// tabel penghubung shift_kerja_unit_kerja (lihat models.ShiftKerja) --
+	// kolom id_unit_kerja lama itu sudah dibuang dari struct Go, tapi
+	// AutoMigrate TIDAK PERNAH menghapus kolom yang sudah tidak ada di
+	// struct, jadi di database yang sudah pernah dideploy sebelum perubahan
+	// ini, kolom NOT NULL itu masih tertinggal -- membuat SEMUA insert shift
+	// kerja baru gagal dengan error constraint (kolom lama itu tidak pernah
+	// diisi lagi oleh kode yang sekarang). Baris di bawah ini menangani
+	// migrasi itu secara aman & idempotent: kalau kolom itu masih ada, data
+	// pemasangan shift<->unit kerja yang sudah tersimpan di sana dipindahkan
+	// dulu ke tabel penghubung yang baru (supaya tidak hilang), baru
+	// kolomnya dihapus. Aman dijalankan berkali-kali -- begitu kolomnya
+	// sudah tidak ada, blok ini langsung dilewati.
+	if db.Migrator().HasColumn(&models.ShiftKerja{}, "id_unit_kerja") {
+		if err := db.Exec(`
+			INSERT INTO shift_kerja_unit_kerja (id_shift, id_unit_kerja)
+			SELECT id, id_unit_kerja FROM shift_kerja
+			WHERE id_unit_kerja IS NOT NULL
+			ON CONFLICT (id_unit_kerja) DO NOTHING
+		`).Error; err != nil {
+			log.Printf("peringatan: gagal memindahkan data shift_kerja.id_unit_kerja lama ke shift_kerja_unit_kerja: %v", err)
+		}
+		if err := db.Migrator().DropColumn(&models.ShiftKerja{}, "id_unit_kerja"); err != nil {
+			log.Printf("peringatan: gagal menghapus kolom lama shift_kerja.id_unit_kerja: %v", err)
+		} else {
+			log.Println("migrasi: kolom lama shift_kerja.id_unit_kerja berhasil dipindahkan & dihapus")
+		}
+	}
+
 	// Fitur "Jam Kerja Khusus" per Unit Kerja/Sekolah sudah dihapus dari UI
 	// (menu Master Data -> Unit Kerja) atas permintaan pengguna, karena
 	// jam kerja sekarang cukup diatur lewat 2 jendela waktu global di menu
