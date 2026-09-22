@@ -252,17 +252,21 @@ func resolveSignerInfo(db *gorm.DB, pengaturan models.PengaturanSurat) (nama, ni
 // buildSignatureQR encodes a Google Search URL for the automatic digital-
 // signature stamp printed on both forms (Formulir Cuti & Surat Rekomendasi)
 // -- scanning it with an ordinary phone camera opens straight to a Google
-// search (not just raw text in a QR-reader app) showing: nama surat, NIP,
-// nama pegawai, jenis cuti, lama cuti, siapa yang bertanda tangan beserta
-// jabatannya, dan tanggal disetujuinya pengajuan cuti tersebut. A failure
-// here (extremely unlikely) is meant to be treated by the caller as "skip
-// the stamp", not a hard error: it's a supplementary trust marker, not the
-// form's substance.
+// search (not just raw text in a QR-reader app). A failure here (extremely
+// unlikely) is meant to be treated by the caller as "skip the stamp", not a
+// hard error: it's a supplementary trust marker, not the form's substance.
 //
-// namaSurat identifies which document this stamp belongs to ("Surat
-// Rekomendasi Izin Cuti" / "Formulir Permintaan dan Pemberian Cuti") since
-// the same function serves both forms.
-func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai, namaSurat string) ([]byte, error) {
+// Format kalimat query SENGAJA ditulis sebagai daftar field berlabel
+// ("Nama Pejabat: ... Jabatan: ... Menyetujui ... atas nama ... Mulai ...
+// sampai dengan ... Ditandatangani pada tanggal ... di Kolonodale") --
+// bukan lagi satu kalimat mengalir dipisah tanda "-" -- sesuai permintaan
+// eksplisit & contoh acuan yang diberikan: Google lebih sering menampilkan
+// ringkasan AI yang rapi (bukan "tidak cocok dengan dokumen apa pun") kalau
+// query-nya berupa fakta-fakta berlabel jelas seperti ini. Jabatan
+// penandatangan & rentang tanggal cuti (Mulai/sampai dengan) ikut
+// disertakan lagi di sini karena keduanya persis yang muncul pada contoh
+// acuan tersebut.
+func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai) ([]byte, error) {
 	jenisNama := "-"
 	if item.JenisCuti != nil {
 		jenisNama = item.JenisCuti.Jenis
@@ -271,22 +275,14 @@ func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai, namaSur
 	if item.TglApproval != nil {
 		tglDisetujui = formatDateID(*item.TglApproval)
 	}
-	// Format kalimat SENGAJA disederhanakan jadi satu kalimat mengalir --
-	// bukan lagi daftar field dipisah tanda "-" -- sesuai permintaan
-	// eksplisit: "<nama surat> <jenis cuti> atas nama <nama pegawai> -
-	// <NIP pegawai> - yang ditandatangani oleh <nama penandatangan> - <NIP
-	// penandatangan> - pada tanggal <tanggal disetujui>". Jabatan
-	// penandatangan & rincian lama cuti TIDAK lagi disertakan di sini (di
-	// luar permintaan) supaya kalimatnya tetap pendek & tidak terpotong
-	// Google saat ditampilkan di ringkasan hasil pencarian.
 	query := fmt.Sprintf(
-		"%s %s atas nama %s - %s - yang ditandatangani oleh %s - %s - pada tanggal %s",
-		namaSurat,
+		"Nama Pejabat: %s Jabatan: %s Menyetujui %s atas nama %s Mulai %s sampai dengan %s Ditandatangani pada tanggal %s di Kolonodale",
+		namaOrDash(item.TtdNama),
+		namaOrDash(item.TtdJabatan),
 		jenisNama,
 		pegawai.Nama,
-		namaOrDash(pegawai.NIP),
-		namaOrDash(item.TtdNama),
-		namaOrDash(item.TtdNip),
+		formatDateID(item.TglMulai),
+		formatDateID(item.TglSelesai),
 		tglDisetujui,
 	)
 	googleURL := "https://www.google.com/search?q=" + neturl.QueryEscape(query)
@@ -296,8 +292,8 @@ func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai, namaSur
 // drawSignatureQR registers (under a page-unique name) and draws the
 // automatic signature QR at (x, yTop) sized side x side pt square. Any error
 // (encoding or registration) is swallowed on purpose -- see buildSignatureQR.
-func drawSignatureQR(doc *utils.PDFDoc, p *utils.PDFPage, name string, item models.PengajuanCuti, pegawai models.Pegawai, namaSurat string, x, yTop, side float64) {
-	png, err := buildSignatureQR(item, pegawai, namaSurat)
+func drawSignatureQR(doc *utils.PDFDoc, p *utils.PDFPage, name string, item models.PengajuanCuti, pegawai models.Pegawai, x, yTop, side float64) {
+	png, err := buildSignatureQR(item, pegawai)
 	if err != nil {
 		return
 	}
@@ -444,7 +440,7 @@ func buildSuratRekomendasiPage(doc *utils.PDFDoc, item models.PengajuanCuti, peg
 	if qrCenterX+qrSide/2 > rightX {
 		qrCenterX = rightX - qrSide/2
 	}
-	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, "Surat Rekomendasi Izin Cuti", qrCenterX-qrSide/2, y+4, qrSide)
+	drawSignatureQR(doc, p, "ttd_qr_rekomendasi", item, pegawai, qrCenterX-qrSide/2, y+4, qrSide)
 	y += qrSide + 18
 
 	p.SetFont(true, 12)
@@ -920,7 +916,7 @@ func buildFormulirCutiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai
 	const qrSideVII = 120.0
 	qrTopVII := jabatanBottomVII + 8.0
 	qrX := centerVII - qrSideVII/2
-	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, "Formulir Permintaan dan Pemberian Cuti", qrX, qrTopVII, qrSideVII)
+	drawSignatureQR(doc, p, "ttd_qr_formulir", item, pegawai, qrX, qrTopVII, qrSideVII)
 
 	nameTopVII := qrTopVII + qrSideVII + 14.0
 	kepalaDinasNama := truncateToWidth(namaOrDash(signerNama), capWidthVII*boldWidthSafety, 12)
