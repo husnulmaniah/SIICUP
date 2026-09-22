@@ -535,10 +535,26 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		NamaPasangan         string
 		NikPasangan          string
 		PekerjaanPasangan    string
+		CatatanPasangan      string
 		JumlahAnak           string
 		DaftarNamaAnak       string
 		StatusKp4            string
 		DataPegawai          string
+	}
+
+	// kp4CatatanTanggungan: label "TERTANGGUNG"/"TIDAK TERTANGGUNG" yang
+	// dipakai kolom "Catatan" pada rekap KP4 -- mengikuti format yang sudah
+	// biasa dipakai sekolah secara manual (contoh: rekap KP4 SMPN 1 Bungku
+	// Utara/Butar yang diberikan pengguna): pasangan SELALU "Tertanggung"
+	// begitu datanya ada (sama dengan aturan jumlah_keluarga_tertanggung di
+	// muatKp4Ringkasan -- pasangan tidak punya flag dapat/tidak tunjangan
+	// sendiri seperti anak), sedangkan anak ikut/tidak ikut "Tertanggung"
+	// sesuai Kp4Anak.DapatTunjangan yang memang sudah diisi pegawai di form.
+	kp4CatatanTanggungan := func(tertanggung bool) string {
+		if tertanggung {
+			return "Tertanggung"
+		}
+		return "Tidak Tertanggung"
 	}
 
 	var rows []kp4ExportRow
@@ -586,6 +602,7 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			NamaPasangan:         "-",
 			NikPasangan:          "-",
 			PekerjaanPasangan:    "-",
+			CatatanPasangan:      "-",
 			JumlahAnak:           strconv.Itoa(len(ring.Anak)),
 			DaftarNamaAnak:       "-",
 		}
@@ -604,13 +621,16 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			out.NamaPasangan = namaOrDash(ring.Pasangan.Nama)
 			out.NikPasangan = namaOrDash(ring.Pasangan.NIK)
 			out.PekerjaanPasangan = namaOrDash(ring.Pasangan.Pekerjaan)
+			// pasangan ada -> selalu Tertanggung (lihat catatan
+			// kp4CatatanTanggungan di atas).
+			out.CatatanPasangan = kp4CatatanTanggungan(true)
 		}
 		if len(ring.Anak) > 0 {
 			namaAnak := make([]string, 0, len(ring.Anak))
 			for _, a := range ring.Anak {
-				namaAnak = append(namaAnak, a.Nama)
+				namaAnak = append(namaAnak, fmt.Sprintf("%s (%s)", a.Nama, kp4CatatanTanggungan(a.DapatTunjangan)))
 			}
-			out.DaftarNamaAnak = strings.Join(namaAnak, ", ")
+			out.DaftarNamaAnak = strings.Join(namaAnak, "; ")
 		}
 		if ring.Kelengkapan.Kp4BelumLengkap {
 			out.StatusKp4 = "Belum Lengkap"
@@ -643,8 +663,9 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		{Header: "Nama Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).NamaPasangan }},
 		{Header: "NIK Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).NikPasangan }},
 		{Header: "Pekerjaan Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).PekerjaanPasangan }},
+		{Header: "Catatan Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).CatatanPasangan }},
 		{Header: "Jumlah Anak", Get: func(item interface{}) string { return item.(kp4ExportRow).JumlahAnak }},
-		{Header: "Daftar Nama Anak", Get: func(item interface{}) string { return item.(kp4ExportRow).DaftarNamaAnak }},
+		{Header: "Daftar Anak (Nama & Catatan Tanggungan)", Get: func(item interface{}) string { return item.(kp4ExportRow).DaftarNamaAnak }},
 		{Header: "Status KP4", Get: func(item interface{}) string { return item.(kp4ExportRow).StatusKp4 }},
 		{Header: "Data Pegawai", Get: func(item interface{}) string { return item.(kp4ExportRow).DataPegawai }},
 	}

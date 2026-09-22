@@ -1,4 +1,5 @@
 <script setup>
+import Message from 'primevue/message'
 import Kp4FormPanel from '../components/Kp4FormPanel.vue'
 </script>
 
@@ -10,6 +11,10 @@ import Kp4FormPanel from '../components/Kp4FormPanel.vue'
       tersimpan langsung tanpa perlu menunggu persetujuan. Formulir yang dicetak akan ditandatangani otomatis oleh
       Kepala Dinas/PLT.
     </p>
+    <Message severity="error" :closable="false" style="margin-bottom: 1.25rem">
+      <strong>Catatan:</strong> Isi KP4 berdasarkan tunjangan sesuai dengan gaji yang diterima saat ini. Jangan
+      dikurangi dan jangan dilebihkan.
+    </Message>
     <Kp4FormPanel />
   </div>
 </template>
