@@ -332,6 +332,13 @@ func drawKp4TandaTangan(doc *utils.PDFDoc, p *utils.PDFPage, qrNameSuffix string
 	colW := (rightX - marginX - 30) / 2
 	leftX := marginX
 	rightColX := marginX + colW + 30
+	// Titik tengah masing-masing kolom -- dipakai supaya nama+garis+NIP
+	// digambar rata tengah kolom (bukan rata kiri) dan garis bawah tanda
+	// tangan mengikuti panjang nama yang sebenarnya, bukan lebar kolom penuh
+	// (lihat truncateToWidth/boldWidthSafety di formulir.go untuk pola yang
+	// sama dipakai pada blok TTE kepala dinas di formulir cuti).
+	leftColCenter := leftX + colW/2
+	rightColCenter := rightColX + colW/2
 
 	p.SetFont(false, 10)
 	p.Text(leftX, yTop, "Mengetahui / Mengesahkan :")
@@ -345,11 +352,13 @@ func drawKp4TandaTangan(doc *utils.PDFDoc, p *utils.PDFPage, qrNameSuffix string
 	drawKp4SignatureQR(doc, p, "kp4_qr_"+qrNameSuffix, signerNama, signerJabatan, pegawai, tglCetak, leftX, y1+4, qrSide)
 	y1 += qrSide + 16
 	p.SetFont(true, 10)
-	p.Text(leftX, y1, namaOrDash(signerNama))
-	p.Line(leftX, y1+3, leftX+colW, y1+3)
+	signerNamaDisp := truncateToWidth(namaOrDash(signerNama), (colW-10)*boldWidthSafety, 10)
+	p.TextCentered(leftColCenter, y1, signerNamaDisp)
+	wLeft := utils.TextWidth(signerNamaDisp, 10)
+	p.Line(leftColCenter-wLeft/2, y1+3, leftColCenter+wLeft/2, y1+3)
 	y1 += 13
 	p.SetFont(false, 10)
-	p.Text(leftX, y1, "NIP. "+namaOrDash(signerNip))
+	p.TextCentered(leftColCenter, y1, "NIP. "+namaOrDash(signerNip))
 
 	p.SetFont(false, 10)
 	p.Text(rightColX, yTop, "Kolonodale, "+formatDateID(tglCetak)+".")
@@ -357,11 +366,13 @@ func drawKp4TandaTangan(doc *utils.PDFDoc, p *utils.PDFPage, qrNameSuffix string
 	p.Text(rightColX, y2, "Pegawai yang bersangkutan,")
 	y2 += 13 + 70 + 16 // ruang kosong setinggi blok QR di kiri, utk tanda tangan basah
 	p.SetFont(true, 10)
-	p.Text(rightColX, y2, namaOrDash(pegawai.Nama))
-	p.Line(rightColX, y2+3, rightColX+colW, y2+3)
+	pegawaiNamaDisp := truncateToWidth(namaOrDash(pegawai.Nama), (colW-10)*boldWidthSafety, 10)
+	p.TextCentered(rightColCenter, y2, pegawaiNamaDisp)
+	wRight := utils.TextWidth(pegawaiNamaDisp, 10)
+	p.Line(rightColCenter-wRight/2, y2+3, rightColCenter+wRight/2, y2+3)
 	y2 += 13
 	p.SetFont(false, 10)
-	p.Text(rightColX, y2, "NIP. "+namaOrDash(pegawai.NIP))
+	p.TextCentered(rightColCenter, y2, "NIP. "+namaOrDash(pegawai.NIP))
 }
 
 // ---------------------------------------------------------------------------

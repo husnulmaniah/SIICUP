@@ -587,22 +587,29 @@ func (Kp4Pasangan) TableName() string { return "kp4_pasangan" }
 // Kp4Anak: data anak yang menjadi tanggungan (0..N baris per pegawai,
 // pegawai bisa "tambah anak" sebanyak yang diperlukan lewat menu KP4).
 type Kp4Anak struct {
-	ID                  uint       `json:"id" gorm:"primaryKey"`
-	IDPegawai           uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
-	Urutan              int        `json:"urutan" gorm:"column:urutan;default:0"`
-	Nama                string     `json:"nama" gorm:"column:nama;size:150"`
-	TempatLahir         string     `json:"tempat_lahir" gorm:"column:tempat_lahir;size:100"`
-	TglLahir            *time.Time `json:"tgl_lahir" gorm:"column:tgl_lahir;type:date"`
-	StatusAnak          string     `json:"status_anak" gorm:"column:status_anak;size:20"`
-	DariPasanganKe      int        `json:"dari_pasangan_ke" gorm:"column:dari_pasangan_ke;default:1"`
-	JenisKelamin        string     `json:"jenis_kelamin" gorm:"column:jenis_kelamin;size:5"`
-	DapatTunjangan      bool       `json:"dapat_tunjangan" gorm:"column:dapat_tunjangan;default:false"`
-	SudahKawin          bool       `json:"sudah_kawin" gorm:"column:sudah_kawin;default:false"`
-	SudahBekerja        bool       `json:"sudah_bekerja" gorm:"column:sudah_bekerja;default:false"`
-	MasihSekolah        bool       `json:"masih_sekolah" gorm:"column:masih_sekolah;default:true"`
-	NoPutusanPengadilan string     `json:"no_putusan_pengadilan" gorm:"column:no_putusan_pengadilan;size:100"`
-	CreatedAt           time.Time  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt           time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+	ID             uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai      uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
+	Urutan         int        `json:"urutan" gorm:"column:urutan;default:0"`
+	Nama           string     `json:"nama" gorm:"column:nama;size:150"`
+	TempatLahir    string     `json:"tempat_lahir" gorm:"column:tempat_lahir;size:100"`
+	TglLahir       *time.Time `json:"tgl_lahir" gorm:"column:tgl_lahir;type:date"`
+	StatusAnak     string     `json:"status_anak" gorm:"column:status_anak;size:20"`
+	DariPasanganKe int        `json:"dari_pasangan_ke" gorm:"column:dari_pasangan_ke;default:1"`
+	JenisKelamin   string     `json:"jenis_kelamin" gorm:"column:jenis_kelamin;size:5"`
+	DapatTunjangan bool       `json:"dapat_tunjangan" gorm:"column:dapat_tunjangan;default:false"`
+	SudahKawin     bool       `json:"sudah_kawin" gorm:"column:sudah_kawin;default:false"`
+	SudahBekerja   bool       `json:"sudah_bekerja" gorm:"column:sudah_bekerja;default:false"`
+	// PENTING: sengaja TANPA tag "default:true" di GORM -- kalau ada, GORM
+	// menganggap nilai false (zero-value bool di Go) sebagai "tidak diisi"
+	// dan malah memakai default kolom (true) saat INSERT, sehingga pegawai
+	// tidak akan pernah bisa meng-uncheck "Masih Sekolah/Kuliah" (nilai false
+	// yang dikirim dari form selalu berubah balik jadi true setelah simpan).
+	// Default true tetap dijaga di level aplikasi lewat anakBaru() di
+	// Kp4FormPanel.vue (anak BARU otomatis tercentang), bukan di kolom DB.
+	MasihSekolah        bool      `json:"masih_sekolah" gorm:"column:masih_sekolah"`
+	NoPutusanPengadilan string    `json:"no_putusan_pengadilan" gorm:"column:no_putusan_pengadilan;size:100"`
+	CreatedAt           time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt           time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (Kp4Anak) TableName() string { return "kp4_anak" }
