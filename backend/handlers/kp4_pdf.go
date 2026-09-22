@@ -340,16 +340,21 @@ func drawKp4TandaTangan(doc *utils.PDFDoc, p *utils.PDFPage, qrNameSuffix string
 	leftColCenter := leftX + colW/2
 	rightColCenter := rightColX + colW/2
 
+	// qrSide diperbesar dari 70 -> 100 (permintaan pengguna: barcode TTE
+	// terlalu kecil) -- dipakai juga utk menyamakan tinggi ruang kosong pada
+	// kolom kanan (tanda tangan basah pegawai) supaya kedua kolom tetap
+	// sejajar meski ukuran QR berubah.
+	qrSide := 100.0
+
 	p.SetFont(false, 10)
-	p.Text(leftX, yTop, "Mengetahui / Mengesahkan :")
+	p.TextCentered(leftColCenter, yTop, "Mengetahui / Mengesahkan :")
 	y1 := yTop + 13
 	jabatanLines := utils.WrapText(namaOrDash(signerJabatan), colW, 10)
 	for _, jl := range jabatanLines {
-		p.Text(leftX, y1, jl)
+		p.TextCentered(leftColCenter, y1, jl)
 		y1 += 13
 	}
-	qrSide := 70.0
-	drawKp4SignatureQR(doc, p, "kp4_qr_"+qrNameSuffix, signerNama, signerJabatan, pegawai, tglCetak, leftX, y1+4, qrSide)
+	drawKp4SignatureQR(doc, p, "kp4_qr_"+qrNameSuffix, signerNama, signerJabatan, pegawai, tglCetak, leftColCenter-qrSide/2, y1+4, qrSide)
 	y1 += qrSide + 16
 	p.SetFont(true, 10)
 	signerNamaDisp := truncateToWidth(namaOrDash(signerNama), (colW-10)*boldWidthSafety, 10)
@@ -361,10 +366,10 @@ func drawKp4TandaTangan(doc *utils.PDFDoc, p *utils.PDFPage, qrNameSuffix string
 	p.TextCentered(leftColCenter, y1, "NIP. "+namaOrDash(signerNip))
 
 	p.SetFont(false, 10)
-	p.Text(rightColX, yTop, "Kolonodale, "+formatDateID(tglCetak)+".")
+	p.TextCentered(rightColCenter, yTop, "Kolonodale, "+formatDateID(tglCetak)+".")
 	y2 := yTop + 13
-	p.Text(rightColX, y2, "Pegawai yang bersangkutan,")
-	y2 += 13 + 70 + 16 // ruang kosong setinggi blok QR di kiri, utk tanda tangan basah
+	p.TextCentered(rightColCenter, y2, "Pegawai yang bersangkutan,")
+	y2 += 13 + qrSide + 16 // ruang kosong setinggi blok QR di kiri, utk tanda tangan basah
 	p.SetFont(true, 10)
 	pegawaiNamaDisp := truncateToWidth(namaOrDash(pegawai.Nama), (colW-10)*boldWidthSafety, 10)
 	p.TextCentered(rightColCenter, y2, pegawaiNamaDisp)

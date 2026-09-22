@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -368,6 +369,7 @@ func RegisterKp4Routes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/kp4/saya/cetak", cetakRoles(func(w http.ResponseWriter, r *http.Request) { kp4CetakSaya(w, r, db) }))
 
 	mux.Handle("GET /api/kp4", manage(func(w http.ResponseWriter, r *http.Request) { kp4AdminList(w, r, db) }))
+	mux.Handle("GET /api/kp4/export", manage(func(w http.ResponseWriter, r *http.Request) { kp4Export(w, r, db) }))
 	mux.Handle("GET /api/kp4/pegawai/{id}", manage(func(w http.ResponseWriter, r *http.Request) { kp4AdminGet(w, r, db) }))
 	mux.Handle("PUT /api/kp4/pegawai/{id}", manage(func(w http.ResponseWriter, r *http.Request) { kp4AdminSave(w, r, db) }))
 	mux.Handle("GET /api/kp4/pegawai/{id}/cetak", cetakRoles(func(w http.ResponseWriter, r *http.Request) { kp4CetakAdmin(w, r, db) }))
@@ -493,6 +495,165 @@ func kp4AdminList(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		"total_sudah_lengkap": totalSudahLengkap,
 		"total_belum_lengkap": len(pegawaiList) - totalSudahLengkap,
 	})
+}
+
+// kp4Export menghasilkan file .xlsx satu baris per pegawai berisi SELURUH
+// data KP4 (bukan cuma status kelengkapan seperti kp4AdminList di atas) --
+// dipakai administrator/admin lewat tombol "Download Excel" pada menu KP4
+// utk keperluan administrasi/verifikasi tunjangan keluarga di luar aplikasi
+// (mis. dilampirkan ke SPM/berkas gaji). Menerima filter ?q= dan
+// ?lengkap=sudah|belum yang sama dengan kp4AdminList supaya file yang
+// diunduh konsisten dengan apa yang sedang ditampilkan/difilter di tabel.
+func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	var pegawaiList []models.Pegawai
+	q := db.Preload("Jabatan").Preload("UnitKerja").Omit(dokumenFileFields...).Order("nama asc")
+	if search := strings.TrimSpace(r.URL.Query().Get("q")); search != "" {
+		like := "%" + strings.ToLower(search) + "%"
+		q = q.Where("LOWER(nama) LIKE ? OR LOWER(nip) LIKE ?", like, like)
+	}
+	if err := q.Find(&pegawaiList).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pegawai")
+		return
+	}
+	filterLengkap := r.URL.Query().Get("lengkap")
+
+	type kp4ExportRow struct {
+		NIP                  string
+		Nama                 string
+		Jabatan              string
+		UnitKerja            string
+		TempatLahir          string
+		JenisKelamin         string
+		Agama                string
+		AlamatLengkap        string
+		DigajiMenurut        string
+		BesarnyaPenghasilan  string
+		SkTerakhir           string
+		JumlahKeluarga       string
+		MasaKerjaGolongan    string
+		MasaKerjaKeseluruhan string
+		NamaPasangan         string
+		NikPasangan          string
+		PekerjaanPasangan    string
+		JumlahAnak           string
+		DaftarNamaAnak       string
+		StatusKp4            string
+		DataPegawai          string
+	}
+
+	var rows []kp4ExportRow
+	for _, pg := range pegawaiList {
+		// dipanggil per-pegawai (bukan query massal) supaya field turunan
+		// (jumlah_keluarga_tertanggung/masa_kerja_*) & kelengkapan dihitung
+		// oleh SATU fungsi yang sama dipakai tampilan KP4 lainnya (lihat
+		// catatan "dihitung di sini setiap kali dibaca" pada kp4Ringkasan) --
+		// jumlah pegawai kecil jadi N+1 query di sini bukan masalah performa.
+		ring, err := muatKp4Ringkasan(db, pg.ID)
+		if err != nil {
+			continue
+		}
+		if filterLengkap == "sudah" && ring.Kelengkapan.Kp4BelumLengkap {
+			continue
+		}
+		if filterLengkap == "belum" && !ring.Kelengkapan.Kp4BelumLengkap {
+			continue
+		}
+
+		jabatanNama := "-"
+		if pg.Jabatan != nil {
+			jabatanNama = pg.Jabatan.Jabatan
+		}
+		unitNama := "-"
+		if pg.UnitKerja != nil {
+			unitNama = pg.UnitKerja.Unit
+		}
+
+		out := kp4ExportRow{
+			NIP:                  namaOrDash(pg.NIP),
+			Nama:                 pg.Nama,
+			Jabatan:              jabatanNama,
+			UnitKerja:            unitNama,
+			TempatLahir:          "-",
+			JenisKelamin:         "-",
+			Agama:                "-",
+			AlamatLengkap:        "-",
+			DigajiMenurut:        "-",
+			BesarnyaPenghasilan:  "-",
+			SkTerakhir:           "-",
+			JumlahKeluarga:       strconv.Itoa(ring.JumlahKeluargaTertanggung),
+			MasaKerjaGolongan:    ring.MasaKerjaGolongan,
+			MasaKerjaKeseluruhan: ring.MasaKerjaKeseluruhan,
+			NamaPasangan:         "-",
+			NikPasangan:          "-",
+			PekerjaanPasangan:    "-",
+			JumlahAnak:           strconv.Itoa(len(ring.Anak)),
+			DaftarNamaAnak:       "-",
+		}
+		if ring.Kp4Data != nil {
+			kp4 := ring.Kp4Data
+			out.TempatLahir = namaOrDash(kp4.TempatLahir)
+			out.JenisKelamin = jenisKelaminLabel(kp4.JenisKelamin)
+			out.Agama = namaOrDash(kp4.Agama)
+			out.AlamatLengkap = fmt.Sprintf("%s, Desa/Kel. %s, Kec. %s, %s, %s",
+				namaOrDash(kp4.AlamatJalan), namaOrDash(kp4.Desa), namaOrDash(kp4.Kecamatan), namaOrDash(kp4.Kabupaten), namaOrDash(kp4.Provinsi))
+			out.DigajiMenurut = namaOrDash(kp4.DigajiMenurut)
+			out.BesarnyaPenghasilan = formatRupiahKp4(kp4.BesarnyaPenghasilan)
+			out.SkTerakhir = namaOrDash(kp4.SkTerakhir)
+		}
+		if ring.Pasangan != nil {
+			out.NamaPasangan = namaOrDash(ring.Pasangan.Nama)
+			out.NikPasangan = namaOrDash(ring.Pasangan.NIK)
+			out.PekerjaanPasangan = namaOrDash(ring.Pasangan.Pekerjaan)
+		}
+		if len(ring.Anak) > 0 {
+			namaAnak := make([]string, 0, len(ring.Anak))
+			for _, a := range ring.Anak {
+				namaAnak = append(namaAnak, a.Nama)
+			}
+			out.DaftarNamaAnak = strings.Join(namaAnak, ", ")
+		}
+		if ring.Kelengkapan.Kp4BelumLengkap {
+			out.StatusKp4 = "Belum Lengkap"
+		} else {
+			out.StatusKp4 = "Sudah Lengkap"
+		}
+		if len(ring.Kelengkapan.DataPegawaiKosong) > 0 {
+			out.DataPegawai = "Ada Data Kosong"
+		} else {
+			out.DataPegawai = "Lengkap"
+		}
+		rows = append(rows, out)
+	}
+
+	columns := []utils.ExcelColumn{
+		{Header: "NIP", Get: func(item interface{}) string { return item.(kp4ExportRow).NIP }},
+		{Header: "Nama", Get: func(item interface{}) string { return item.(kp4ExportRow).Nama }},
+		{Header: "Jabatan", Get: func(item interface{}) string { return item.(kp4ExportRow).Jabatan }},
+		{Header: "Unit Kerja", Get: func(item interface{}) string { return item.(kp4ExportRow).UnitKerja }},
+		{Header: "Tempat Lahir", Get: func(item interface{}) string { return item.(kp4ExportRow).TempatLahir }},
+		{Header: "Jenis Kelamin", Get: func(item interface{}) string { return item.(kp4ExportRow).JenisKelamin }},
+		{Header: "Agama", Get: func(item interface{}) string { return item.(kp4ExportRow).Agama }},
+		{Header: "Alamat Lengkap", Get: func(item interface{}) string { return item.(kp4ExportRow).AlamatLengkap }},
+		{Header: "Digaji Menurut (PP/SK)", Get: func(item interface{}) string { return item.(kp4ExportRow).DigajiMenurut }},
+		{Header: "Besarnya Penghasilan", Get: func(item interface{}) string { return item.(kp4ExportRow).BesarnyaPenghasilan }},
+		{Header: "SK Terakhir yang Dimiliki", Get: func(item interface{}) string { return item.(kp4ExportRow).SkTerakhir }},
+		{Header: "Jumlah Keluarga Tertanggung", Get: func(item interface{}) string { return item.(kp4ExportRow).JumlahKeluarga }},
+		{Header: "Masa Kerja Golongan", Get: func(item interface{}) string { return item.(kp4ExportRow).MasaKerjaGolongan }},
+		{Header: "Masa Kerja Keseluruhan", Get: func(item interface{}) string { return item.(kp4ExportRow).MasaKerjaKeseluruhan }},
+		{Header: "Nama Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).NamaPasangan }},
+		{Header: "NIK Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).NikPasangan }},
+		{Header: "Pekerjaan Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).PekerjaanPasangan }},
+		{Header: "Jumlah Anak", Get: func(item interface{}) string { return item.(kp4ExportRow).JumlahAnak }},
+		{Header: "Daftar Nama Anak", Get: func(item interface{}) string { return item.(kp4ExportRow).DaftarNamaAnak }},
+		{Header: "Status KP4", Get: func(item interface{}) string { return item.(kp4ExportRow).StatusKp4 }},
+		{Header: "Data Pegawai", Get: func(item interface{}) string { return item.(kp4ExportRow).DataPegawai }},
+	}
+	f, err := utils.ExportData(rows, columns)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal membuat file excel: "+err.Error())
+		return
+	}
+	writeXlsxResponse(w, f, "rekap_kp4_"+time.Now().Format("2006-01-02")+".xlsx")
 }
 
 func kp4IDFromPath(r *http.Request) (uint, bool) {

@@ -337,11 +337,22 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 		})
 	}
 
-	// rekap hanya menampilkan pegawai yang SUDAH PERNAH absen masuk pada
-	// periode ini -- pegawai yang belum pernah memakai menu Absen sama
-	// sekali (mis. belum lolos filter tempat tugas/jabatan, atau memang
-	// belum pernah absen) disembunyikan dari rekap & export supaya daftarnya
-	// tidak dipenuhi baris kosong (0 hadir, 0 terlambat).
+	// rekap hanya menampilkan pegawai yang SUDAH PERNAH absen masuk ATAU
+	// punya tanggal yang tercover dokumen (Surat Tugas/Izin/Sakit/Dinas
+	// Dalam, termasuk yang berasal dari Pengajuan Surat Kolektif yang sudah
+	// disetujui -- lihat setujuiPengajuanSuratKolektif) pada periode ini --
+	// pegawai yang benar-benar tidak punya data apa pun (mis. belum lolos
+	// filter tempat tugas/jabatan, atau memang belum pernah absen/tidak
+	// punya surat) disembunyikan dari rekap & export supaya daftarnya tidak
+	// dipenuhi baris kosong (0 hadir, 0 terlambat).
+	//
+	// PENTING: sebelumnya syaratnya HANYA hasHadir (JamMasuk != nil), jadi
+	// pegawai yang seluruh tanggal kerjanya di bulan itu tertutup surat
+	// kolektif (tidak sekali pun absen masuk manual) hilang total dari
+	// rekap & tidak bisa didownload -- inilah sebabnya nama seperti "Ady
+	// Sudarmawan" muncul di daftar Pengajuan Surat Kolektif (sudah
+	// disetujui, baris AbsensiDokumen sudah dibuat) tapi tidak muncul sama
+	// sekali di tabel/Excel rekap absensi.
 	n := 0
 	for _, it := range items {
 		hasHadir := false
@@ -351,7 +362,8 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 				break
 			}
 		}
-		if hasHadir {
+		hasData := hasHadir || len(it.TanggalTercover) > 0
+		if hasData {
 			items[n] = it
 			n++
 		}

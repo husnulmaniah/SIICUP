@@ -22,6 +22,7 @@ import Kp4FormPanel from '../components/Kp4FormPanel.vue'
 const toast = useToast()
 const rows = ref([])
 const loading = ref(true)
+const exporting = ref(false)
 const search = ref('')
 const filterLengkap = ref(null)
 const filterOptions = [
@@ -66,6 +67,33 @@ function onSaved() {
   load()
 }
 
+// Download Excel -- GET /api/kp4/export (handlers/kp4.go, kp4Export),
+// mengikuti filter pencarian/status kelengkapan yang sedang aktif di tabel
+// (sama pola dgn exportExcel di RekapAbsensiView.vue) supaya isi file yang
+// diunduh konsisten dgn apa yang sedang ditampilkan.
+async function exportExcel() {
+  exporting.value = true
+  try {
+    const params = {}
+    if (search.value) params.q = search.value
+    if (filterLengkap.value) params.lengkap = filterLengkap.value
+    const res = await http.get('/kp4/export', { params, responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    const tanggal = new Date().toISOString().slice(0, 10)
+    link.download = `rekap_kp4_${tanggal}.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    exporting.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -84,6 +112,7 @@ onMounted(load)
           <InputText v-model="search" placeholder="Cari nama/NIP..." style="width: 220px" />
         </IconField>
         <Select v-model="filterLengkap" :options="filterOptions" optionLabel="label" optionValue="id" style="width: 200px" />
+        <Button label="Download Excel" icon="pi pi-file-excel" severity="success" outlined :loading="exporting" @click="exportExcel" style="margin-left: auto" />
       </div>
 
       <div class="stat-row">
