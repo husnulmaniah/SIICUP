@@ -113,6 +113,7 @@ const navSections = computed(() => {
       items: [
         { label: 'Absen', icon: 'pi pi-camera', to: '/absen' },
         { label: 'Profil Saya', icon: 'pi pi-user-edit', to: '/profil-saya' },
+        { label: 'KP4', icon: 'pi pi-users', to: '/kp4' },
       ],
     })
   }
@@ -142,6 +143,7 @@ const navSections = computed(() => {
       items: [
         { label: 'Data Pegawai', icon: 'pi pi-users', to: '/master/pegawai' },
         { label: 'Perubahan Data Pegawai', icon: 'pi pi-user-edit', to: '/perubahan-data' },
+        { label: 'KP4', icon: 'pi pi-id-card', to: '/kp4-admin' },
         { label: 'Pengajuan Pensiun', icon: 'pi pi-briefcase', to: '/pengajuan-pensiun' },
         { label: 'Penerima TPP', icon: 'pi pi-money-bill', to: '/penerima-tpp' },
         { label: 'Jatah Cuti Tahunan', icon: 'pi pi-wallet', to: '/master/jatah-cuti' },
@@ -182,6 +184,7 @@ const navSections = computed(() => {
       items: [
         ...(auth.isAdministrator ? [{ label: 'Role', icon: 'pi pi-shield', to: '/master/role' }, { label: 'Akun Pengguna', icon: 'pi pi-user', to: '/master/user' }] : []),
         { label: 'Pengaturan Formulir', icon: 'pi pi-file-edit', to: '/pengaturan-formulir' },
+        { label: 'Pengaturan KP4', icon: 'pi pi-file-edit', to: '/pengaturan-kp4' },
       ],
     })
   }

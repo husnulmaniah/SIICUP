@@ -30,6 +30,23 @@ export const tempatKerjaOptions = [
 ]
 export const tempatKerjaLabels = tempatKerjaOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
 
+// Pilihan Jenis Kelamin & Status Anak (statis) -- dipakai menu KP4 (lihat
+// components/Kp4FormPanel.vue) untuk field jenis_kelamin (pegawai & anak) dan
+// status_anak (Anak Kandung/Tiri/Angkat, singkatan resmi Ak/At/Aa yang
+// dipakai formulir KP4 asli).
+export const jenisKelaminOptions = [
+  { id: 'L', label: 'Laki-laki' },
+  { id: 'P', label: 'Perempuan' },
+]
+export const jenisKelaminLabels = jenisKelaminOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
+
+export const statusAnakOptions = [
+  { id: 'kandung', label: 'Anak Kandung (Ak)' },
+  { id: 'tiri', label: 'Anak Tiri (At)' },
+  { id: 'angkat', label: 'Anak Angkat (Aa)' },
+]
+export const statusAnakLabels = statusAnakOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
+
 // Pilihan Kode Jenis Surat Kolektif (statis) -- menentukan bagaimana satu
 // jenis surat kolektif (lihat tableConfigs['jenis-surat'] di bawah) dihitung
 // & ditampilkan di rekap/PDF absen: DD (Dinas Dalam), I (Izin), S (Sakit).

@@ -517,6 +517,110 @@ func (PengaturanSurat) TableName() string { return "pengaturan_surat" }
 func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
 
 // ============================================================
+// KP4 -- "Surat Keterangan Untuk Mendapatkan Pembayaran Tunjangan Keluarga"
+// ============================================================
+//
+// Data pegawai yang SUDAH ADA di tabel Pegawai (nama, NIP, pangkat/golongan,
+// TMT, tanggal lahir, status kepegawaian, jenis jabatan) TIDAK diduplikasi di
+// sini -- selalu diambil live lewat relasi IDPegawai saat data KP4 dibaca/
+// dicetak (lihat handlers/kp4.go). Kp4Data hanya menyimpan field TAMBAHAN
+// yang memang belum ada di Pegawai, khusus untuk keperluan formulir KP4 ini.
+
+// Kp4JenisKelamin* / Kp4StatusAnak*: konstanta nilai yang valid untuk field
+// enum-like di bawah (disimpan sebagai string biasa, bukan tipe khusus,
+// supaya konsisten dengan pola enum lain di file ini seperti TempatKerja*).
+const (
+	Kp4JenisKelaminL = "L"
+	Kp4JenisKelaminP = "P"
+
+	Kp4StatusAnakKandung = "kandung"
+	Kp4StatusAnakTiri    = "tiri"
+	Kp4StatusAnakAngkat  = "angkat"
+)
+
+// Kp4Data menyimpan field tambahan KP4 milik SATU pegawai (relasi 1:1 lewat
+// IDPegawai, unique). JumlahKeluargaTertanggung & MasaKerja* SENGAJA TIDAK
+// disimpan sebagai kolom -- selalu dihitung otomatis saat dibaca (lihat
+// kp4Ringkasan di handlers/kp4.go) dari Kp4Pasangan/Kp4Anak & TMT pegawai,
+// supaya tidak pernah berbeda/basi dari data sumbernya.
+type Kp4Data struct {
+	ID                  uint      `json:"id" gorm:"primaryKey"`
+	IDPegawai           uint      `json:"id_pegawai" gorm:"column:id_pegawai;not null;uniqueIndex"`
+	Pegawai             *Pegawai  `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	TempatLahir         string    `json:"tempat_lahir" gorm:"column:tempat_lahir;size:100"`
+	JenisKelamin        string    `json:"jenis_kelamin" gorm:"column:jenis_kelamin;size:5"`
+	Agama               string    `json:"agama" gorm:"column:agama;size:50"`
+	AlamatJalan         string    `json:"alamat_jalan" gorm:"column:alamat_jalan;size:255"`
+	Desa                string    `json:"desa" gorm:"column:desa;size:100"`
+	Kecamatan           string    `json:"kecamatan" gorm:"column:kecamatan;size:100"`
+	Kabupaten           string    `json:"kabupaten" gorm:"column:kabupaten;size:100"`
+	Provinsi            string    `json:"provinsi" gorm:"column:provinsi;size:100"`
+	DigajiMenurut       string    `json:"digaji_menurut" gorm:"column:digaji_menurut;size:150"`
+	BesarnyaPenghasilan float64   `json:"besarnya_penghasilan" gorm:"column:besarnya_penghasilan;default:0"`
+	SkTerakhir          string    `json:"sk_terakhir" gorm:"column:sk_terakhir;size:150"`
+	CreatedAt           time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt           time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (Kp4Data) TableName() string { return "kp4_data" }
+
+// Kp4Pasangan: data istri/suami yang menjadi tanggungan (0 ATAU 1 baris per
+// pegawai -- boleh kosong kalau belum/tidak menikah, lihat penjelasan di
+// Pegawai.go). uniqueIndex di IDPegawai memastikan tidak lebih dari 1 baris.
+type Kp4Pasangan struct {
+	ID            uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai     uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null;uniqueIndex"`
+	Nama          string     `json:"nama" gorm:"column:nama;size:150"`
+	TempatLahir   string     `json:"tempat_lahir" gorm:"column:tempat_lahir;size:100"`
+	TglLahir      *time.Time `json:"tgl_lahir" gorm:"column:tgl_lahir;type:date"`
+	NIK           string     `json:"nik" gorm:"column:nik;size:30"`
+	Pekerjaan     string     `json:"pekerjaan" gorm:"column:pekerjaan;size:100"`
+	TglPerkawinan *time.Time `json:"tgl_perkawinan" gorm:"column:tgl_perkawinan;type:date"`
+	PasanganKe    int        `json:"pasangan_ke" gorm:"column:pasangan_ke;default:1"`
+	Penghasilan   float64    `json:"penghasilan" gorm:"column:penghasilan;default:0"`
+	CreatedAt     time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt     time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (Kp4Pasangan) TableName() string { return "kp4_pasangan" }
+
+// Kp4Anak: data anak yang menjadi tanggungan (0..N baris per pegawai,
+// pegawai bisa "tambah anak" sebanyak yang diperlukan lewat menu KP4).
+type Kp4Anak struct {
+	ID                  uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai           uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
+	Urutan              int        `json:"urutan" gorm:"column:urutan;default:0"`
+	Nama                string     `json:"nama" gorm:"column:nama;size:150"`
+	TempatLahir         string     `json:"tempat_lahir" gorm:"column:tempat_lahir;size:100"`
+	TglLahir            *time.Time `json:"tgl_lahir" gorm:"column:tgl_lahir;type:date"`
+	StatusAnak          string     `json:"status_anak" gorm:"column:status_anak;size:20"`
+	DariPasanganKe      int        `json:"dari_pasangan_ke" gorm:"column:dari_pasangan_ke;default:1"`
+	JenisKelamin        string     `json:"jenis_kelamin" gorm:"column:jenis_kelamin;size:5"`
+	DapatTunjangan      bool       `json:"dapat_tunjangan" gorm:"column:dapat_tunjangan;default:false"`
+	SudahKawin          bool       `json:"sudah_kawin" gorm:"column:sudah_kawin;default:false"`
+	SudahBekerja        bool       `json:"sudah_bekerja" gorm:"column:sudah_bekerja;default:false"`
+	MasihSekolah        bool       `json:"masih_sekolah" gorm:"column:masih_sekolah;default:true"`
+	NoPutusanPengadilan string     `json:"no_putusan_pengadilan" gorm:"column:no_putusan_pengadilan;size:100"`
+	CreatedAt           time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt           time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (Kp4Anak) TableName() string { return "kp4_anak" }
+
+// PengaturanKp4: singleton (selalu 1 baris, ID=1, sama pola dengan
+// PengaturanSurat) diisi administrator lewat menu Pengaturan KP4 --
+// dicetak sebagai kop/identitas instansi pada formulir KP4.
+type PengaturanKp4 struct {
+	ID               uint   `json:"id" gorm:"primaryKey"`
+	NamaInstansi     string `json:"nama_instansi" gorm:"column:nama_instansi;size:200"`
+	AlamatInstansi   string `json:"alamat_instansi" gorm:"column:alamat_instansi;size:255"`
+	InstansiInduk    string `json:"instansi_induk" gorm:"column:instansi_induk;size:200"`
+	BendaharawanGaji string `json:"bendaharawan_gaji" gorm:"column:bendaharawan_gaji;size:150"`
+}
+
+func (PengaturanKp4) TableName() string { return "pengaturan_kp4" }
+
+// ============================================================
 // PENERIMA TPP -- daftar pegawai & permintaan upload SK Terakhir
 // ============================================================
 

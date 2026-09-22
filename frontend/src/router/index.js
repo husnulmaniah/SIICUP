@@ -16,6 +16,9 @@ import RekapAbsensiView from '../views/RekapAbsensiView.vue'
 import TemplateSuratView from '../views/TemplateSuratView.vue'
 import PenerimaTppView from '../views/PenerimaTppView.vue'
 import ShiftKerjaView from '../views/ShiftKerjaView.vue'
+import Kp4View from '../views/Kp4View.vue'
+import Kp4AdminView from '../views/Kp4AdminView.vue'
+import PengaturanKp4View from '../views/PengaturanKp4View.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -48,6 +51,12 @@ const routes = [
       { path: 'pengajuan-pensiun', name: 'pengajuan-pensiun', component: PengajuanPensiunView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'penerima-tpp', name: 'penerima-tpp', component: PenerimaTppView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'shift-kerja', name: 'shift-kerja', component: ShiftKerjaView, meta: { roles: ['administrator'] } },
+      // KP4: pegawai isi/lihat data KP4 SENDIRI (/kp4, sama pola akses
+      // dengan /profil-saya) -- administrator/admin melihat rekap SEMUA
+      // pegawai & boleh mengedit data KP4 pegawai manapun lewat /kp4-admin.
+      { path: 'kp4', name: 'kp4', component: Kp4View, meta: { roles: ['pegawai'] } },
+      { path: 'kp4-admin', name: 'kp4-admin', component: Kp4AdminView, meta: { roles: ['administrator', 'admin'] } },
+      { path: 'pengaturan-kp4', name: 'pengaturan-kp4', component: PengaturanKp4View, meta: { roles: ['administrator', 'admin'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },

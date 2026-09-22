@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import http from '../api/http'
 import DataTable from 'primevue/datatable'
@@ -12,6 +13,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 
 const auth = useAuthStore()
 const toast = useToast()
+const router = useRouter()
 const data = ref(null)
 const loading = ref(true)
 
@@ -232,6 +234,36 @@ onMounted(() => {
               @click="pickSkFile"
             />
             <input ref="skFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkFileChosen" />
+          </div>
+        </Message>
+
+        <!-- notifikasi KP4 (lihat handlers/kp4.go, kp4_kelengkapan pada
+        respons dashboard) -- dua pesan berbeda: (1) data KP4-nya sendiri
+        belum lengkap -> arahkan ke menu KP4, (2) field dasar Data Pegawai
+        yang dipakai KP4 belum lengkap -> arahkan ke Profil Saya. Keduanya
+        bisa muncul bersamaan. -->
+        <Message v-if="data.kp4_kelengkapan?.kp4_belum_lengkap" severity="warn" :closable="false" style="margin-bottom: 1rem">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
+            <div>
+              <strong>KP4 Belum Terisi</strong>
+              <div style="margin-top: 0.25rem">
+                Data KP4 Anda belum lengkap ({{ data.kp4_kelengkapan.kp4_field_kosong?.join(', ') }}). Silakan
+                dilengkapi.
+              </div>
+            </div>
+            <Button label="Lengkapi KP4" icon="pi pi-id-card" size="small" @click="router.push('/kp4')" />
+          </div>
+        </Message>
+        <Message v-if="data.kp4_kelengkapan?.data_pegawai_kosong?.length" severity="warn" :closable="false" style="margin-bottom: 1rem">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
+            <div>
+              <strong>Data Pegawai Belum Lengkap</strong>
+              <div style="margin-top: 0.25rem">
+                Data berikut masih kosong: {{ data.kp4_kelengkapan.data_pegawai_kosong.join(', ') }}. Silakan
+                dilengkapi di menu Profil Saya (Ajukan Perubahan Data).
+              </div>
+            </div>
+            <Button label="Ajukan Perubahan Data" icon="pi pi-user-edit" size="small" @click="router.push('/profil-saya')" />
           </div>
         </Message>
 

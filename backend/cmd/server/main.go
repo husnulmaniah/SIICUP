@@ -19,6 +19,7 @@ func main() {
 	database.EnsureStatusPegawai(config.DB)
 	database.EnsurePengaturanSurat(config.DB)
 	database.EnsurePengaturanAbsensi(config.DB)
+	database.EnsurePengaturanKp4(config.DB)
 	database.EnsurePengaturanPensiun(config.DB)
 	database.EnsurePengaturanKenaikanGajiBerkala(config.DB)
 	database.MigrateAdminAbsensiRole(config.DB)

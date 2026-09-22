@@ -108,6 +108,11 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			"riwayat_cuti":      riwayat,
 			"statistik_absensi": statistikAbsensiBulanIni(db, *claims.IDPegawai),
 			"permintaan_sk":     permintaanSk,
+			// kp4_kelengkapan: dipakai DashboardView.vue untuk menampilkan
+			// pemberitahuan "KP4 belum terisi, silakan dilengkapi" dan/atau
+			// "data X masih kosong, silakan dilengkapi di menu Profil ->
+			// Ajukan Perubahan Data" (lihat handlers/kp4.go).
+			"kp4_kelengkapan": kp4KelengkapanUntukDashboard(db, *claims.IDPegawai),
 		})
 
 	default:

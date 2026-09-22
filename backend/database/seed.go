@@ -224,6 +224,23 @@ func EnsurePengaturanSurat(db *gorm.DB) {
 	}
 }
 
+// EnsurePengaturanKp4 memastikan selalu ada tepat satu baris pengaturan
+// (ID=1) untuk kop/identitas instansi yang dicetak pada formulir KP4.
+// Idempotent -- hanya membuat baris default (kosong, diisi administrator
+// lewat menu Pengaturan KP4) sekali.
+func EnsurePengaturanKp4(db *gorm.DB) {
+	var count int64
+	db.Model(&models.PengaturanKp4{}).Count(&count)
+	if count > 0 {
+		return
+	}
+	if err := db.Create(&models.PengaturanKp4{ID: 1}).Error; err != nil {
+		log.Printf("gagal membuat pengaturan KP4 default: %v", err)
+	} else {
+		log.Println("pengaturan KP4 default dibuat (isi lewat menu Pengaturan KP4)")
+	}
+}
+
 // EnsurePengaturanAbsensi memastikan selalu ada tepat satu baris pengaturan
 // (ID=1) untuk menu Absen (aktif/nonaktif modul & jendela waktu absen masuk/
 // pulang). Idempotent -- hanya membuat baris default sekali; setelah itu
