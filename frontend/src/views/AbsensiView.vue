@@ -36,7 +36,7 @@ const isSekolahSaya = computed(() => !!riwayat.value?.is_sekolah)
 const pengaturan = ref(null)
 const loadingPengaturan = ref(true)
 const periodDate = ref(new Date())
-const riwayat = ref({ absensi: [], tanggal_terlewat: [], tanggal_tercover: [] })
+const riwayat = ref({ absensi: [], tanggal_terlewat: [], tanggal_tercover: [], tanggal_bisa_diajukan: [] })
 const loadingRiwayat = ref(false)
 const dokumenList = ref([])
 
@@ -196,12 +196,17 @@ async function loadPengajuanSaya() {
   }
 }
 
-// opsi tanggal untuk MultiSelect form pengajuan -- daftar tanggal_terlewat
-// bulan yang sedang dilihat, DITAMBAH tanggal milik pengajuan yang sedang
-// diedit (kalau ada, supaya tetap terlihat & bisa dipilih ulang walau
-// pengajuan itu dibuat/berasal dari bulan lain).
+// opsi tanggal untuk MultiSelect form pengajuan -- daftar
+// tanggal_bisa_diajukan bulan yang sedang dilihat (SELURUH hari kerja bulan
+// itu, termasuk tanggal KE DEPAN yang belum ada absen/surat -- bukan cuma
+// tanggal_terlewat yang dibatasi sampai hari ini, lihat komentar
+// TanggalBisaDiajukan pada riwayatAbsenSaya/absensi.go -- permintaan
+// pengguna: supaya bisa mengajukan surat kolektif untuk cuti tahunan/SKS/
+// surat tugas yang tanggalnya sudah dipastikan ke depan), DITAMBAH tanggal
+// milik pengajuan yang sedang diedit (kalau ada, supaya tetap terlihat &
+// bisa dipilih ulang walau pengajuan itu dibuat/berasal dari bulan lain).
 function opsiTanggalUntuk(extraDates) {
-  const set = new Set(riwayat.value.tanggal_terlewat || [])
+  const set = new Set(riwayat.value.tanggal_bisa_diajukan || [])
   for (const t of extraDates || []) set.add(t)
   return Array.from(set)
     .sort()
@@ -1160,12 +1165,14 @@ async function downloadDokumen(item) {
         <h3>Ajukan Surat Kolektif</h3>
         <Message severity="info" :closable="false">
           Khusus pegawai bertugas di sekolah: ajukan surat (Surat Tugas/Berita Acara/Surat Izin/SKS/dst) untuk
-          beberapa tanggal terlewat sekaligus. Pengajuan menunggu persetujuan administrator/admin verifikasi --
-          absen Anda baru berubah jadi bersurat setelah disetujui.
+          beberapa tanggal sekaligus -- boleh tanggal yang sudah terlewat (belum ada absen) MAUPUN tanggal ke
+          depan pada bulan yang sedang dilihat (mis. cuti tahunan/surat tugas yang sudah dipastikan lebih awal).
+          Pengajuan menunggu persetujuan administrator/admin verifikasi -- absen Anda baru berubah jadi bersurat
+          setelah disetujui.
         </Message>
         <div class="kolektif-self-form">
           <div class="field">
-            <label>Tanggal Terlewat</label>
+            <label>Tanggal</label>
             <MultiSelect
               v-model="kolektifSelfForm.tanggal"
               :options="opsiTanggalKolektif"
@@ -1175,7 +1182,7 @@ async function downloadDokumen(item) {
               display="chip"
               style="width: 100%"
             />
-            <small v-if="!opsiTanggalKolektif.length" class="text-muted">Tidak ada tanggal terlewat pada bulan yang sedang dilihat.</small>
+            <small v-if="!opsiTanggalKolektif.length" class="text-muted">Tidak ada tanggal yang bisa diajukan pada bulan yang sedang dilihat.</small>
           </div>
           <div class="field">
             <label>Jenis Surat</label>
@@ -1380,7 +1387,7 @@ async function downloadDokumen(item) {
         Catatan dari verifikator: {{ editPengajuanItem.catatan_verifikasi }}
       </Message>
       <div class="field">
-        <label>Tanggal Terlewat</label>
+        <label>Tanggal</label>
         <MultiSelect
           v-model="editPengajuanForm.tanggal"
           :options="opsiTanggalKolektif"

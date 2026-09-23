@@ -1143,6 +1143,17 @@ type riwayatAbsenResponse struct {
 	// berapa hari kerja yang seharusnya ada di bulan ini sebagai acuan,
 	// bukan cuma daftar tanggal yang sudah terlewat.
 	TotalHariKerja int `json:"total_hari_kerja"`
+	// TanggalBisaDiajukan: SEMUA hari kerja bulan yang diminta (start..end,
+	// TERMASUK tanggal KE DEPAN -- beda dari TanggalTerlewat yang dibatasi
+	// sampai hari ini) yang belum punya absen masuk & belum ada AbsensiDokumen
+	// -- dipakai sebagai pilihan tanggal pada dropdown "Ajukan Surat Kolektif"
+	// (AbsensiView.vue) supaya pegawai sekolah bisa mengajukan surat untuk
+	// tanggal yang sudah direncanakan ke depan juga (mis. cuti tahunan/surat
+	// tugas yang sudah pasti), tidak cuma tanggal yang sudah terlewat tanpa
+	// absen. TanggalTerlewat TETAP dibatasi sampai hari ini karena masih
+	// dipakai utuh untuk peringatan "tidak melakukan absensi" di atas, yang
+	// secara semantik memang cuma berlaku untuk hari yang sudah lewat.
+	TanggalBisaDiajukan []string `json:"tanggal_bisa_diajukan"`
 }
 
 // riwayatAbsenSaya mengembalikan riwayat absen pegawai yang login untuk satu
@@ -1208,8 +1219,12 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			hadirSet[row.Tanggal.Format("2006-01-02")] = true
 		}
 	}
+	// Dicek sampai AKHIR BULAN (end, bukan limit/hari ini) supaya tanggal ke
+	// depan yang sudah lebih dulu diinput/disetujui suratnya (mis. lewat
+	// menu admin Surat Kolektif) tidak muncul dobel sebagai pilihan pada
+	// tanggal_bisa_diajukan di bawah.
 	var dokumen []models.AbsensiDokumen
-	db.Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, limit).
+	db.Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, end).
 		Order("tanggal desc").Find(&dokumen)
 	jenisLookup := jenisSuratLookup(db)
 	tercoverSet := map[string]bool{}
@@ -1244,14 +1259,26 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// tersebut, sama untuk bulan berjalan maupun bulan yang sudah lewat.
 	totalHariKerja := len(workingDaysInRange(db, start, end, sixDayWeek))
 
+	// tanggal_bisa_diajukan: sama seperti terlewat, tapi SELURUH bulan
+	// (start..end) -- lihat komentar TanggalBisaDiajukan pada
+	// riwayatAbsenResponse untuk alasannya.
+	bisaDiajukan := []string{}
+	for _, d := range workingDaysInRange(db, start, end, sixDayWeek) {
+		key := d.Format("2006-01-02")
+		if !hadirSet[key] && !tercoverSet[key] {
+			bisaDiajukan = append(bisaDiajukan, key)
+		}
+	}
+
 	utils.Success(w, "ok", riwayatAbsenResponse{
-		Bulan:           int(bulan),
-		Tahun:           tahun,
-		Absensi:         rows,
-		TanggalTerlewat: terlewat,
-		TanggalTercover: tercover,
-		IsSekolah:       isSekolahPegawai(pegawai),
-		TotalHariKerja:  totalHariKerja,
+		Bulan:               int(bulan),
+		Tahun:               tahun,
+		Absensi:             rows,
+		TanggalTerlewat:     terlewat,
+		TanggalTercover:     tercover,
+		IsSekolah:           isSekolahPegawai(pegawai),
+		TotalHariKerja:      totalHariKerja,
+		TanggalBisaDiajukan: bisaDiajukan,
 	})
 }
 

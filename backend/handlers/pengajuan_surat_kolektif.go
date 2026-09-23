@@ -81,10 +81,20 @@ func toPengajuanSuratKolektifOut(item models.PengajuanSuratKolektif) pengajuanSu
 // excludeID dilewatkan saat mengedit pengajuan yang sudah ada sendiri
 // (supaya baris pengajuan itu sendiri tidak dianggap "sudah ada pengajuan
 // lain" untuk tanggalnya sendiri).
+//
+// Tanggal KE DEPAN diperbolehkan sampai AKHIR BULAN BERJALAN saja (bukan
+// cuma sampai hari ini seperti sebelumnya) -- permintaan pengguna: supaya
+// pegawai sekolah bisa mengajukan surat kolektif untuk tanggal yang sudah
+// direncanakan/dipastikan ke depan (mis. cuti tahunan, surat tugas, SKS
+// yang sudah diketahui lebih awal), tidak cuma tanggal yang sudah terlewat
+// tanpa absen. Dibatasi sampai akhir bulan (bukan tanpa batas) supaya tetap
+// selaras dengan pilihan tanggal yang ditampilkan di dropdown "Ajukan Surat
+// Kolektif" (lihat TanggalBisaDiajukan pada riwayatAbsenSaya, absensi.go).
 func tanggalTerlewatValid(db *gorm.DB, pegawai models.Pegawai, tanggal time.Time, excludeID uint) (bool, string) {
 	today := absensiToday()
-	if tanggal.After(today) {
-		return false, "tanggal di masa depan"
+	batasAkhirBulan := time.Date(today.Year(), today.Month()+1, 0, 0, 0, 0, 0, today.Location())
+	if tanggal.After(batasAkhirBulan) {
+		return false, "tanggal di luar bulan ini (maksimal sampai akhir bulan berjalan)"
 	}
 	wd := tanggal.Weekday()
 	if wd == time.Sunday {
@@ -199,7 +209,7 @@ func buatPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *gorm
 		return
 	}
 	if len(tanggalList) == 0 {
-		utils.Error(w, http.StatusBadRequest, "pilih minimal satu tanggal terlewat")
+		utils.Error(w, http.StatusBadRequest, "pilih minimal satu tanggal")
 		return
 	}
 
@@ -222,7 +232,7 @@ func buatPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *gorm
 	if len(invalid) > 0 {
 		utils.Error(w, http.StatusBadRequest,
 			"tanggal berikut tidak bisa diajukan: "+strings.Join(invalid, ", ")+
-				" -- hanya tanggal terlewat (hari kerja anda yang belum ada absen masuk maupun surat) yang bisa diajukan surat kolektif.")
+				" -- hanya hari kerja anda pada bulan ini (sampai akhir bulan berjalan) yang belum ada absen masuk maupun surat yang bisa diajukan surat kolektif.")
 		return
 	}
 
@@ -328,7 +338,7 @@ func updatePengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *go
 		return
 	}
 	if len(tanggalList) == 0 {
-		utils.Error(w, http.StatusBadRequest, "pilih minimal satu tanggal terlewat")
+		utils.Error(w, http.StatusBadRequest, "pilih minimal satu tanggal")
 		return
 	}
 	// Keterangan wajib diisi -- lihat komentar yang sama pada
@@ -347,7 +357,7 @@ func updatePengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *go
 	if len(invalid) > 0 {
 		utils.Error(w, http.StatusBadRequest,
 			"tanggal berikut tidak bisa diajukan: "+strings.Join(invalid, ", ")+
-				" -- hanya tanggal terlewat (hari kerja anda yang belum ada absen masuk maupun surat) yang bisa diajukan surat kolektif.")
+				" -- hanya hari kerja anda pada bulan ini (sampai akhir bulan berjalan) yang belum ada absen masuk maupun surat yang bisa diajukan surat kolektif.")
 		return
 	}
 
