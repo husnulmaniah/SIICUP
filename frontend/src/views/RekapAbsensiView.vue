@@ -230,7 +230,14 @@ async function loadJenisSuratOptions() {
   try {
     const { data } = await http.get('/ref/jenis-surat')
     const items = data.data || []
-    jenisSuratOptions.value = items.map((it) => ({ label: `${it.nama} (${it.kode})`, value: it.slug }))
+    // tidak_perlu_berkas ikut dibawa dari master data (lihat models.JenisSurat)
+    // supaya form Input Surat Kolektif di bawah tahu jenis mana yang tidak
+    // mewajibkan upload berkas (mis. "WFH") tanpa hardcode nama/slug tertentu.
+    jenisSuratOptions.value = items.map((it) => ({
+      label: `${it.nama} (${it.kode})`,
+      value: it.slug,
+      tidak_perlu_berkas: !!it.tidak_perlu_berkas,
+    }))
     // beberapa jenis surat bisa berbagi kode custom yang sama -- ambil nama
     // yang pertama ketemu saja per kode supaya badge "Lainnya" tetap ringkas
     kodeLabelMap.value = items.reduce((acc, it) => (it.kode in acc ? acc : { ...acc, [it.kode]: it.nama }), {})
@@ -837,9 +844,21 @@ function onKolektifFileChosen(e) {
   kolektifFile.value = e.target.files[0] || null
 }
 
+// Jenis surat yang sedang dipilih di form + apakah berkasnya wajib -- lihat
+// komentar tidak_perlu_berkas pada loadJenisSuratOptions di atas.
+const jenisKolektifTerpilih = computed(() => jenisSuratOptions.value.find((o) => o.value === kolektifForm.jenis))
+const kolektifBerkasWajib = computed(() => !jenisKolektifTerpilih.value?.tidak_perlu_berkas)
+
 async function submitKolektif() {
-  if (!kolektifForm.id_pegawai.length || !kolektifForm.jenis || !kolektifFile.value) {
-    toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Pilih minimal satu pegawai, jenis surat, dan berkasnya', life: 4000 })
+  if (!kolektifForm.id_pegawai.length || !kolektifForm.jenis || (kolektifBerkasWajib.value && !kolektifFile.value)) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Periksa kembali',
+      detail: kolektifBerkasWajib.value
+        ? 'Pilih minimal satu pegawai, jenis surat, dan berkasnya'
+        : 'Pilih minimal satu pegawai dan jenis surat',
+      life: 4000,
+    })
     return
   }
   if (!kolektifForm.keterangan.trim()) {
@@ -859,7 +878,10 @@ async function submitKolektif() {
     fd.append('tanggal_selesai', toApiDate(kolektifForm.tanggal_selesai || kolektifForm.tanggal_mulai))
     fd.append('jenis', kolektifForm.jenis)
     fd.append('keterangan', kolektifForm.keterangan || '')
-    fd.append('file', kolektifFile.value)
+    // Berkas hanya dikirim kalau memang dipilih -- untuk jenis surat yang
+    // ditandai tidak_perlu_berkas (mis. "WFH"), kolektifFile bisa tetap null
+    // dan backend (inputAbsensiDokumenKolektif) tidak akan menolaknya.
+    if (kolektifFile.value) fd.append('file', kolektifFile.value)
     const { data } = await http.post('/absensi/dokumen/kolektif', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
     kolektifForm.id_pegawai = []
@@ -1572,7 +1594,9 @@ const defaultTab = computed(() => {
           </small>
         </div>
         <div>
-          <label class="field-label">Berkas (PDF/JPG/PNG)</label>
+          <label class="field-label">
+            Berkas (PDF/JPG/PNG)<span v-if="!kolektifBerkasWajib" class="text-muted"> (opsional)</span>
+          </label>
           <input ref="kolektifFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onKolektifFileChosen" />
           <Button
             class="berkas-btn"
@@ -1582,6 +1606,9 @@ const defaultTab = computed(() => {
             outlined
             @click="pickKolektifFile"
           />
+          <small v-if="!kolektifBerkasWajib" class="text-muted" style="display: block; margin-top: 0.35rem">
+            Jenis surat ini ditandai tidak wajib berkas (Master Data -&gt; Jenis Surat) -- boleh dikosongkan.
+          </small>
         </div>
 
         <div class="kolektif-span">

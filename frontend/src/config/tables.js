@@ -250,6 +250,7 @@ export const tableConfigs = {
       { field: 'nama', header: 'Nama Jenis Surat' },
       { field: 'slug', header: 'Slug', width: '180px' },
       { field: 'kode', header: 'Kode', type: 'lookup', map: jenisSuratKodeLabels, width: '160px' },
+      { field: 'tidak_perlu_berkas', header: 'Tidak Wajib Berkas', type: 'boolean', width: '160px' },
     ],
     formFields: [
       { field: 'nama', label: 'Nama Jenis Surat', type: 'text', required: true, hint: 'Nama yang tampil di dropdown Surat Kolektif, mis. "Surat Tugas" atau "Surat Dinas Luar".' },
@@ -266,6 +267,12 @@ export const tableConfigs = {
         type: 'text',
         required: true,
         hint: 'Bebas, tentukan sendiri (maks. 10 karakter), mis. "DD", "I", "S", atau kode lain seperti "CT" untuk Cuti Tahunan. Khusus kode DD/I/S yang dihitung ke kolom Jumlah DD/Izin/Sakit di rekap & PDF absen; kode lain tetap menutup tanggal terlewat pegawai tapi tidak masuk ke tiga kolom itu.',
+      },
+      {
+        field: 'tidak_perlu_berkas',
+        label: 'Tidak Wajib Upload Berkas',
+        type: 'checkbox',
+        hint: 'Jika dicentang, saat menginput Surat Kolektif jenis ini (mis. "WFH") admin TIDAK diwajibkan mengupload berkas apapun. Jenis surat lain sebaiknya dibiarkan tidak dicentang supaya tetap wajib ada bukti berkas.',
       },
     ],
     searchPlaceholder: 'Cari jenis surat...',

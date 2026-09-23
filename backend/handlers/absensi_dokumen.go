@@ -166,33 +166,43 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	}
 	label := jenisSurat.Nama
 
+	// Berkas WAJIB diupload untuk jenis surat biasa (Surat Tugas/Izin/dst.),
+	// KECUALI untuk jenis yang ditandai TidakPerluBerkas oleh administrator
+	// di Master Data -> Jenis Surat (mis. "WFH" -- permintaan pengguna: input
+	// WFH tidak perlu upload berkas apapun). Kalau jenisnya memang tidak
+	// perlu berkas, fh boleh nil dan fileData/namaFile tetap kosong.
 	fh := formFileHeader(r, "file")
-	if fh == nil {
+	if fh == nil && !jenisSurat.TidakPerluBerkas {
 		utils.Error(w, http.StatusBadRequest, "berkas surat wajib diupload")
 		return
 	}
-	ext := strings.ToLower(fh.Filename[strings.LastIndex(fh.Filename, "."):])
-	if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-		utils.Error(w, http.StatusBadRequest, "berkas harus berformat PDF, JPG, atau PNG")
-		return
-	}
-	f, err := fh.Open()
-	if err != nil {
-		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
-		return
-	}
-	fileData, err := io.ReadAll(f)
-	f.Close()
-	if err != nil {
-		utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
-		return
-	}
-	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
-	// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
-	// perangkat saat dipilih lewat file picker.
-	if len(fileData) == 0 {
-		utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
-		return
+	var fileData []byte
+	var namaFile string
+	if fh != nil {
+		ext := strings.ToLower(fh.Filename[strings.LastIndex(fh.Filename, "."):])
+		if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+			utils.Error(w, http.StatusBadRequest, "berkas harus berformat PDF, JPG, atau PNG")
+			return
+		}
+		f, err := fh.Open()
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
+			return
+		}
+		fileData, err = io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "gagal membaca berkas")
+			return
+		}
+		// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+		// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
+		// perangkat saat dipilih lewat file picker.
+		if len(fileData) == 0 {
+			utils.Error(w, http.StatusBadRequest, "berkas yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
+			return
+		}
+		namaFile = fh.Filename
 	}
 	// Keterangan sekarang WAJIB diisi (dulu opsional) -- diisi lewat dropdown
 	// pilihan tetap di frontend (lihat composables/keteranganSurat.js), atau
@@ -258,7 +268,7 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 			existing.Tanggal = tgl
 			existing.Jenis = jenis
 			existing.Label = label
-			existing.NamaFile = fh.Filename
+			existing.NamaFile = namaFile
 			existing.File = fileData
 			existing.Keterangan = keterangan
 			if claims != nil {

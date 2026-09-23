@@ -925,6 +925,15 @@ type JenisSurat struct {
 	Slug string `json:"slug" gorm:"column:slug;size:40;not null;uniqueIndex"`
 	Nama string `json:"nama" gorm:"column:nama;size:150;not null"`
 	Kode string `json:"kode" gorm:"column:kode;size:10;not null"`
+	// TidakPerluBerkas: kalau dicentang administrator (mis. untuk jenis
+	// "WFH"), input Surat Kolektif untuk jenis ini TIDAK mewajibkan upload
+	// berkas apapun -- lihat inputAbsensiDokumenKolektif di
+	// handlers/absensi_dokumen.go. Jenis surat lain (Surat Tugas/Izin/dst.)
+	// tetap wajib upload berkas seperti biasa selama ini tidak dicentang.
+	// Default APLIKASI & default KOLOM sama-sama false (bukan kasus
+	// zero-value-vs-default konflik seperti Kp4Anak.MasihSekolah), jadi aman
+	// dipakai tag "default:false".
+	TidakPerluBerkas bool `json:"tidak_perlu_berkas" gorm:"column:tidak_perlu_berkas;default:false"`
 }
 
 func (JenisSurat) TableName() string { return "jenis_surat" }
