@@ -348,6 +348,21 @@ type Pegawai struct {
 	// administrator/admin.
 	FotoProfilNama string `json:"foto_profil_nama" gorm:"column:foto_profil_nama;size:255"`
 	FotoProfilFile []byte `json:"-" gorm:"column:foto_profil_file;type:bytea"`
+
+	// TtdPegawai: tanda tangan digital pegawai (opsional), digambar sendiri
+	// lewat signature pad kanvas di halaman Profil Saya lalu disimpan sebagai
+	// PNG latar transparan -- dipakai handlers/formulir.go (drawTtdPegawai)
+	// untuk menempelkan tanda tangan itu otomatis di atas nama pegawai pada
+	// Formulir Cuti (blok "Hormat Saya"), sehingga pegawai yang sudah
+	// menyimpan TTD-nya TIDAK perlu mencetak - tanda tangan basah - scan ulang
+	// formulir tersebut. Sama seperti FotoProfil di atas, pegawai boleh
+	// mengganti/menghapus TTD miliknya sendiri kapan saja lewat endpoint
+	// khusus (lihat uploadTtdPegawai di handlers/pegawai.go), TANPA alur
+	// persetujuan administrator/admin. Kalau kosong, blok tanda tangan pada
+	// formulir dibiarkan kosong seperti sebelum fitur ini ada (siap ditanda
+	// tangani basah di atas kertas cetak).
+	TtdPegawaiNama string `json:"ttd_pegawai_nama" gorm:"column:ttd_pegawai_nama;size:255"`
+	TtdPegawaiFile []byte `json:"-" gorm:"column:ttd_pegawai_file;type:bytea"`
 }
 
 func (Pegawai) TableName() string { return "pegawai" }

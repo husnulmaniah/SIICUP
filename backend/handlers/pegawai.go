@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -23,7 +26,7 @@ import (
 // must be excluded from ordinary list/detail queries so we don't drag large
 // binary blobs along with every request; they're only fetched by the
 // dedicated download endpoint below.
-var dokumenFileFields = []string{"SkTerakhirFile", "SkKgbFile", "SkPangkatFile", "SkPensiunFile", "FotoProfilFile"}
+var dokumenFileFields = []string{"SkTerakhirFile", "SkKgbFile", "SkPangkatFile", "SkPensiunFile", "FotoProfilFile", "TtdPegawaiFile"}
 
 var pegawaiPreloads = []string{"Jabatan", "UnitKerja", "PangkatGol.Pangkat", "PangkatGol.Gol", "Status", "Atasan"}
 
@@ -211,6 +214,15 @@ func RegisterPegawaiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/pegawai/{id}/foto", anyRole(func(w http.ResponseWriter, r *http.Request) { fotoProfilPegawai(w, r, db) }))
 	mux.Handle("POST /api/pegawai/{id}/foto", anyRole(func(w http.ResponseWriter, r *http.Request) { uploadFotoProfilPegawai(w, r, db) }))
 	mux.Handle("DELETE /api/pegawai/{id}/foto", anyRole(func(w http.ResponseWriter, r *http.Request) { deleteFotoProfilPegawai(w, r, db) }))
+
+	// Tanda tangan digital (TTD): pola & alasan aksesnya SAMA seperti foto
+	// profil di atas (anyRole, permission per-request lewat
+	// canManageTtdPegawai) -- pegawai boleh menyimpan/mengubah/menghapus TTD
+	// miliknya sendiri kapan saja tanpa alur persetujuan (lihat models.go &
+	// ProfilSayaView.vue).
+	mux.Handle("GET /api/pegawai/{id}/ttd", anyRole(func(w http.ResponseWriter, r *http.Request) { ttdPegawaiPegawai(w, r, db) }))
+	mux.Handle("POST /api/pegawai/{id}/ttd", anyRole(func(w http.ResponseWriter, r *http.Request) { uploadTtdPegawai(w, r, db) }))
+	mux.Handle("DELETE /api/pegawai/{id}/ttd", anyRole(func(w http.ResponseWriter, r *http.Request) { deleteTtdPegawai(w, r, db) }))
 }
 
 // validDokumenJenis restricts the {jenis} path segment to the three known
@@ -505,6 +517,176 @@ func deleteFotoProfilPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		return
 	}
 	utils.Success(w, "foto profil berhasil dihapus", nil)
+}
+
+// canManageTtdPegawai: aturan sama seperti canManageFotoProfil di atas --
+// administrator/admin boleh untuk siapa saja, pegawai/atasan hanya untuk
+// dirinya sendiri.
+func canManageTtdPegawai(claims *utils.Claims, item *models.Pegawai) bool {
+	return canManageFotoProfil(claims, item)
+}
+
+// resizeImageBoxAlpha: sama seperti resizeImageBox (absensi.go) -- box-filter
+// downsampling ke lebar targetW -- TAPI kanal alpha ikut dirata-rata &
+// dipertahankan (BUKAN dipaksa 255 seperti resizeImageBox) supaya latar
+// transparan gambar tanda tangan tidak berubah jadi kotak opaque saat
+// diperkecil.
+func resizeImageBoxAlpha(src image.Image, targetW int) *image.NRGBA {
+	b := src.Bounds()
+	if b.Dx() < targetW {
+		targetW = b.Dx()
+	}
+	if targetW < 1 {
+		targetW = 1
+	}
+	targetH := b.Dy() * targetW / b.Dx()
+	if targetH < 1 {
+		targetH = 1
+	}
+
+	// Salin dulu ke buffer NRGBA (alpha TIDAK premultiplied) supaya rata-rata
+	// per kanal di bawah akurat untuk gambar dengan alpha bervariasi.
+	srcN := image.NewNRGBA(b)
+	draw.Draw(srcN, b, src, b.Min, draw.Src)
+
+	dst := image.NewNRGBA(image.Rect(0, 0, targetW, targetH))
+	for y := 0; y < targetH; y++ {
+		y0 := b.Min.Y + y*b.Dy()/targetH
+		y1 := b.Min.Y + (y+1)*b.Dy()/targetH
+		if y1 <= y0 {
+			y1 = y0 + 1
+		}
+		for x := 0; x < targetW; x++ {
+			x0 := b.Min.X + x*b.Dx()/targetW
+			x1 := b.Min.X + (x+1)*b.Dx()/targetW
+			if x1 <= x0 {
+				x1 = x0 + 1
+			}
+			var sumR, sumG, sumB, sumA, n uint64
+			for sy := y0; sy < y1; sy++ {
+				for sx := x0; sx < x1; sx++ {
+					c := srcN.NRGBAAt(sx, sy)
+					sumR += uint64(c.R)
+					sumG += uint64(c.G)
+					sumB += uint64(c.B)
+					sumA += uint64(c.A)
+					n++
+				}
+			}
+			if n == 0 {
+				n = 1
+			}
+			dst.SetNRGBA(x, y, color.NRGBA{R: uint8(sumR / n), G: uint8(sumG / n), B: uint8(sumB / n), A: uint8(sumA / n)})
+		}
+	}
+	return dst
+}
+
+// ttdPegawaiPegawai menyajikan tanda tangan digital pegawai sebagai gambar
+// PNG langsung (bukan dibungkus utils.Success, sama seperti fotoProfilPegawai)
+// -- latar transparan TETAP dipertahankan (BEDA dari foto profil yang selalu
+// dikompres ulang jadi JPEG opaque) supaya formulir.go bisa menempelkannya di
+// atas kertas formulir tanpa kotak putih/hitam di sekitar coretan tanda
+// tangan.
+func ttdPegawaiPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.Pegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessPegawaiRow(claims, &item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
+		return
+	}
+	if len(item.TtdPegawaiFile) == 0 {
+		utils.Error(w, http.StatusNotFound, "belum ada tanda tangan")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Write(item.TtdPegawaiFile)
+}
+
+// uploadTtdPegawai menerima gambar tanda tangan (PNG latar transparan hasil
+// signature pad kanvas di ProfilSayaView.vue, atau JPG/PNG dari upload
+// berkas biasa) lalu menyimpannya ulang sebagai PNG lebar maksimum 480px
+// memakai resizeImageBoxAlpha di atas (BUKAN resizeImageBox biasa) supaya
+// kanal alpha-nya tidak hilang.
+func uploadTtdPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.Pegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canManageTtdPegawai(claims, &item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses untuk mengubah tanda tangan ini")
+		return
+	}
+	utils.LimitBody(w, r, 8<<20)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca file upload (maksimal 8MB)")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "file tidak ditemukan (field 'file')")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		utils.Error(w, http.StatusBadRequest, "format tanda tangan harus JPG atau PNG")
+		return
+	}
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal membaca isi file")
+		return
+	}
+	src, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "berkas bukan gambar yang valid")
+		return
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, resizeImageBoxAlpha(src, 480)); err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal memproses gambar")
+		return
+	}
+
+	updates := map[string]interface{}{
+		"ttd_pegawai_nama": header.Filename,
+		"ttd_pegawai_file": buf.Bytes(),
+	}
+	if err := db.Model(&item).Updates(updates).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan tanda tangan: "+err.Error())
+		return
+	}
+	utils.Success(w, "tanda tangan berhasil disimpan", map[string]string{"nama_file": header.Filename})
+}
+
+func deleteTtdPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.Pegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canManageTtdPegawai(claims, &item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses untuk mengubah tanda tangan ini")
+		return
+	}
+	updates := map[string]interface{}{"ttd_pegawai_nama": "", "ttd_pegawai_file": nil}
+	if err := db.Model(&item).Updates(updates).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menghapus tanda tangan: "+err.Error())
+		return
+	}
+	utils.Success(w, "tanda tangan berhasil dihapus", nil)
 }
 
 func deleteDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

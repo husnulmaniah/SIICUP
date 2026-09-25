@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
@@ -66,6 +66,7 @@ async function loadProfile() {
     const { data } = await http.get('/pegawai/me')
     profile.value = data.data
     refreshFoto(profile.value?.id)
+    refreshTtd()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat data profil', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
@@ -117,6 +118,138 @@ function confirmHapusFoto() {
         toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Foto profil berhasil dihapus', life: 3000 })
       } catch (e) {
         toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      }
+    },
+  })
+}
+
+// ---- tanda tangan digital (TTD): pola izin SAMA seperti foto profil di
+// atas -- pegawai boleh menyimpan/mengubah/menghapus TTD miliknya sendiri
+// kapan saja tanpa alur persetujuan administrator/admin. BEDA dari foto
+// profil, TTD tidak dibagikan lewat composable global karena hanya dipakai
+// di halaman ini -- begitu disimpan, otomatis ditempelkan backend di atas
+// nama pegawai pada Formulir Cuti (lihat drawTtdPegawai di
+// backend/handlers/formulir.go) sehingga TIDAK perlu lagi cetak - tanda
+// tangan basah - scan ulang formulir tersebut.
+const ttdUrl = ref('')
+const ttdDialogVisible = ref(false)
+const ttdSaving = ref(false)
+const ttdCanvasRef = ref(null)
+const ttdHasDrawn = ref(false)
+let ttdCtx = null
+let ttdDrawing = false
+
+async function refreshTtd() {
+  if (!profile.value) return
+  if (ttdUrl.value) window.URL.revokeObjectURL(ttdUrl.value)
+  ttdUrl.value = ''
+  try {
+    const res = await http.get(`/pegawai/${profile.value.id}/ttd`, { responseType: 'blob' })
+    ttdUrl.value = window.URL.createObjectURL(res.data)
+  } catch (e) {
+    // belum ada TTD tersimpan (404) -- biarkan kosong, tampil placeholder
+  }
+}
+
+// ttdCanvasPos mengonversi koordinat pointer (CSS px, bisa beda dari ukuran
+// asli kanvas kalau kanvas diperkecil lewat CSS di HP) ke koordinat piksel
+// asli kanvas supaya garis tetap presisi di bawah kursor/jari di semua
+// ukuran layar.
+function ttdCanvasPos(e) {
+  const canvas = ttdCanvasRef.value
+  const rect = canvas.getBoundingClientRect()
+  const scaleX = canvas.width / rect.width
+  const scaleY = canvas.height / rect.height
+  return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY }
+}
+
+// Dipakai Pointer Events (bukan mouse/touch events terpisah) supaya satu set
+// handler yang sama otomatis berfungsi baik lewat mouse di desktop maupun
+// jari/stylus di HP/tablet.
+function ttdPointerDown(e) {
+  e.preventDefault()
+  const canvas = ttdCanvasRef.value
+  if (!canvas || !ttdCtx) return
+  ttdDrawing = true
+  ttdHasDrawn.value = true
+  const { x, y } = ttdCanvasPos(e)
+  ttdCtx.beginPath()
+  ttdCtx.moveTo(x, y)
+  canvas.setPointerCapture?.(e.pointerId)
+}
+function ttdPointerMove(e) {
+  if (!ttdDrawing || !ttdCtx) return
+  e.preventDefault()
+  const { x, y } = ttdCanvasPos(e)
+  ttdCtx.lineTo(x, y)
+  ttdCtx.stroke()
+}
+function ttdPointerUp() {
+  ttdDrawing = false
+}
+
+function ttdSetupCanvas() {
+  const canvas = ttdCanvasRef.value
+  if (!canvas) return
+  ttdCtx = canvas.getContext('2d')
+  ttdCtx.clearRect(0, 0, canvas.width, canvas.height)
+  ttdCtx.lineWidth = 3
+  ttdCtx.lineCap = 'round'
+  ttdCtx.lineJoin = 'round'
+  ttdCtx.strokeStyle = '#1e293b'
+  ttdHasDrawn.value = false
+}
+
+function bukaTtdDialog() {
+  ttdDialogVisible.value = true
+  // nextTick supaya <canvas> di dalam Dialog sudah ter-render dulu sebelum
+  // ref-nya diambil & context 2D disiapkan.
+  nextTick(ttdSetupCanvas)
+}
+
+function bersihkanTtd() {
+  const canvas = ttdCanvasRef.value
+  if (!canvas || !ttdCtx) return
+  ttdCtx.clearRect(0, 0, canvas.width, canvas.height)
+  ttdHasDrawn.value = false
+}
+
+async function simpanTtd() {
+  const canvas = ttdCanvasRef.value
+  if (!canvas || !ttdHasDrawn.value || !profile.value) return
+  ttdSaving.value = true
+  try {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    const fd = new FormData()
+    fd.append('file', blob, 'ttd.png')
+    await http.post(`/pegawai/${profile.value.id}/ttd`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    profile.value.ttd_pegawai_nama = 'ttd.png'
+    await refreshTtd()
+    ttdDialogVisible.value = false
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Tanda tangan digital berhasil disimpan', life: 3000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan tanda tangan', detail: await extractErrorMessage(e), life: 4000 })
+  } finally {
+    ttdSaving.value = false
+  }
+}
+
+function confirmHapusTtd() {
+  confirm.require({
+    message: 'Hapus tanda tangan digital anda? Formulir Cuti berikutnya akan tampil kosong (siap ditanda tangani basah di atas kertas) sampai anda membuat tanda tangan baru.',
+    header: 'Konfirmasi Hapus Tanda Tangan',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await http.delete(`/pegawai/${profile.value.id}/ttd`)
+        profile.value.ttd_pegawai_nama = ''
+        await refreshTtd()
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Tanda tangan digital berhasil dihapus', life: 3000 })
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: await extractErrorMessage(e), life: 4000 })
       }
     },
   })
@@ -661,6 +794,18 @@ function formatDate(v) {
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
       </div>
       <template v-else-if="profile">
+        <Message v-if="!profile.ttd_pegawai_nama" severity="warn" :closable="false" style="margin-bottom: 1rem">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
+            <div>
+              <strong>Tanda Tangan Digital Belum Dibuat</strong>
+              <div style="margin-top: 0.25rem">
+                Isi tanda tangan digital anda terlebih dahulu (lihat bagian "Tanda Tangan Digital" di bawah) agar otomatis tertempel di atas nama anda pada Formulir Cuti, tanpa perlu mencetak dan tanda tangan basah lebih dulu.
+              </div>
+            </div>
+            <Button label="Buat Tanda Tangan" icon="pi pi-pencil" size="small" @click="bukaTtdDialog" />
+          </div>
+        </Message>
+
         <div class="foto-profil-row">
           <div class="foto-profil-avatar">
             <img v-if="fotoUrl" :src="fotoUrl" alt="Foto profil" />
@@ -682,6 +827,23 @@ function formatDate(v) {
             </div>
             <small style="display: block; margin-top: 0.4rem; color: var(--p-text-muted-color)">
               Foto profil bisa anda ganti atau hapus sendiri kapan saja, langsung berlaku tanpa perlu persetujuan administrator/admin. Format JPG atau PNG.
+            </small>
+          </div>
+        </div>
+
+        <div class="foto-profil-row">
+          <div class="ttd-preview">
+            <img v-if="ttdUrl" :src="ttdUrl" alt="Tanda tangan digital" />
+            <span v-else class="ttd-preview-empty">Belum ada</span>
+          </div>
+          <div>
+            <div style="font-weight: 600; margin-bottom: 0.4rem">Tanda Tangan Digital</div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+              <Button :label="ttdUrl ? 'Ubah Tanda Tangan' : 'Buat Tanda Tangan'" icon="pi pi-pencil" size="small" outlined @click="bukaTtdDialog" />
+              <Button v-if="ttdUrl" label="Hapus Tanda Tangan" icon="pi pi-trash" size="small" severity="danger" text @click="confirmHapusTtd" />
+            </div>
+            <small style="display: block; margin-top: 0.4rem; color: var(--p-text-muted-color)">
+              Setelah disimpan, tanda tangan ini otomatis ditempelkan di atas nama anda pada Formulir Cuti yang dicetak -- tidak perlu lagi mencetak dan tanda tangan basah lebih dulu.
             </small>
           </div>
         </div>
@@ -897,6 +1059,33 @@ function formatDate(v) {
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="pensiunDialogVisible = false" />
         <Button label="Kirim Pengajuan" icon="pi pi-send" :loading="pensiunSaving" @click="submitAjukanPensiun" />
+      </template>
+    </Dialog>
+
+    <!-- Dialog Buat/Ubah Tanda Tangan Digital -->
+    <Dialog v-model:visible="ttdDialogVisible" modal header="Buat Tanda Tangan Digital" :style="{ width: '34rem', maxWidth: '95vw' }">
+      <Message severity="info" :closable="false" style="margin-bottom: 1rem">
+        Gambar tanda tangan anda pada kotak putih di bawah memakai mouse atau jari, lalu klik "Simpan".
+      </Message>
+      <div class="ttd-canvas-wrap">
+        <canvas
+          ref="ttdCanvasRef"
+          width="600"
+          height="220"
+          class="ttd-canvas"
+          @pointerdown="ttdPointerDown"
+          @pointermove="ttdPointerMove"
+          @pointerup="ttdPointerUp"
+          @pointerleave="ttdPointerUp"
+          @pointercancel="ttdPointerUp"
+        ></canvas>
+      </div>
+      <div style="margin-top: 0.6rem">
+        <Button label="Bersihkan" icon="pi pi-refresh" size="small" text @click="bersihkanTtd" />
+      </div>
+      <template #footer>
+        <Button label="Batal" text @click="ttdDialogVisible = false" />
+        <Button label="Simpan" icon="pi pi-check" :loading="ttdSaving" :disabled="!ttdHasDrawn" @click="simpanTtd" />
       </template>
     </Dialog>
 
@@ -1121,6 +1310,45 @@ function formatDate(v) {
 .foto-profil-avatar i {
   font-size: 2.1rem;
   color: var(--p-text-muted-color, #94a3b8);
+}
+
+.ttd-preview {
+  width: 140px;
+  height: 84px;
+  border: 1px dashed var(--p-surface-300, #cbd5e1);
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.ttd-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.ttd-preview-empty {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color, #94a3b8);
+}
+
+.ttd-canvas-wrap {
+  border: 1px dashed var(--p-surface-300, #cbd5e1);
+  border-radius: 8px;
+  background: #fff;
+  line-height: 0;
+}
+
+.ttd-canvas {
+  width: 100%;
+  height: 220px;
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
 }
 
 .detail-grid {

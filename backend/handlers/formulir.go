@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
+	"image/png"
 	"io"
 	"net/http"
 	neturl "net/url"
@@ -287,6 +289,37 @@ func buildSignatureQR(item models.PengajuanCuti, pegawai models.Pegawai) ([]byte
 	)
 	googleURL := "https://www.google.com/search?q=" + neturl.QueryEscape(query)
 	return qrcode.Encode(googleURL, qrcode.Medium, 240)
+}
+
+// drawTtdPegawai menggambar tanda tangan digital pegawai (jika sudah
+// disimpan lewat Profil Saya -- lihat uploadTtdPegawai di
+// handlers/pegawai.go) di dalam kotak berukuran maxW x maxH, rata tengah
+// horizontal pada cx dan sisi atas kotak di yTop -- dipakai di Baris VI
+// (blok "Hormat Saya") formulir.go supaya pegawai yang sudah menyimpan TTD
+// digitalnya TIDAK perlu mencetak, tanda tangan basah, lalu scan ulang
+// formulir ini. Gambar diskalakan proporsional (contain, bukan
+// stretch/crop). Kalau pegawai belum punya TTD tersimpan atau berkasnya
+// gagal dibaca, fungsi ini tidak menggambar apa pun -- area dibiarkan
+// kosong seperti sebelum fitur ini ada, siap ditanda tangani basah di atas
+// kertas cetak.
+func drawTtdPegawai(doc *utils.PDFDoc, p *utils.PDFPage, pegawai models.Pegawai, cx, yTop, maxW, maxH float64) {
+	if len(pegawai.TtdPegawaiFile) == 0 {
+		return
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(pegawai.TtdPegawaiFile))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return
+	}
+	scale := maxW / float64(cfg.Width)
+	if h := float64(cfg.Height) * scale; h > maxH {
+		scale = maxH / float64(cfg.Height)
+	}
+	dw := float64(cfg.Width) * scale
+	dh := float64(cfg.Height) * scale
+	if err := doc.RegisterImage("ttd_pegawai", pegawai.TtdPegawaiFile); err != nil {
+		return
+	}
+	p.Image("ttd_pegawai", cx-dw/2, yTop+(maxH-dh)/2, dw, dh)
 }
 
 // drawSignatureQR registers (under a page-unique name) and draws the
@@ -847,6 +880,10 @@ func buildFormulirCutiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai
 	sigMaxWVI := (rightX - rightHalfX) - 16
 	p.SetFont(false, 11)
 	p.TextCentered(sigColCenterVI, rowTop+55, "Hormat Saya")
+	// Kalau pegawai sudah menyimpan tanda tangan digitalnya (lihat Profil
+	// Saya), tempelkan otomatis di ruang kosong antara "Hormat Saya" dan
+	// nama di bawahnya -- tidak perlu cetak-tanda tangan basah-scan lagi.
+	drawTtdPegawai(doc, p, pegawai, sigColCenterVI, rowTop+58, sigMaxWVI*0.9, 38)
 	p.SetFont(true, 12)
 	namaPegawaiUpper := truncateToWidth(strings.ToUpper(pegawai.Nama), sigMaxWVI*boldWidthSafety, 12)
 	p.TextCentered(sigColCenterVI, rowTop+100, namaPegawaiUpper)
@@ -897,12 +934,22 @@ func buildFormulirCutiPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai
 	p.Line(contentX, gridTopVII, rightX, gridTopVII)
 	p.Line(contentX, gridTopVII+optHeaderH, rightX, gridTopVII+optHeaderH)
 
-	centerVII := contentX + contentW/2
-	const capWidthVII = 420.0
-	jabatanWVII := contentW - 2*pad
-	if jabatanWVII > capWidthVII {
-		jabatanWVII = capWidthVII
-	}
+	// sigLeftVII/capWidthVII: blok jabatan/QR/nama/NIP Kepala Dinas kini rata
+	// kiri mulai TEPAT dari kolom "Disetujui" (kolom pertama, i == 0 di
+	// atas) -- BUKAN lagi di tengah-tengah seluruh baris 4 kolom seperti
+	// sebelumnya -- atas permintaan eksplisit supaya blok itu terlihat jelas
+	// berada di bawah opsi yang memang selalu tercentang (pengajuan hanya
+	// dicetak setelah disetujui). Lebar dibatasi 260 (bukan 420 seperti versi
+	// full-row sebelumnya) agar tidak meluber jauh ke kanan, tapi tetap di
+	// atas 228 -- lebar minimum yang pernah dibutuhkan supaya nama penanda
+	// tangan yang cukup panjang (mis. "BERNOULLI TANARI, S.Pd.,M.Pd") tidak
+	// terpotong, lihat komentar sigColW pada buildSuratRekomendasiPage di
+	// atas. Elemen di dalam blok tetap rata tengah SATU SAMA LAIN (jabatan/
+	// QR/nama/NIP bertumpuk simetris), hanya titik pusatnya yang berubah.
+	sigLeftVII := contentX
+	const capWidthVII = 260.0
+	centerVII := sigLeftVII + capWidthVII/2
+	jabatanWVII := capWidthVII
 	jabatanLinesVII, jabatanSizeVII := wrapJabatan(namaOrDash(signerJabatan), jabatanWVII, 2, []float64{11, 10, 9.5, 9, 8.5, 8, 7.5})
 	jabatanLineHVII := jabatanSizeVII + 3
 	p.SetFont(false, jabatanSizeVII)

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { useAuthStore } from '../stores/auth'
@@ -21,6 +21,7 @@ import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
 import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
+import ProgressSpinner from 'primevue/progressspinner'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -229,6 +230,7 @@ function openCreate() {
   flaggedEditDocs.value = []
   editReturnNote.value = ''
   formDialog.value = true
+  if (isManage.value) refreshTtdAdmin(null)
 }
 
 function openEdit(row) {
@@ -245,6 +247,7 @@ function openEdit(row) {
   flaggedEditDocs.value = row.status === 'dikembalikan' ? (row.dokumen || []).filter((d) => d.perlu_perbaikan) : []
   editReturnNote.value = row.status === 'dikembalikan' ? row.catatan_approval || '' : ''
   formDialog.value = true
+  if (isManage.value) refreshTtdAdmin(row.id_pegawai)
 }
 
 function pickDocFile(key) {
@@ -328,6 +331,135 @@ async function saveForm() {
   } finally {
     saving.value = false
   }
+}
+
+// ---- tanda tangan digital pegawai, diisi ADMIN/ADMINISTRATOR langsung dari
+// form Ajukan/Input Cuti ini (setelah bagian upload berkas) -- supaya kalau
+// pegawai berhalangan mengisi tanda tangannya sendiri lewat Profil Saya,
+// admin/administrator tetap bisa membuatkan tanda tangan tersebut di sini
+// agar otomatis tertempel pada Formulir Cuti (lihat drawTtdPegawai di
+// backend/handlers/formulir.go). Memakai endpoint yang SAMA seperti Profil
+// Saya (GET/POST/DELETE /pegawai/{id}/ttd) -- backend sudah mengizinkan
+// administrator/admin mengubah TTD SIAPA SAJA (lihat canManageTtdPegawai).
+const ttdAdminUrl = ref('')
+const ttdAdminLoading = ref(false)
+const ttdAdminDialogVisible = ref(false)
+const ttdAdminSaving = ref(false)
+const ttdAdminCanvasRef = ref(null)
+const ttdAdminHasDrawn = ref(false)
+let ttdAdminCtx = null
+let ttdAdminDrawing = false
+
+async function refreshTtdAdmin(idPegawai) {
+  if (ttdAdminUrl.value) window.URL.revokeObjectURL(ttdAdminUrl.value)
+  ttdAdminUrl.value = ''
+  if (!idPegawai) return
+  ttdAdminLoading.value = true
+  try {
+    const res = await http.get(`/pegawai/${idPegawai}/ttd`, { responseType: 'blob' })
+    ttdAdminUrl.value = window.URL.createObjectURL(res.data)
+  } catch (e) {
+    // belum ada TTD tersimpan (404) -- biarkan kosong
+  } finally {
+    ttdAdminLoading.value = false
+  }
+}
+
+// Ikuti perubahan pegawai yang dipilih admin pada Select "Pegawai" di dalam
+// dialog ini -- begitu ganti pegawai, pratinjau TTD ikut diperbarui.
+watch(
+  () => form.id_pegawai,
+  (id) => {
+    if (isManage.value) refreshTtdAdmin(id)
+  },
+)
+
+function ttdAdminCanvasPos(e) {
+  const canvas = ttdAdminCanvasRef.value
+  const rect = canvas.getBoundingClientRect()
+  const scaleX = canvas.width / rect.width
+  const scaleY = canvas.height / rect.height
+  return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY }
+}
+function ttdAdminPointerDown(e) {
+  e.preventDefault()
+  const canvas = ttdAdminCanvasRef.value
+  if (!canvas || !ttdAdminCtx) return
+  ttdAdminDrawing = true
+  ttdAdminHasDrawn.value = true
+  const { x, y } = ttdAdminCanvasPos(e)
+  ttdAdminCtx.beginPath()
+  ttdAdminCtx.moveTo(x, y)
+  canvas.setPointerCapture?.(e.pointerId)
+}
+function ttdAdminPointerMove(e) {
+  if (!ttdAdminDrawing || !ttdAdminCtx) return
+  e.preventDefault()
+  const { x, y } = ttdAdminCanvasPos(e)
+  ttdAdminCtx.lineTo(x, y)
+  ttdAdminCtx.stroke()
+}
+function ttdAdminPointerUp() {
+  ttdAdminDrawing = false
+}
+function ttdAdminSetupCanvas() {
+  const canvas = ttdAdminCanvasRef.value
+  if (!canvas) return
+  ttdAdminCtx = canvas.getContext('2d')
+  ttdAdminCtx.clearRect(0, 0, canvas.width, canvas.height)
+  ttdAdminCtx.lineWidth = 3
+  ttdAdminCtx.lineCap = 'round'
+  ttdAdminCtx.lineJoin = 'round'
+  ttdAdminCtx.strokeStyle = '#1e293b'
+  ttdAdminHasDrawn.value = false
+}
+function bukaTtdAdminDialog() {
+  if (!form.id_pegawai) return
+  ttdAdminDialogVisible.value = true
+  nextTick(ttdAdminSetupCanvas)
+}
+function bersihkanTtdAdmin() {
+  const canvas = ttdAdminCanvasRef.value
+  if (!canvas || !ttdAdminCtx) return
+  ttdAdminCtx.clearRect(0, 0, canvas.width, canvas.height)
+  ttdAdminHasDrawn.value = false
+}
+async function simpanTtdAdmin() {
+  const canvas = ttdAdminCanvasRef.value
+  if (!canvas || !ttdAdminHasDrawn.value || !form.id_pegawai) return
+  ttdAdminSaving.value = true
+  try {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    const fd = new FormData()
+    fd.append('file', blob, 'ttd.png')
+    await http.post(`/pegawai/${form.id_pegawai}/ttd`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    await refreshTtdAdmin(form.id_pegawai)
+    ttdAdminDialogVisible.value = false
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Tanda tangan digital pegawai berhasil disimpan', life: 3000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan tanda tangan', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    ttdAdminSaving.value = false
+  }
+}
+function confirmHapusTtdAdmin() {
+  confirm.require({
+    message: 'Hapus tanda tangan digital pegawai ini?',
+    header: 'Konfirmasi Hapus Tanda Tangan',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await http.delete(`/pegawai/${form.id_pegawai}/ttd`)
+        await refreshTtdAdmin(form.id_pegawai)
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Tanda tangan digital pegawai berhasil dihapus', life: 3000 })
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      }
+    },
+  })
 }
 
 function confirmDelete(row) {
@@ -944,10 +1076,64 @@ onMounted(() => {
             </div>
           </div>
         </div>
+
+        <!-- Tanda tangan digital pegawai -- diisi ADMIN/ADMINISTRATOR di
+        sini (SETELAH bagian upload berkas di atas) supaya kalau pegawai
+        berhalangan mengisi tanda tangannya sendiri lewat Profil Saya,
+        admin/administrator tetap bisa membuatkannya agar otomatis
+        tertempel pada Formulir Cuti (lihat catatan pada refreshTtdAdmin
+        di atas). Sengaja tidak wajib -- tersimpan langsung begitu diklik
+        "Simpan" di dialog kanvas, TIDAK menunggu tombol "Simpan" pengajuan
+        cuti di bawah. -->
+        <div v-if="isManage && form.id_pegawai" style="border-top: 1px solid var(--p-content-border-color); padding-top: 1rem">
+          <label class="field-label">Tanda Tangan Digital Pegawai (opsional)</label>
+          <Message severity="info" :closable="false" style="font-size: 0.8rem; margin-bottom: 0.6rem">
+            Kalau pegawai ini berhalangan mengisi tanda tangan digitalnya sendiri lewat Profil Saya, admin/administrator bisa membuatkannya di sini agar tetap otomatis tertempel di atas nama pegawai pada Formulir Cuti.
+          </Message>
+          <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap">
+            <div class="ttd-admin-preview">
+              <ProgressSpinner v-if="ttdAdminLoading" style="width: 1.5rem; height: 1.5rem" />
+              <img v-else-if="ttdAdminUrl" :src="ttdAdminUrl" alt="Tanda tangan digital pegawai" />
+              <span v-else class="ttd-admin-preview-empty">Belum ada</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+              <Button :label="ttdAdminUrl ? 'Ubah Tanda Tangan' : 'Buat Tanda Tangan'" icon="pi pi-pencil" size="small" outlined @click="bukaTtdAdminDialog" />
+              <Button v-if="ttdAdminUrl" label="Hapus" icon="pi pi-trash" size="small" severity="danger" text @click="confirmHapusTtdAdmin" />
+            </div>
+          </div>
+        </div>
       </div>
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="formDialog = false" />
         <Button label="Simpan" :loading="saving" @click="saveForm" />
+      </template>
+    </Dialog>
+
+    <!-- Dialog gambar Tanda Tangan Digital Pegawai (diisi admin/administrator
+    dari dalam form Ajukan/Input Cuti di atas) -->
+    <Dialog v-model:visible="ttdAdminDialogVisible" modal header="Buat Tanda Tangan Digital Pegawai" :style="{ width: '34rem', maxWidth: '95vw' }">
+      <Message severity="info" :closable="false" style="margin-bottom: 1rem">
+        Gambar tanda tangan pegawai pada kotak putih di bawah memakai mouse atau jari, lalu klik "Simpan".
+      </Message>
+      <div class="ttd-admin-canvas-wrap">
+        <canvas
+          ref="ttdAdminCanvasRef"
+          width="600"
+          height="220"
+          class="ttd-admin-canvas"
+          @pointerdown="ttdAdminPointerDown"
+          @pointermove="ttdAdminPointerMove"
+          @pointerup="ttdAdminPointerUp"
+          @pointerleave="ttdAdminPointerUp"
+          @pointercancel="ttdAdminPointerUp"
+        ></canvas>
+      </div>
+      <div style="margin-top: 0.6rem">
+        <Button label="Bersihkan" icon="pi pi-refresh" size="small" text @click="bersihkanTtdAdmin" />
+      </div>
+      <template #footer>
+        <Button label="Batal" text @click="ttdAdminDialogVisible = false" />
+        <Button label="Simpan" icon="pi pi-check" :loading="ttdAdminSaving" :disabled="!ttdAdminHasDrawn" @click="simpanTtdAdmin" />
       </template>
     </Dialog>
 
@@ -1149,6 +1335,40 @@ onMounted(() => {
 .doc-upload-filename {
   font-size: 0.8rem;
   color: var(--p-text-muted-color);
+}
+.ttd-admin-preview {
+  width: 140px;
+  height: 84px;
+  border: 1px dashed var(--p-surface-300, #cbd5e1);
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.ttd-admin-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ttd-admin-preview-empty {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color, #94a3b8);
+}
+.ttd-admin-canvas-wrap {
+  border: 1px dashed var(--p-surface-300, #cbd5e1);
+  border-radius: 8px;
+  background: #fff;
+  line-height: 0;
+}
+.ttd-admin-canvas {
+  width: 100%;
+  height: 220px;
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
 }
 .doc-row {
   display: flex;

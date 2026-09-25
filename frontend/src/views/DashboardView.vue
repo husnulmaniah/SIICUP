@@ -267,6 +267,22 @@ onMounted(() => {
           </div>
         </Message>
 
+        <!-- notifikasi tanda tangan digital (lihat ttd_kosong pada respons
+        dashboard, handlers/dashboard.go) -- mengarahkan ke Profil Saya
+        supaya Formulir Cuti berikutnya bisa langsung tertempel TTD tanpa
+        perlu cetak-tanda tangan basah-scan lagi. -->
+        <Message v-if="data.ttd_kosong" severity="warn" :closable="false" style="margin-bottom: 1rem">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
+            <div>
+              <strong>Tanda Tangan Digital Belum Dibuat</strong>
+              <div style="margin-top: 0.25rem">
+                Isi tanda tangan digital anda terlebih dahulu agar otomatis tertempel di atas nama anda pada Formulir Cuti, tanpa perlu mencetak dan tanda tangan basah lebih dulu.
+              </div>
+            </div>
+            <Button label="Buat Tanda Tangan" icon="pi pi-pencil" size="small" @click="router.push('/profil-saya')" />
+          </div>
+        </Message>
+
         <div class="stat-grid">
           <div class="stat-card"><div class="stat-value">{{ data.jatah_tahun_ini }}</div><div class="stat-label">Jatah Cuti Tahun Ini</div></div>
           <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.terpakai }}</div><div class="stat-label">Terpakai</div></div>

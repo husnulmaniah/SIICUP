@@ -98,6 +98,15 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			permintaanSk = &psk
 		}
 
+		// ttdKosong: dipakai DashboardView.vue untuk menampilkan pemberitahuan
+		// "Tanda Tangan Digital Belum Dibuat" -- cukup baca kolom
+		// ttd_pegawai_nama saja (BUKAN ttd_pegawai_file yang bisa besar) supaya
+		// query dashboard tetap ringan. Lihat uploadTtdPegawai/drawTtdPegawai
+		// di handlers/pegawai.go & handlers/formulir.go.
+		var ttdRow models.Pegawai
+		db.Select("ttd_pegawai_nama").First(&ttdRow, *claims.IDPegawai)
+		ttdKosong := ttdRow.TtdPegawaiNama == ""
+
 		utils.Success(w, "ok", map[string]interface{}{
 			"role":              claims.RoleName,
 			"jatah_tahun_ini":   jatah.JumlahHari,
@@ -113,6 +122,10 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			// "data X masih kosong, silakan dilengkapi di menu Profil ->
 			// Ajukan Perubahan Data" (lihat handlers/kp4.go).
 			"kp4_kelengkapan": kp4KelengkapanUntukDashboard(db, *claims.IDPegawai),
+			// ttd_kosong: true kalau pegawai ini belum pernah menyimpan tanda
+			// tangan digitalnya lewat Profil Saya (lihat komentar ttdKosong di
+			// atas).
+			"ttd_kosong": ttdKosong,
 		})
 
 	default:
