@@ -14,6 +14,13 @@ export const useAuthStore = defineStore('auth', {
     isAdmin: (state) => state.user?.role === 'admin',
     isPegawai: (state) => state.user?.role === 'pegawai',
     isAtasan: (state) => state.user?.role === 'atasan',
+    // idPegawai: id baris data Pegawai yang terhubung ke akun ini (null utk
+    // administrator/admin yang tidak terhubung ke data pegawai manapun) --
+    // dipakai mis. oleh PengajuanCutiView.vue untuk tahu tanda tangan
+    // digital SIAPA yang harus ditampilkan/diisi saat pegawai/atasan
+    // mengajukan cuti untuk diri sendiri (id_pegawai tidak dipilih lewat
+    // Select seperti pada alur admin, jadi harus dibaca dari sini).
+    idPegawai: (state) => state.user?.id_pegawai || null,
     // isAdminAbsensi: centang tambahan pada akun (pegawai/atasan/dll), BUKAN
     // role tersendiri -- akun tetap punya menu sesuai role aslinya (Dashboard,
     // Pengajuan Cuti, Absen, dst.) dan HANYA mendapat tambahan 1 menu "Input

@@ -230,7 +230,7 @@ function openCreate() {
   flaggedEditDocs.value = []
   editReturnNote.value = ''
   formDialog.value = true
-  if (isManage.value) refreshTtdAdmin(null)
+  refreshTtdAdmin(ttdTargetId.value)
 }
 
 function openEdit(row) {
@@ -247,7 +247,7 @@ function openEdit(row) {
   flaggedEditDocs.value = row.status === 'dikembalikan' ? (row.dokumen || []).filter((d) => d.perlu_perbaikan) : []
   editReturnNote.value = row.status === 'dikembalikan' ? row.catatan_approval || '' : ''
   formDialog.value = true
-  if (isManage.value) refreshTtdAdmin(row.id_pegawai)
+  refreshTtdAdmin(ttdTargetId.value)
 }
 
 function pickDocFile(key) {
@@ -333,14 +333,22 @@ async function saveForm() {
   }
 }
 
-// ---- tanda tangan digital pegawai, diisi ADMIN/ADMINISTRATOR langsung dari
-// form Ajukan/Input Cuti ini (setelah bagian upload berkas) -- supaya kalau
-// pegawai berhalangan mengisi tanda tangannya sendiri lewat Profil Saya,
-// admin/administrator tetap bisa membuatkan tanda tangan tersebut di sini
-// agar otomatis tertempel pada Formulir Cuti (lihat drawTtdPegawai di
-// backend/handlers/formulir.go). Memakai endpoint yang SAMA seperti Profil
-// Saya (GET/POST/DELETE /pegawai/{id}/ttd) -- backend sudah mengizinkan
-// administrator/admin mengubah TTD SIAPA SAJA (lihat canManageTtdPegawai).
+// ---- tanda tangan digital pegawai, diisi langsung dari form Ajukan/Input
+// Cuti ini (setelah bagian upload berkas) -- dua kasus:
+// (1) pegawai/atasan mengajukan untuk DIRI SENDIRI -- targetnya id pegawai
+//     akun yang sedang login (auth.idPegawai), sama seperti mengisinya lewat
+//     Profil Saya, cuma dipindah/ditambahkan di sini juga supaya tidak perlu
+//     pindah halaman saat mengajukan cuti.
+// (2) admin/administrator membuat pengajuan UNTUK PEGAWAI LAIN -- targetnya
+//     pegawai yang dipilih di Select "Pegawai" (form.id_pegawai) -- supaya
+//     kalau pegawai itu berhalangan mengisi tanda tangannya sendiri,
+//     admin/administrator tetap bisa membuatkannya di sini.
+// Begitu tersimpan, otomatis tertempel pada Formulir Cuti (lihat
+// drawTtdPegawai di backend/handlers/formulir.go). Memakai endpoint yang SAMA
+// seperti Profil Saya (GET/POST/DELETE /pegawai/{id}/ttd) -- backend
+// mengizinkan pegawai mengubah TTD miliknya sendiri, dan administrator/admin
+// mengubah TTD siapa saja (lihat canManageTtdPegawai).
+const ttdTargetId = computed(() => (isManage.value ? form.id_pegawai : auth.idPegawai))
 const ttdAdminUrl = ref('')
 const ttdAdminLoading = ref(false)
 const ttdAdminDialogVisible = ref(false)
@@ -365,14 +373,12 @@ async function refreshTtdAdmin(idPegawai) {
   }
 }
 
-// Ikuti perubahan pegawai yang dipilih admin pada Select "Pegawai" di dalam
-// dialog ini -- begitu ganti pegawai, pratinjau TTD ikut diperbarui.
-watch(
-  () => form.id_pegawai,
-  (id) => {
-    if (isManage.value) refreshTtdAdmin(id)
-  },
-)
+// Ikuti perubahan target TTD -- untuk admin/administrator ini berubah saat
+// ganti pilihan pada Select "Pegawai"; untuk pegawai/atasan sendiri nilainya
+// tetap (auth.idPegawai), jadi watcher ini praktis hanya aktif pada kasus
+// admin, sedangkan kasus self-submit di-refresh langsung lewat openCreate/
+// openEdit di bawah.
+watch(ttdTargetId, (id) => refreshTtdAdmin(id))
 
 function ttdAdminCanvasPos(e) {
   const canvas = ttdAdminCanvasRef.value
@@ -414,7 +420,7 @@ function ttdAdminSetupCanvas() {
   ttdAdminHasDrawn.value = false
 }
 function bukaTtdAdminDialog() {
-  if (!form.id_pegawai) return
+  if (!ttdTargetId.value) return
   ttdAdminDialogVisible.value = true
   nextTick(ttdAdminSetupCanvas)
 }
@@ -426,14 +432,14 @@ function bersihkanTtdAdmin() {
 }
 async function simpanTtdAdmin() {
   const canvas = ttdAdminCanvasRef.value
-  if (!canvas || !ttdAdminHasDrawn.value || !form.id_pegawai) return
+  if (!canvas || !ttdAdminHasDrawn.value || !ttdTargetId.value) return
   ttdAdminSaving.value = true
   try {
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
     const fd = new FormData()
     fd.append('file', blob, 'ttd.png')
-    await http.post(`/pegawai/${form.id_pegawai}/ttd`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-    await refreshTtdAdmin(form.id_pegawai)
+    await http.post(`/pegawai/${ttdTargetId.value}/ttd`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    await refreshTtdAdmin(ttdTargetId.value)
     ttdAdminDialogVisible.value = false
     toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Tanda tangan digital pegawai berhasil disimpan', life: 3000 })
   } catch (e) {
@@ -452,8 +458,8 @@ function confirmHapusTtdAdmin() {
     acceptClass: 'p-button-danger',
     accept: async () => {
       try {
-        await http.delete(`/pegawai/${form.id_pegawai}/ttd`)
-        await refreshTtdAdmin(form.id_pegawai)
+        await http.delete(`/pegawai/${ttdTargetId.value}/ttd`)
+        await refreshTtdAdmin(ttdTargetId.value)
         toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Tanda tangan digital pegawai berhasil dihapus', life: 3000 })
       } catch (e) {
         toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
@@ -1077,23 +1083,30 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Tanda tangan digital pegawai -- diisi ADMIN/ADMINISTRATOR di
-        sini (SETELAH bagian upload berkas di atas) supaya kalau pegawai
-        berhalangan mengisi tanda tangannya sendiri lewat Profil Saya,
-        admin/administrator tetap bisa membuatkannya agar otomatis
-        tertempel pada Formulir Cuti (lihat catatan pada refreshTtdAdmin
-        di atas). Sengaja tidak wajib -- tersimpan langsung begitu diklik
+        <!-- Tanda tangan digital -- diisi di sini (SETELAH bagian upload
+        berkas di atas), dua kasus (lihat ttdTargetId): (1) pegawai/atasan
+        mengajukan sendiri -- mengisi TTD miliknya sendiri, sama seperti
+        lewat Profil Saya, dan (2) admin/administrator membuat pengajuan
+        untuk pegawai lain -- bisa membuatkan TTD pegawai itu kalau dia
+        berhalangan mengisinya sendiri. Begitu tersimpan, otomatis
+        tertempel pada Formulir Cuti (lihat catatan pada refreshTtdAdmin di
+        atas). Sengaja tidak wajib -- tersimpan langsung begitu diklik
         "Simpan" di dialog kanvas, TIDAK menunggu tombol "Simpan" pengajuan
         cuti di bawah. -->
-        <div v-if="isManage && form.id_pegawai" style="border-top: 1px solid var(--p-content-border-color); padding-top: 1rem">
-          <label class="field-label">Tanda Tangan Digital Pegawai (opsional)</label>
+        <div v-if="ttdTargetId" style="border-top: 1px solid var(--p-content-border-color); padding-top: 1rem">
+          <label class="field-label">Tanda Tangan Digital{{ isManage ? ' Pegawai' : '' }} (opsional)</label>
           <Message severity="info" :closable="false" style="font-size: 0.8rem; margin-bottom: 0.6rem">
-            Kalau pegawai ini berhalangan mengisi tanda tangan digitalnya sendiri lewat Profil Saya, admin/administrator bisa membuatkannya di sini agar tetap otomatis tertempel di atas nama pegawai pada Formulir Cuti.
+            <template v-if="isManage">
+              Kalau pegawai ini berhalangan mengisi tanda tangan digitalnya sendiri lewat Profil Saya, admin/administrator bisa membuatkannya di sini agar tetap otomatis tertempel di atas nama pegawai pada Formulir Cuti.
+            </template>
+            <template v-else>
+              Isi tanda tangan digital anda di sini (atau lewat menu Profil Saya) agar otomatis tertempel di atas nama anda pada Formulir Cuti, tanpa perlu mencetak dan tanda tangan basah lebih dulu.
+            </template>
           </Message>
           <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap">
             <div class="ttd-admin-preview">
               <ProgressSpinner v-if="ttdAdminLoading" style="width: 1.5rem; height: 1.5rem" />
-              <img v-else-if="ttdAdminUrl" :src="ttdAdminUrl" alt="Tanda tangan digital pegawai" />
+              <img v-else-if="ttdAdminUrl" :src="ttdAdminUrl" alt="Tanda tangan digital" />
               <span v-else class="ttd-admin-preview-empty">Belum ada</span>
             </div>
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
@@ -1111,9 +1124,9 @@ onMounted(() => {
 
     <!-- Dialog gambar Tanda Tangan Digital Pegawai (diisi admin/administrator
     dari dalam form Ajukan/Input Cuti di atas) -->
-    <Dialog v-model:visible="ttdAdminDialogVisible" modal header="Buat Tanda Tangan Digital Pegawai" :style="{ width: '34rem', maxWidth: '95vw' }">
+    <Dialog v-model:visible="ttdAdminDialogVisible" modal :header="isManage ? 'Buat Tanda Tangan Digital Pegawai' : 'Buat Tanda Tangan Digital'" :style="{ width: '34rem', maxWidth: '95vw' }">
       <Message severity="info" :closable="false" style="margin-bottom: 1rem">
-        Gambar tanda tangan pegawai pada kotak putih di bawah memakai mouse atau jari, lalu klik "Simpan".
+        Gambar tanda tangan{{ isManage ? ' pegawai' : ' anda' }} pada kotak putih di bawah memakai mouse atau jari, lalu klik "Simpan".
       </Message>
       <div class="ttd-admin-canvas-wrap">
         <canvas
