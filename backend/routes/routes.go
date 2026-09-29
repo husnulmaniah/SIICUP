@@ -34,6 +34,7 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 	handlers.RegisterTppRoutes(mux, db)
 	handlers.RegisterShiftKerjaRoutes(mux, db)
 	handlers.RegisterKp4Routes(mux, db)
+	handlers.RegisterSuratRekomendasiRoutes(mux, db)
 
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

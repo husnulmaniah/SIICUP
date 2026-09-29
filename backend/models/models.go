@@ -532,6 +532,64 @@ func (PengaturanSurat) TableName() string { return "pengaturan_surat" }
 func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
 
 // ============================================================
+// SURAT REKOMENDASI (perpanjangan kontrak PPPK/PPPK Paruh Waktu)
+// ============================================================
+
+// SuratRekomendasi: surat rekomendasi perpanjangan kontrak yang dibuat
+// administrator/admin untuk pegawai berstatus PPPK/PPPK Paruh Waktu --
+// biasanya dikirim SEKALIGUS (kolektif) berdasarkan status kepegawaian &
+// tahun TMT menjelang masa kontrak berakhir, tapi boleh juga satu-satu.
+// Begitu dibuat, surat langsung "terkirim" -- muncul di menu Arsip Surat
+// akun pegawai ybs (lihat listSuratRekomendasi di
+// handlers/surat_rekomendasi.go) sebagai PDF yang bisa dilihat/diunduh
+// kapan saja, TANPA proses approval terpisah (beda dari Pengajuan Cuti/
+// Pensiun/dll yang butuh persetujuan atasan).
+//
+// Nomor surat memakai kode klasifikasi TETAP "800.1.11" (lihat konstanta
+// KodeKlasifikasiSuratRekomendasi di bawah) -- hanya NomorUrut yang
+// berubah: administrator mengisi manual nomor urut AWAL untuk surat
+// PERTAMA di suatu tahun, setelah itu OTOMATIS melanjutkan (+1) untuk
+// setiap surat berikutnya di tahun yang sama, baik dibuat satu-satu maupun
+// sekaligus/kolektif dalam satu kali kirim (lihat
+// nextNomorUrutSuratRekomendasi & buatSuratRekomendasi di
+// handlers/surat_rekomendasi.go). Nomor urut TIDAK reset lagi setelah
+// tahun berikutnya dimulai -- justru sebaliknya, tahun BARU otomatis minta
+// diisi manual lagi sekali (karena belum ada baris ber-Tahun itu),
+// menandakan dimulainya rentang nomor baru untuk tahun tersebut.
+//
+// Data pribadi pegawai (nama, NIP, pangkat/gol, jabatan, unit kerja,
+// status kepegawaian, TMT) TIDAK diduplikasi di sini -- selalu diambil
+// LIVE lewat relasi IDPegawai saat surat ditampilkan/dicetak (sama pola
+// dengan Kp4Data di bawah), supaya kalau data pegawai diperbarui
+// administrator, surat yang sudah terbit ikut menampilkan data terbaru.
+type SuratRekomendasi struct {
+	ID        uint     `json:"id" gorm:"primaryKey"`
+	IDPegawai uint     `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai   *Pegawai `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	// Judul: judul/perihal surat yang tampil di kartu grid menu Arsip Surat
+	// & Surat Rekomendasi, mis. "Surat Rekomendasi Tahun 2026" -- diisi
+	// administrator saat mengirim (satu judul dipakai bersama untuk seluruh
+	// pegawai pada satu kali kirim kolektif).
+	Judul        string    `json:"judul" gorm:"size:150;not null"`
+	NomorUrut    int       `json:"nomor_urut" gorm:"column:nomor_urut;not null"`
+	Tahun        int       `json:"tahun" gorm:"not null"`
+	TanggalSurat time.Time `json:"tanggal_surat" gorm:"column:tanggal_surat;type:date;not null"`
+	// DibuatOlehNama: nama akun administrator/admin yang membuat/mengirim
+	// surat ini, disimpan sebagai teks biasa (bukan FK ke User) supaya
+	// tetap tercatat meskipun akun pembuatnya kelak dihapus/diubah.
+	DibuatOlehNama string    `json:"dibuat_oleh_nama" gorm:"column:dibuat_oleh_nama;size:150"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+func (SuratRekomendasi) TableName() string { return "surat_rekomendasi" }
+
+// KodeKlasifikasiSuratRekomendasi: kode klasifikasi TETAP untuk semua
+// Surat Rekomendasi (perpanjangan kontrak PPPK) -- beda dari Surat
+// Rekomendasi Izin Cuti yang kodenya berbeda-beda per jenis cuti (lihat
+// suratNomorKode di handlers/formulir.go).
+const KodeKlasifikasiSuratRekomendasi = "800.1.11"
+
+// ============================================================
 // KP4 -- "Surat Keterangan Untuk Mendapatkan Pembayaran Tunjangan Keluarga"
 // ============================================================
 //

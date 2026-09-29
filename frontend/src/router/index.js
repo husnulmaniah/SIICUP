@@ -19,6 +19,8 @@ import ShiftKerjaView from '../views/ShiftKerjaView.vue'
 import Kp4View from '../views/Kp4View.vue'
 import Kp4AdminView from '../views/Kp4AdminView.vue'
 import PengaturanKp4View from '../views/PengaturanKp4View.vue'
+import SuratRekomendasiView from '../views/SuratRekomendasiView.vue'
+import ArsipSuratView from '../views/ArsipSuratView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -57,6 +59,11 @@ const routes = [
       { path: 'kp4', name: 'kp4', component: Kp4View, meta: { roles: ['pegawai'] } },
       { path: 'kp4-admin', name: 'kp4-admin', component: Kp4AdminView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'pengaturan-kp4', name: 'pengaturan-kp4', component: PengaturanKp4View, meta: { roles: ['administrator', 'admin'] } },
+      // Surat Rekomendasi (kirim, khusus administrator/admin) & Arsip Surat
+      // (terima, khusus pegawai/atasan) -- dua sisi dari fitur yang sama,
+      // lihat backend/handlers/surat_rekomendasi.go.
+      { path: 'surat-rekomendasi', name: 'surat-rekomendasi', component: SuratRekomendasiView, meta: { roles: ['administrator', 'admin'] } },
+      { path: 'arsip-surat', name: 'arsip-surat', component: ArsipSuratView, meta: { roles: ['pegawai', 'atasan'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },

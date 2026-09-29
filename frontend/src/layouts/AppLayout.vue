@@ -118,6 +118,13 @@ const navSections = computed(() => {
     })
   }
 
+  // Arsip Surat: surat rekomendasi (perpanjangan kontrak PPPK/PPPK Paruh
+  // Waktu) yang dikirim administrator untuk akun pegawai/atasan ybs --
+  // lihat SuratRekomendasiView.vue (sisi administrator) & ArsipSuratView.vue.
+  if (auth.isPegawai || auth.isAtasan) {
+    sections.push({ header: null, items: [{ label: 'Arsip Surat', icon: 'pi pi-inbox', to: '/arsip-surat' }] })
+  }
+
   // Template Surat: administrator/admin mengelola, pegawai/atasan bertugas
   // di SEKOLAH hanya melihat/preview (lihat auth.canViewTemplateSurat,
   // dihitung dari flag is_sekolah yang dikirim backend saat login).
@@ -146,6 +153,7 @@ const navSections = computed(() => {
         { label: 'KP4', icon: 'pi pi-id-card', to: '/kp4-admin' },
         { label: 'Pengajuan Pensiun', icon: 'pi pi-briefcase', to: '/pengajuan-pensiun' },
         { label: 'Penerima TPP', icon: 'pi pi-money-bill', to: '/penerima-tpp' },
+        { label: 'Surat Rekomendasi', icon: 'pi pi-send', to: '/surat-rekomendasi' },
         { label: 'Jatah Cuti Tahunan', icon: 'pi pi-wallet', to: '/master/jatah-cuti' },
       ],
     })
