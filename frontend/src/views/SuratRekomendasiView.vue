@@ -297,6 +297,57 @@ async function doHapus(item) {
     toast.add({ severity: 'error', summary: 'Gagal menghapus', detail: e.response?.data?.message || e.message, life: 5000 })
   }
 }
+
+// ============================================================
+// unduh Excel (Nomor Surat -> Nama Pegawai) -- difilter dari TANGGAL
+// SURAT (tanggal dikirimnya surat rekomendasi, bukan tanggal dibuatnya
+// baris), lihat exportSuratRekomendasi di handlers/surat_rekomendasi.go.
+// Kedua tanggal opsional & boleh dipakai sendiri-sendiri.
+// ============================================================
+const excelDialog = ref(false)
+const excelDari = ref(null)
+const excelSampai = ref(null)
+const excelLoading = ref(false)
+
+function bukaExcelDialog() {
+  excelDari.value = null
+  excelSampai.value = null
+  excelDialog.value = true
+}
+
+function toDateStrExcel(d) {
+  if (!d) return ''
+  const dt = new Date(d)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+}
+
+async function unduhExcel() {
+  if (excelDari.value && excelSampai.value && excelDari.value > excelSampai.value) {
+    toast.add({ severity: 'warn', summary: 'Rentang tanggal tidak valid', detail: '"Dari Tanggal" harus sebelum atau sama dengan "Sampai Tanggal"', life: 5000 })
+    return
+  }
+  excelLoading.value = true
+  try {
+    const params = {}
+    if (excelDari.value) params.tanggal_mulai = toDateStrExcel(excelDari.value)
+    if (excelSampai.value) params.tanggal_selesai = toDateStrExcel(excelSampai.value)
+    const res = await http.get('/surat-rekomendasi/export', { params, responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'surat_rekomendasi.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    excelDialog.value = false
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh Excel', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    excelLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -310,7 +361,10 @@ async function doHapus(item) {
           Arsip Surat akun pegawai penerimanya.
         </p>
       </div>
-      <Button label="Kirim Surat Rekomendasi" icon="pi pi-send" @click="bukaKirimDialog" />
+      <div class="page-header-actions">
+        <Button label="Unduh Excel" icon="pi pi-file-excel" severity="secondary" outlined @click="bukaExcelDialog" />
+        <Button label="Kirim Surat Rekomendasi" icon="pi pi-send" @click="bukaKirimDialog" />
+      </div>
     </div>
 
     <div class="toolbar-row">
@@ -430,6 +484,28 @@ async function doHapus(item) {
     <Dialog v-model:visible="previewDialog" modal :header="previewTitle" style="width: 90vw; max-width: 900px" @hide="tutupPreview">
       <iframe :src="previewPdfUrl" class="preview-frame"></iframe>
     </Dialog>
+
+    <!-- dialog unduh Excel -->
+    <Dialog v-model:visible="excelDialog" modal header="Unduh Excel Surat Rekomendasi" style="width: 30rem; max-width: 96vw">
+      <p class="page-subtitle" style="margin-top: 0">
+        Excel berisi Nomor Surat &amp; Nama Pegawai (beserta NIP, Jabatan, Unit Kerja, Status Kepegawaian, Judul), difilter
+        berdasarkan tanggal surat dikirim. Kosongkan salah satu atau kedua tanggal untuk mengunduh semua surat.
+      </p>
+      <div class="form-grid-2">
+        <div class="form-field">
+          <label>Dari Tanggal Dikirim</label>
+          <DatePicker v-model="excelDari" dateFormat="dd/mm/yy" showIcon showButtonBar style="width: 100%" />
+        </div>
+        <div class="form-field">
+          <label>Sampai Tanggal Dikirim</label>
+          <DatePicker v-model="excelSampai" dateFormat="dd/mm/yy" showIcon showButtonBar style="width: 100%" />
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="excelDialog = false" />
+        <Button label="Unduh Excel" icon="pi pi-file-excel" :loading="excelLoading" @click="unduhExcel" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -441,6 +517,12 @@ async function doHapus(item) {
   gap: 1rem;
   flex-wrap: wrap;
   margin-bottom: 1rem;
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 .toolbar-row {

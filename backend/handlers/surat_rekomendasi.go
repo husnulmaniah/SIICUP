@@ -581,6 +581,83 @@ func hapusSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 	utils.Success(w, "surat rekomendasi berhasil dihapus", nil)
 }
 
+// exportSuratRekomendasi menangani GET /api/surat-rekomendasi/export?
+// tanggal_mulai=YYYY-MM-DD&tanggal_selesai=YYYY-MM-DD -- mengunduh daftar
+// Nomor Surat -> Nama Pegawai (beserta beberapa kolom pendukung) sebagai
+// Excel, difilter dari TANGGAL SURAT (tanggal dikirimnya surat rekomendasi
+// itu, models.SuratRekomendasi.TanggalSurat) -- BUKAN tanggal baris
+// dibuat/CreatedAt. Kedua parameter opsional & bisa dipakai sendiri-sendiri
+// (mis. hanya tanggal_mulai = "sejak tanggal itu", hanya tanggal_selesai =
+// "sampai tanggal itu"); kalau keduanya kosong, seluruh surat diexport.
+func exportSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	q := r.URL.Query()
+	query := db.Model(&models.SuratRekomendasi{})
+
+	var dariLabel, sampaiLabel string
+	if s := strings.TrimSpace(q.Get("tanggal_mulai")); s != "" {
+		if tgl, err := time.Parse("2006-01-02", s); err == nil {
+			query = query.Where("tanggal_surat >= ?", tgl)
+			dariLabel = tgl.Format("2006-01-02")
+		} else {
+			utils.Error(w, http.StatusBadRequest, "tanggal_mulai tidak valid (format YYYY-MM-DD)")
+			return
+		}
+	}
+	if s := strings.TrimSpace(q.Get("tanggal_selesai")); s != "" {
+		if tgl, err := time.Parse("2006-01-02", s); err == nil {
+			query = query.Where("tanggal_surat <= ?", tgl)
+			sampaiLabel = tgl.Format("2006-01-02")
+		} else {
+			utils.Error(w, http.StatusBadRequest, "tanggal_selesai tidak valid (format YYYY-MM-DD)")
+			return
+		}
+	}
+
+	var rows []models.SuratRekomendasi
+	if err := suratRekomendasiPreload(query).
+		Order("tanggal_surat asc, nomor_urut asc").
+		Find(&rows).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data surat rekomendasi")
+		return
+	}
+
+	items := make([]suratRekomendasiOut, 0, len(rows))
+	for _, it := range rows {
+		items = append(items, toSuratRekomendasiOut(it))
+	}
+
+	// noCounter: kolom "No" (nomor urut BARIS di Excel, BUKAN nomor_urut
+	// surat) -- ExcelColumn.Get tidak diberi indeks barisnya sendiri, jadi
+	// dihitung manual lewat closure ini. Aman karena kolom "No" SENGAJA
+	// ditaruh PALING PERTAMA di slice columns di bawah -- ExportData
+	// memanggil Get tiap kolom berurutan per baris, jadi noCounter
+	// bertambah tepat satu kali per baris, sesuai urutan baris.
+	noCounter := 0
+	columns := []utils.ExcelColumn{
+		{Header: "No", Get: func(i interface{}) string { noCounter++; return strconv.Itoa(noCounter) }},
+		{Header: "Nomor Surat", Get: func(i interface{}) string { return i.(suratRekomendasiOut).NomorSurat }},
+		{Header: "Nama Pegawai", Get: func(i interface{}) string { return i.(suratRekomendasiOut).NamaPegawai }},
+		{Header: "NIP", Get: func(i interface{}) string { return i.(suratRekomendasiOut).NipPegawai }},
+		{Header: "Jabatan", Get: func(i interface{}) string { return i.(suratRekomendasiOut).Jabatan }},
+		{Header: "Unit Kerja", Get: func(i interface{}) string { return i.(suratRekomendasiOut).UnitKerja }},
+		{Header: "Status Kepegawaian", Get: func(i interface{}) string { return i.(suratRekomendasiOut).StatusKepegawaian }},
+		{Header: "Judul Surat", Get: func(i interface{}) string { return i.(suratRekomendasiOut).Judul }},
+		{Header: "Tanggal Surat", Get: func(i interface{}) string { return i.(suratRekomendasiOut).TanggalSurat }},
+	}
+	f, err := utils.ExportData(items, columns)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	filename := "surat_rekomendasi"
+	if dariLabel != "" || sampaiLabel != "" {
+		filename += "_" + dariLabel + "_" + sampaiLabel
+	}
+	filename += ".xlsx"
+	writeXlsxResponse(w, f, filename)
+}
+
 // pdfSuratRekomendasi menangani GET /api/surat-rekomendasi/{id}/pdf?inline=1
 // -- administrator/admin boleh membuka surat siapa saja, pegawai/atasan
 // hanya boleh membuka surat miliknya sendiri (lihat canAccessSuratRekomendasi).
@@ -623,6 +700,7 @@ func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/surat-rekomendasi", anyRole(func(w http.ResponseWriter, r *http.Request) { listSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/calon-pegawai", manage(func(w http.ResponseWriter, r *http.Request) { listCalonPegawaiSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/next-nomor", manage(func(w http.ResponseWriter, r *http.Request) { nextNomorSuratRekomendasi(w, r, db) }))
+	mux.Handle("GET /api/surat-rekomendasi/export", manage(func(w http.ResponseWriter, r *http.Request) { exportSuratRekomendasi(w, r, db) }))
 	mux.Handle("POST /api/surat-rekomendasi", manage(func(w http.ResponseWriter, r *http.Request) { buatSuratRekomendasi(w, r, db) }))
 	mux.Handle("DELETE /api/surat-rekomendasi/{id}", manage(func(w http.ResponseWriter, r *http.Request) { hapusSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfSuratRekomendasi(w, r, db) }))
