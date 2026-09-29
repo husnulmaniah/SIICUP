@@ -450,11 +450,20 @@ type buatSuratRekomendasiPayload struct {
 	IDPegawai     []uint `json:"id_pegawai"`
 }
 
-// buatSuratRekomendasi menangani POST /api/surat-rekomendasi -- membuat &
-// "mengirim" surat rekomendasi untuk SATU atau BEBERAPA pegawai sekaligus
-// (kolektif) dalam satu kali panggilan, masing-masing mendapat nomor urut
-// berurutan (lihat komentar models.SuratRekomendasi perihal aturan nomor
-// urut per tahun).
+// buatSuratRekomendasi menangani POST /api/surat-rekomendasi -- mengirim
+// surat rekomendasi untuk SATU atau BEBERAPA pegawai sekaligus (kolektif)
+// dalam satu kali panggilan.
+//
+// PENTING -- anti nomor surat dobel: kalau pegawai yang dipilih SUDAH
+// PERNAH dikirimi surat rekomendasi di TAHUN YANG SAMA, kirim ulang untuk
+// pegawai itu TIDAK membuat baris baru/nomor baru -- baris yang sudah ada
+// hanya diperbarui (Judul & catatan pengirim), sementara Nomor Urut &
+// Tanggal Surat ASLINYA dipertahankan apa adanya. Pegawai yang BELUM punya
+// surat tahun ini tetap mendapat baris baru dengan nomor urut berikutnya
+// seperti biasa (lihat komentar models.SuratRekomendasi perihal aturan
+// nomor urut per tahun). Ini mencegah satu pegawai punya dua nomor surat
+// berbeda di tahun yang sama hanya karena admin tidak sadar sudah pernah
+// mengirim sebelumnya.
 func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p buatSuratRekomendasiPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -506,12 +515,38 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		pegawaiByID[pg.ID] = pg
 	}
 
+	// surat yang SUDAH ADA tahun ini untuk pegawai-pegawai yang dipilih --
+	// dikunci dari IDPegawai (satu pegawai maksimal satu baris per tahun).
+	// Kirim ulang untuk pegawai di peta ini akan MEMPERBARUI baris itu, BUKAN
+	// membuat baris baru.
+	var existingRows []models.SuratRekomendasi
+	if err := db.Where("tahun = ? AND id_pegawai IN ?", tahun, idList).Find(&existingRows).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal memeriksa surat rekomendasi yang sudah ada")
+		return
+	}
+	existingByPegawai := map[uint]models.SuratRekomendasi{}
+	for _, er := range existingRows {
+		existingByPegawai[er.IDPegawai] = er
+	}
+
+	// nomor urut awal HANYA perlu ditanyakan kalau memang ada pegawai BARU
+	// (belum punya surat tahun ini) yang bakal butuh nomor baru -- kalau
+	// SEMUA yang dipilih ternyata sudah punya surat tahun ini (murni
+	// kirim ulang/perbarui), tidak ada nomor baru yang dipakai sama sekali.
+	adaYangBaru := false
+	for _, id := range idList {
+		if _, ada := existingByPegawai[id]; !ada {
+			adaYangBaru = true
+			break
+		}
+	}
+
 	var maxNomor int
 	db.Model(&models.SuratRekomendasi{}).Where("tahun = ?", tahun).
 		Select("COALESCE(MAX(nomor_urut), 0)").Scan(&maxNomor)
 
 	nomorMulai := maxNomor + 1
-	if maxNomor == 0 {
+	if maxNomor == 0 && adaYangBaru {
 		if p.NomorUrutAwal == nil || *p.NomorUrutAwal < 1 {
 			utils.Error(w, http.StatusBadRequest, fmt.Sprintf("ini surat rekomendasi pertama untuk tahun %d -- isi nomor urut awal terlebih dahulu", tahun))
 			return
@@ -525,7 +560,7 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		dibuatOleh = claims.Username
 	}
 
-	var created []models.SuratRekomendasi
+	var dibuat, diperbarui int
 	var dilewati []string
 	nomorBerjalan := nomorMulai
 	txErr := db.Transaction(func(tx *gorm.DB) error {
@@ -533,6 +568,17 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			pg, ok := pegawaiByID[id]
 			if !ok {
 				dilewati = append(dilewati, fmt.Sprintf("ID %d (tidak ditemukan)", id))
+				continue
+			}
+			if existing, ada := existingByPegawai[id]; ada {
+				// sudah pernah dikirimi tahun ini -- perbarui judul & catatan
+				// pengirim SAJA, nomor urut & tanggal surat aslinya tetap.
+				existing.Judul = judul
+				existing.DibuatOlehNama = dibuatOleh
+				if err := tx.Save(&existing).Error; err != nil {
+					return fmt.Errorf("gagal memperbarui surat untuk %s: %w", pg.Nama, err)
+				}
+				diperbarui++
 				continue
 			}
 			row := models.SuratRekomendasi{
@@ -546,7 +592,7 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			if err := tx.Create(&row).Error; err != nil {
 				return fmt.Errorf("gagal menyimpan surat untuk %s: %w", pg.Nama, err)
 			}
-			created = append(created, row)
+			dibuat++
 			nomorBerjalan++
 		}
 		return nil
@@ -555,16 +601,23 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, txErr.Error())
 		return
 	}
-	if len(created) == 0 {
-		utils.Error(w, http.StatusBadRequest, "tidak ada surat yang berhasil dibuat -- pegawai yang dipilih tidak ditemukan")
+	if dibuat == 0 && diperbarui == 0 {
+		utils.Error(w, http.StatusBadRequest, "tidak ada surat yang berhasil diproses -- pegawai yang dipilih tidak ditemukan")
 		return
 	}
 
-	msg := fmt.Sprintf("%d surat rekomendasi berhasil dikirim (nomor urut %d-%d/%d)", len(created), nomorMulai, nomorBerjalan-1, tahun)
+	var bagianPesan []string
+	if dibuat > 0 {
+		bagianPesan = append(bagianPesan, fmt.Sprintf("%d surat baru dikirim (nomor urut %d-%d/%d)", dibuat, nomorMulai, nomorBerjalan-1, tahun))
+	}
+	if diperbarui > 0 {
+		bagianPesan = append(bagianPesan, fmt.Sprintf("%d surat diperbarui (sudah pernah dikirim tahun %d -- nomor & tanggal surat lama dipertahankan)", diperbarui, tahun))
+	}
+	msg := strings.Join(bagianPesan, "; ")
 	if len(dilewati) > 0 {
 		msg += fmt.Sprintf(" -- %d dilewati: %s", len(dilewati), strings.Join(dilewati, ", "))
 	}
-	utils.Created(w, msg, map[string]interface{}{"dibuat": len(created), "dilewati": len(dilewati)})
+	utils.Created(w, msg, map[string]interface{}{"dibuat": dibuat, "diperbarui": diperbarui, "dilewati": len(dilewati)})
 }
 
 // hapusSuratRekomendasi menangani DELETE /api/surat-rekomendasi/{id} --

@@ -562,6 +562,16 @@ func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
 // LIVE lewat relasi IDPegawai saat surat ditampilkan/dicetak (sama pola
 // dengan Kp4Data di bawah), supaya kalau data pegawai diperbarui
 // administrator, surat yang sudah terbit ikut menampilkan data terbaru.
+//
+// Anti nomor surat dobel: SATU pegawai maksimal SATU baris per tahun
+// (IDPegawai + Tahun). Kalau admin klik "Kirim" lagi untuk pegawai yang
+// tahun itu SUDAH punya surat, buatSuratRekomendasi (handlers/
+// surat_rekomendasi.go) TIDAK membuat baris baru -- baris yang sudah ada
+// hanya diperbarui Judul-nya (data pegawai sendiri sudah otomatis
+// mengikuti data terbaru karena diambil live, lihat paragraf di atas);
+// NomorUrut & TanggalSurat ASLINYA tetap dipertahankan apa adanya, supaya
+// pegawai yang sama tidak pernah punya dua nomor surat berbeda di tahun
+// yang sama.
 type SuratRekomendasi struct {
 	ID        uint     `json:"id" gorm:"primaryKey"`
 	IDPegawai uint     `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
