@@ -10,6 +10,7 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
+import MultiSelect from 'primevue/multiselect'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Checkbox from 'primevue/checkbox'
@@ -104,7 +105,10 @@ const statusOptions = computed(() =>
 )
 const refTahunTmt = ref([])
 
-const filterIdStatus = ref(null)
+// filterIdStatus: array id status -- MultiSelect supaya admin bisa memilih
+// PPPK & PPPK Paruh Waktu SEKALIGUS (dikirim kolektif dalam satu batch),
+// atau tetap bisa memilih satu status saja (kirim satu-satu/per status).
+const filterIdStatus = ref([])
 const filterTahunTmt = ref(null)
 const filterCariNama = ref('')
 const calonLoading = ref(false)
@@ -136,7 +140,7 @@ async function cariCalonPegawai() {
   calonLoading.value = true
   try {
     const params = {}
-    if (filterIdStatus.value) params.id_status = filterIdStatus.value
+    if (filterIdStatus.value?.length) params.id_status = filterIdStatus.value.join(',')
     if (filterTahunTmt.value) params.tahun_tmt = filterTahunTmt.value
     if (filterCariNama.value.trim()) params.q = filterCariNama.value.trim()
     const { data } = await http.get('/surat-rekomendasi/calon-pegawai', { params })
@@ -176,7 +180,7 @@ function bukaKirimDialog() {
   judul.value = `Surat Rekomendasi Tahun ${new Date().getFullYear()}`
   tanggalSurat.value = new Date()
   nomorUrutAwal.value = null
-  filterIdStatus.value = null
+  filterIdStatus.value = []
   filterTahunTmt.value = null
   filterCariNama.value = ''
   calonList.value = []
@@ -430,7 +434,16 @@ async function unduhExcel() {
 
       <div class="divider-label">Pilih Pegawai Penerima</div>
       <div class="filter-row">
-        <Select v-model="filterIdStatus" :options="statusOptions" optionLabel="label" optionValue="value" placeholder="Status Kepegawaian" showClear style="min-width: 190px" />
+        <MultiSelect
+          v-model="filterIdStatus"
+          :options="statusOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Status Kepegawaian"
+          display="chip"
+          showClear
+          style="min-width: 220px"
+        />
         <Select
           v-model="filterTahunTmt"
           :options="refTahunTmt.map((t) => ({ label: String(t), value: t }))"

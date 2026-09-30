@@ -390,20 +390,50 @@ func listSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 // Kepegawaian & tahun TMT).
 func listCalonPegawaiSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	q := r.URL.Query()
-	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
-	if pageSize < 1 || pageSize > 500 {
-		pageSize = 200
+	idStatus := strings.TrimSpace(q.Get("id_status"))
+	// idStatusList: id_status boleh berisi BEBERAPA id status dipisah koma
+	// (mis. "4,5" = PPPK + PPPK Paruh Waktu sekaligus) supaya admin bisa
+	// mengirim surat rekomendasi kolektif untuk gabungan kedua status itu
+	// dalam satu kali "Kirim", TANPA menghilangkan kemampuan memfilter satu
+	// status saja (kirim satu-satu/per status tetap jalan seperti biasa).
+	var idStatusList []string
+	if idStatus != "" {
+		for _, part := range strings.Split(idStatus, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				idStatusList = append(idStatusList, part)
+			}
+		}
 	}
+	tahunTmt := strings.TrimSpace(q.Get("tahun_tmt"))
 	search := strings.TrimSpace(q.Get("q"))
+
+	// defaultPageSize/maxPageSize: pencarian BEBAS tanpa filter (hanya
+	// mengetik nama/NIP) dibatasi wajar (200) supaya ringan. TAPI begitu
+	// admin memfilter sekaligus lewat Status Kepegawaian dan/atau Tahun
+	// TMT, maksudnya jelas "ambil SEMUA pegawai yang cocok" untuk kirim
+	// kolektif/"pilih semua" -- jadi limitnya dinaikkan jauh lebih besar
+	// (5000) supaya TIDAK ada pegawai yang tercecer dari daftar hanya
+	// karena jumlahnya di atas 200 (lihat laporan bug: filter PPPK + tahun
+	// TMT 2025 menghasilkan lebih dari 200 pegawai, tapi daftar/tombol
+	// "Kirim" hanya menghitung 200 karena limit lama selalu 200 flat).
+	defaultPageSize, maxPageSize := 200, 500
+	if idStatus != "" || tahunTmt != "" {
+		defaultPageSize, maxPageSize = 5000, 5000
+	}
+	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	if pageSize < 1 || pageSize > maxPageSize {
+		pageSize = defaultPageSize
+	}
 
 	query := db.Model(&models.Pegawai{}).Omit(dokumenFileFields...).
 		Preload("Jabatan").Preload("UnitKerja").Preload("Status").
 		Preload("PangkatGol.Pangkat").Preload("PangkatGol.Gol")
 
-	if idStatus := strings.TrimSpace(q.Get("id_status")); idStatus != "" {
-		query = query.Where("id_status = ?", idStatus)
+	if len(idStatusList) > 0 {
+		query = query.Where("id_status IN ?", idStatusList)
 	}
-	if tahunTmt := strings.TrimSpace(q.Get("tahun_tmt")); tahunTmt != "" {
+	if tahunTmt != "" {
 		if tahun, err := strconv.Atoi(tahunTmt); err == nil {
 			query = query.Where("tmt IS NOT NULL AND EXTRACT(YEAR FROM tmt) = ?", tahun)
 		}
