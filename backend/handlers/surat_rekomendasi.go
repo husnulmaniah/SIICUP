@@ -378,14 +378,19 @@ func buildPermohonanPerpanjanganKontrak(item models.SuratRekomendasi) ([]byte, e
 	penutup := "Demikian permohonan ini saya sampaikan, kiranya dapat dipertimbangkan untuk terus mengabdi bagi daerah dan masyarakat Kabupaten Morowali Utara. Atas perhatian bapak Bupati, saya ucapkan terima kasih."
 	y = p.MultilineText(marginX, y, rightX-marginX, lineH, penutup) + lineH*2.6
 
-	// blok tanda tangan -- SENGAJA dibiarkan blank (hanya label "Yang
-	// bermohon," & "NI PPPK. <nip>") TANPA garis tanda tangan maupun QR,
-	// karena pegawai harus menandatangani sendiri secara fisik di atas
-	// kertas cetak sebelum dilampirkan ke berkas pengajuan.
+	// blok tanda tangan -- ruang kosong di atas nama (SENGAJA TIDAK ada
+	// garis tanda tangan maupun QR) untuk pegawai tanda tangan sendiri
+	// secara fisik di kertas cetak, baru di bawahnya tercetak Nama & NI
+	// PPPK sebagai identitas penanda tangan -- sebelumnya hanya NIP saja,
+	// sekarang nama pegawai ikut ditampilkan sesuai permintaan.
 	sigX := pageW - 230
 	p.Text(sigX, y, "Yang bermohon,")
 	y += lineH * 3.4
-	p.Text(sigX, y, "NI PPPK. "+namaOrDash(pegawai.NIP))
+	p.SetFont(true, 11)
+	p.Text(sigX, y, strings.ToUpper(namaOrDash(pegawai.Nama)))
+	y += lineH
+	p.SetFont(false, 11)
+	p.Text(sigX, y, "NI PPPK : "+namaOrDash(pegawai.NIP))
 
 	return doc.Output()
 }
