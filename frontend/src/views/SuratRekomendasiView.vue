@@ -298,6 +298,43 @@ async function unduhSurat(item) {
   }
 }
 
+// ------------------------------------------------------------
+// Lampiran 1 (surat permohonan perpanjangan kontrak yang DIAJUKAN PEGAWAI
+// SENDIRI ke Bupati) -- berkas KEDUA dari baris surat rekomendasi yang
+// sama, supaya pegawai (lihat ArsipSuratView.vue) bisa mengunduh dua
+// berkas sekaligus; disediakan juga di sisi admin ini supaya admin bisa
+// mengecek isinya. Tidak perlu nomor surat/QR, lihat
+// pdfPermohonanSuratRekomendasi di handlers/surat_rekomendasi.go.
+// ------------------------------------------------------------
+
+async function lihatLampiran1(item) {
+  previewTitle.value = `${item.judul} -- ${item.nama_pegawai} -- Lampiran 1 (Permohonan)`
+  try {
+    const res = await http.get(`/surat-rekomendasi/${item.id}/pdf-permohonan`, { params: { inline: 1 }, responseType: 'blob' })
+    previewObjectUrl = URL.createObjectURL(res.data)
+    previewPdfUrl.value = previewObjectUrl
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal membuka surat', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+async function unduhLampiran1(item) {
+  try {
+    const res = await http.get(`/surat-rekomendasi/${item.id}/pdf-permohonan`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `permohonan_perpanjangan_kontrak_${item.nip_pegawai}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
 function konfirmasiHapus(item) {
   confirm.require({
     message: `Hapus surat rekomendasi "${item.nomor_surat}" milik ${item.nama_pegawai}? Nomor ini TIDAK akan dipakai ulang.`,
@@ -418,8 +455,13 @@ async function unduhExcel() {
         </div>
         <div class="rekom-card-actions">
           <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
-          <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh" />
+          <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh Surat Rekomendasi" />
           <Button icon="pi pi-trash" size="small" severity="danger" outlined @click="konfirmasiHapus(item)" title="Hapus" />
+        </div>
+        <div class="rekom-card-lampiran">
+          <span class="rekom-card-lampiran-label">Lampiran 1 (Permohonan):</span>
+          <Button icon="pi pi-eye" size="small" severity="secondary" text @click="lihatLampiran1(item)" title="Lihat Lampiran 1" />
+          <Button icon="pi pi-download" size="small" severity="secondary" text @click="unduhLampiran1(item)" title="Unduh Lampiran 1" />
         </div>
       </div>
     </div>
@@ -632,6 +674,20 @@ async function unduhExcel() {
   flex-wrap: wrap;
   margin-top: auto;
   padding-top: 0.4rem;
+}
+
+.rekom-card-lampiran {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--p-content-border-color, #e2e8f0);
+}
+
+.rekom-card-lampiran-label {
+  font-size: 0.72rem;
+  color: var(--p-text-muted-color, #64748b);
+  margin-right: auto;
 }
 
 .form-grid-2 {

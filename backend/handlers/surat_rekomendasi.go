@@ -259,6 +259,138 @@ func buildSuratRekomendasiPppk(item models.SuratRekomendasi, signerNama, signerN
 }
 
 // ============================================================
+// Lampiran 1: surat permohonan perpanjangan kontrak (diajukan PEGAWAI
+// SENDIRI ke Bupati)
+// ============================================================
+
+// buildPermohonanPerpanjanganKontrak menggambar PDF "Lampiran 1" -- surat
+// permohonan perpanjangan kontrak yang ditulis & ditandatangani PEGAWAI
+// SENDIRI (ditujukan ke Bupati Morowali Utara), BUKAN surat resmi dari
+// Kepala Dinas. SENGAJA beda total dari buildSuratRekomendasiPppk di
+// atas: TIDAK memakai kop/logo surat, TIDAK ada nomor surat (kode
+// klasifikasi 800.1.11 TIDAK berlaku untuk surat ini), dan TIDAK ada QR
+// tanda tangan otomatis -- karena memang harus ditandatangani tangan oleh
+// pegawai sendiri sebagai pemohon.
+//
+// Dibuat dari baris models.SuratRekomendasi yang SAMA (dipakai lagi
+// IDPegawai & Tahun-nya) supaya pegawai bisa mengunduh KEDUA berkas
+// sekaligus dari satu kartu Arsip Surat yang sama: (1) Surat Rekomendasi
+// dari Kepala Dinas (pdfSuratRekomendasi), (2) surat permohonan ini
+// (pdfPermohonanSuratRekomendasi) yang tinggal dicetak, ditandatangani
+// sendiri, lalu dilampirkan bersama SK/SKP/Rekomendasi sesuai isi surat
+// ini sendiri. Periode SKP & tanggal akhir kontrak pada isi surat
+// diturunkan dari Tahun yang sama dengan surat rekomendasinya (mis. Tahun
+// 2026 -> "kontrak berakhir 30 September 2026" & "SKP Oktober-Desember
+// 2025 dan Januari-Juni 2026").
+func buildPermohonanPerpanjanganKontrak(item models.SuratRekomendasi) ([]byte, error) {
+	doc := utils.NewPDFDoc()
+	p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
+	doc.AddPage(p)
+
+	marginX := 56.0
+	pageW := utils.PageWidthA4
+	rightX := pageW - marginX
+
+	pegawai := models.Pegawai{}
+	if item.Pegawai != nil {
+		pegawai = *item.Pegawai
+	}
+	jabatanNama := "-"
+	if pegawai.Jabatan != nil {
+		jabatanNama = pegawai.Jabatan.Jabatan
+	}
+	unitKerjaNama := "-"
+	if pegawai.UnitKerja != nil {
+		unitKerjaNama = pegawai.UnitKerja.Unit
+	}
+	statusNama := ""
+	if pegawai.Status != nil {
+		statusNama = pegawai.Status.Status
+	}
+	// jenisPppk: menyesuaikan istilah PPPK/PPPK Paruh Waktu persis seperti
+	// buildSuratRekomendasiPppk, supaya isi surat permohonan ini konsisten
+	// dengan status kepegawaian pegawai yang sebenarnya.
+	jenisPppk := "PPPK"
+	if strings.Contains(strings.ToLower(statusNama), "paruh waktu") {
+		jenisPppk = "PPPK Paruh Waktu"
+	}
+
+	const lineH = 16.0
+	y := 56.0
+
+	p.SetFont(false, 11)
+	p.TextRight(rightX, y, "Lampiran 1")
+	y += lineH
+	// tanggal surat permohonan ini SENGAJA memakai tanggal SAAT DIUNDUH
+	// (bukan tanggal_surat milik Surat Rekomendasi), karena surat ini
+	// pegawai sendiri yang menulis & menandatangani -- wajar kalau
+	// tanggalnya mengikuti kapan pegawai benar-benar mencetak/mengajukan.
+	p.TextRight(rightX, y, "Kolonodale, "+formatDateID(time.Now())+".")
+	y += lineH * 2
+
+	p.Text(marginX, y, "Hal : Permohonan Perpanjangan Kontrak "+jenisPppk)
+	y += lineH * 1.8
+
+	p.Text(marginX, y, "Yth, Bapak BUPATI MOROWALI UTARA")
+	y += lineH
+	p.Text(marginX, y, "di-")
+	y += lineH
+	p.Text(marginX+28, y, "T e m p a t.")
+	y += lineH * 1.8
+
+	p.Text(marginX, y, "Dengan hormat,")
+	y += lineH
+	p.Text(marginX, y, "Saya yang bertanda tangan di bawah ini :")
+	y += lineH
+
+	const labelW = 94.0
+	drawField := func(label, val string) {
+		p.Text(marginX, y, label)
+		p.Text(marginX+labelW, y, ": "+namaOrDash(val))
+		y += lineH
+	}
+	drawField("Nama", pegawai.Nama)
+	drawField("NI PPPK", pegawai.NIP)
+	drawField("Jabatan", jabatanNama)
+	drawField("Unit Kerja", unitKerjaNama)
+	y += lineH * 0.6
+
+	tahunLalu := item.Tahun - 1
+	paragraf1 := fmt.Sprintf(
+		"Dengan ini mengajukan permohonan perpanjangan perjanjian kerja (Kontrak) sebagai %s untuk jangka waktu selanjutnya, karena kontrak kerja saya akan berakhir pada 30 September %d.",
+		jenisPppk, item.Tahun,
+	)
+	y = p.MultilineText(marginX, y, rightX-marginX, lineH, paragraf1) + lineH*0.6
+
+	p.Text(marginX, y, "Sebagai bahan pertimbangan, saya lampirkan :")
+	y += lineH
+
+	poin := []string{
+		fmt.Sprintf("1. Fotokopi SK %s Terakhir;", jenisPppk),
+		fmt.Sprintf("2. ASLI Sasaran Kinerja Pegawai (SKP) Oktober s/d Desember %d dan Januari s/d Juni %d;", tahunLalu, item.Tahun),
+		"3. ASLI Rekomendasi Perpanjangan Kontrak dari atasan langsung.",
+	}
+	for _, butir := range poin {
+		y = p.MultilineText(marginX+14, y, rightX-marginX-14, lineH, butir) + lineH*0.3
+	}
+	y += lineH * 0.4
+
+	penutup := "Demikian permohonan ini saya sampaikan, kiranya dapat dipertimbangkan untuk terus mengabdi bagi daerah dan masyarakat Kabupaten Morowali Utara. Atas perhatian bapak Bupati, saya ucapkan terima kasih."
+	y = p.MultilineText(marginX, y, rightX-marginX, lineH, penutup) + lineH*2.6
+
+	// blok tanda tangan -- SENGAJA dibiarkan blank (hanya label "Yang
+	// bermohon," & "NI PPPK. <nip>") TANPA garis tanda tangan maupun QR,
+	// karena pegawai harus menandatangani sendiri secara fisik di atas
+	// kertas cetak sebelum dilampirkan ke berkas pengajuan.
+	sigX := pageW - 230
+	p.Text(sigX, y, "Yang bermohon,")
+	y += lineH * 3.4
+	p.Text(sigX, y, "NI PPPK. "+namaOrDash(pegawai.NIP))
+
+	return doc.Output()
+}
+
+// ============================================================
 // DTO
 // ============================================================
 
@@ -817,6 +949,38 @@ func pdfSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	writePDFResponse(w, r, pdfBytes, fmt.Sprintf("surat_rekomendasi_%s.pdf", item.Pegawai.NIP))
 }
 
+// pdfPermohonanSuratRekomendasi menangani GET /api/surat-rekomendasi/{id}/
+// pdf-permohonan?inline=1 -- mengunduh/melihat Lampiran 1 (surat
+// permohonan perpanjangan kontrak yang DIAJUKAN PEGAWAI SENDIRI ke
+// Bupati), dibuat dari baris SuratRekomendasi yang SAMA dengan
+// pdfSuratRekomendasi di atas -- sehingga dari satu kartu Arsip Surat,
+// pegawai bisa mengunduh KEDUA berkas sekaligus: surat rekomendasi resmi
+// dari Kepala Dinas, dan surat permohonan ini. Hak akses SAMA PERSIS
+// dengan pdfSuratRekomendasi (lihat canAccessSuratRekomendasi).
+func pdfPermohonanSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.SuratRekomendasi
+	if err := suratRekomendasiPreload(db).First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "surat rekomendasi tidak ditemukan")
+		return
+	}
+	if !canAccessSuratRekomendasi(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak berhak mengakses surat ini")
+		return
+	}
+	if item.Pegawai == nil {
+		utils.Error(w, http.StatusInternalServerError, "data pegawai penerima surat tidak ditemukan")
+		return
+	}
+	pdfBytes, err := buildPermohonanPerpanjanganKontrak(item)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal membuat surat: "+err.Error())
+		return
+	}
+	writePDFResponse(w, r, pdfBytes, fmt.Sprintf("permohonan_perpanjangan_kontrak_%s.pdf", item.Pegawai.NIP))
+}
+
 // RegisterSuratRekomendasiRoutes mendaftarkan semua endpoint
 // /api/surat-rekomendasi*.
 func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
@@ -833,4 +997,5 @@ func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("POST /api/surat-rekomendasi", manage(func(w http.ResponseWriter, r *http.Request) { buatSuratRekomendasi(w, r, db) }))
 	mux.Handle("DELETE /api/surat-rekomendasi/{id}", manage(func(w http.ResponseWriter, r *http.Request) { hapusSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfSuratRekomendasi(w, r, db) }))
+	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf-permohonan", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfPermohonanSuratRekomendasi(w, r, db) }))
 }

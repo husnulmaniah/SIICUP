@@ -82,14 +82,51 @@ async function unduhSurat(item) {
     toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
   }
 }
+
+// ------------------------------------------------------------
+// Lampiran 1 (surat permohonan perpanjangan kontrak YANG DIAJUKAN PEGAWAI
+// SENDIRI ke Bupati) -- berkas KEDUA yang dibuat dari baris surat
+// rekomendasi yang SAMA, lihat pdfPermohonanSuratRekomendasi di
+// handlers/surat_rekomendasi.go. Tidak perlu nomor surat/tanda tangan QR
+// karena pegawai menandatanganinya sendiri secara fisik.
+// ------------------------------------------------------------
+
+async function lihatLampiran1(item) {
+  previewTitle.value = `${item.judul} -- Lampiran 1 (Permohonan)`
+  try {
+    const res = await http.get(`/surat-rekomendasi/${item.id}/pdf-permohonan`, { params: { inline: 1 }, responseType: 'blob' })
+    previewObjectUrl = URL.createObjectURL(res.data)
+    previewPdfUrl.value = previewObjectUrl
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal membuka surat', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+async function unduhLampiran1(item) {
+  try {
+    const res = await http.get(`/surat-rekomendasi/${item.id}/pdf-permohonan`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `permohonan_perpanjangan_kontrak_${item.nip_pegawai || item.id}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
 </script>
 
 <template>
   <div class="page-wrap">
     <div class="page-title">Arsip Surat</div>
     <p class="page-subtitle">
-      Surat rekomendasi yang dikirim administrator untuk anda. Klik "Lihat" untuk membuka langsung, atau "Unduh"
-      untuk menyimpan sebagai PDF.
+      Surat rekomendasi yang dikirim administrator untuk anda, beserta Lampiran 1 (surat permohonan perpanjangan
+      kontrak yang anda ajukan sendiri ke Bupati) -- dua berkas sekaligus untuk setiap pengiriman. Klik "Lihat" untuk
+      membuka langsung, atau ikon unduh untuk menyimpan sebagai PDF.
     </p>
 
     <div v-if="loading" style="display: flex; justify-content: center; padding: 3rem">
@@ -110,7 +147,12 @@ async function unduhSurat(item) {
         </div>
         <div class="arsip-card-actions">
           <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
-          <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh" />
+          <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh Surat Rekomendasi" />
+        </div>
+        <div class="arsip-card-lampiran">
+          <span class="arsip-card-lampiran-label">Lampiran 1 (Permohonan):</span>
+          <Button icon="pi pi-eye" size="small" severity="secondary" text @click="lihatLampiran1(item)" title="Lihat Lampiran 1" />
+          <Button icon="pi pi-download" size="small" severity="secondary" text @click="unduhLampiran1(item)" title="Unduh Lampiran 1" />
         </div>
       </div>
     </div>
@@ -164,6 +206,20 @@ async function unduhSurat(item) {
   gap: 0.4rem;
   flex-wrap: wrap;
   margin-top: auto;
+}
+
+.arsip-card-lampiran {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--p-content-border-color, #e2e8f0);
+}
+
+.arsip-card-lampiran-label {
+  font-size: 0.72rem;
+  color: var(--p-text-muted-color, #64748b);
+  margin-right: auto;
 }
 
 .preview-frame {
