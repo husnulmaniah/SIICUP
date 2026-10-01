@@ -409,6 +409,73 @@ function onPegawaiFilter(event) {
   pegawaiFilterTimer = setTimeout(() => loadPegawaiOptions(keyword), 300)
 }
 
+// ------------------------------------------------------------
+// daftar pegawai KHUSUS dropdown pemilihan penerima pada Input Surat
+// Kolektif -- SENGAJA dibuat state & loader TERPISAH dari
+// pegawaiOptions/loadPegawaiOptions di atas (yang dipakai filter dropdown
+// "Semua pegawai" di tab Rekap Absen), supaya menambah filter Tempat
+// Tugas (Dinas/Sekolah) di sini TIDAK ikut mengubah daftar pegawai pada
+// filter Rekap Absen, maupun sebaliknya.
+// ------------------------------------------------------------
+const TEMPAT_TUGAS_KOLEKTIF_OPTIONS = [
+  { label: 'Dinas/Kantor', value: 'dinas' },
+  { label: 'Sekolah', value: 'sekolah' },
+]
+// kolektifTempatTugas: array nilai 'dinas'/'sekolah' -- boleh pilih SATU,
+// KEDUANYA, atau dikosongkan (dikosongkan/keduanya = semua tempat tugas).
+const kolektifTempatTugas = ref([])
+const kolektifPegawaiOptions = ref([])
+const kolektifLoadingPegawai = ref(false)
+const kolektifPegawaiTotal = ref(0)
+const kolektifPegawaiHasil = ref(0)
+const kolektifPegawaiKeyword = ref('')
+const kolektifPegawaiTerpilihCache = ref([])
+
+function gabungKolektifDenganTerpilih(list) {
+  const adaDiHasil = new Set(list.map((o) => o.value))
+  return [...kolektifPegawaiTerpilihCache.value.filter((o) => !adaDiHasil.has(o.value)), ...list]
+}
+
+async function loadKolektifPegawaiOptions(keyword = '') {
+  kolektifLoadingPegawai.value = true
+  try {
+    const params = { pageSize: PEGAWAI_PAGE_SIZE }
+    const q = (keyword || '').trim()
+    kolektifPegawaiKeyword.value = q
+    if (q) params.q = q
+    // tidak dipilih sama sekali ATAU keduanya dipilih = sama saja (semua
+    // tempat tugas ikut), jadi parameter tempat_kerja cukup dikirim kalau
+    // admin memilih TEPAT SATU dari dua opsi.
+    if (kolektifTempatTugas.value.length === 1) params.tempat_kerja = kolektifTempatTugas.value[0]
+    const { data } = await http.get('/pegawai', { params })
+    const list = Array.isArray(data.data) ? data.data : []
+    kolektifPegawaiHasil.value = data.meta?.total ?? list.length
+    if (!q) kolektifPegawaiTotal.value = kolektifPegawaiHasil.value
+    kolektifPegawaiOptions.value = gabungKolektifDenganTerpilih(list.map(toPegawaiOption))
+  } catch {
+    kolektifPegawaiOptions.value = gabungKolektifDenganTerpilih([])
+  } finally {
+    kolektifLoadingPegawai.value = false
+  }
+}
+
+let kolektifPegawaiFilterTimer = null
+function onKolektifPegawaiFilter(event) {
+  const keyword = event?.value || ''
+  clearTimeout(kolektifPegawaiFilterTimer)
+  kolektifPegawaiFilterTimer = setTimeout(() => loadKolektifPegawaiOptions(keyword), 300)
+}
+
+// ganti filter Tempat Tugas -> cari ulang dari server (pakai kata kunci
+// yang sedang diketik, kalau ada).
+watch(kolektifTempatTugas, () => loadKolektifPegawaiOptions(kolektifPegawaiKeyword.value))
+
+function ingatOpsiKolektifTerpilih(idList) {
+  const terpilih = idList.filter((v) => v != null)
+  const dikenal = new Map([...kolektifPegawaiTerpilihCache.value, ...kolektifPegawaiOptions.value].map((o) => [o.value, o]))
+  kolektifPegawaiTerpilihCache.value = [...new Set(terpilih)].map((id) => dikenal.get(id)).filter(Boolean)
+}
+
 // ingatOpsiTerpilih dipanggil setiap pilihan pegawai berubah (lihat watch di
 // bagian input surat kolektif, setelah kolektifForm dideklarasikan).
 function ingatOpsiTerpilih(idList) {
@@ -453,7 +520,7 @@ onMounted(async () => {
   // kartu Pengaturan.
   const tugasAdminOnly = auth.isAdministrator ? [loadTempatTugasOptions(), loadJabatanOptions(), loadKecamatanOptions()] : []
   const verifikasiOnly = auth.isAdministrator || auth.isAdminVerifikasi ? [loadVerifikasiList(), loadJumlahMenungguVerifikasi()] : []
-  await Promise.all([loadPegawaiOptions(), loadPengaturan(), loadJenisSuratOptions(), ...tugasAdminOnly, ...verifikasiOnly])
+  await Promise.all([loadPegawaiOptions(), loadKolektifPegawaiOptions(), loadPengaturan(), loadJenisSuratOptions(), ...tugasAdminOnly, ...verifikasiOnly])
   if (auth.isAdministrator || auth.isAdminVerifikasi) {
     verifikasiCountInterval = setInterval(loadJumlahMenungguVerifikasi, 30000)
   }
@@ -796,12 +863,19 @@ watch([kolektifKeteranganPilihan, kolektifKeteranganLainnya], () => {
   kolektifForm.keterangan = gabungkanKeterangan(kolektifKeteranganPilihan.value, kolektifKeteranganLainnya.value)
 })
 
-// pegawai yang sedang dipilih (di filter rekap maupun di form kolektif)
-// diingat labelnya supaya tetap tampil walau daftar opsi berganti karena
-// pencarian baru -- lihat komentar pada loadPegawaiOptions.
+// pegawai yang sedang dipilih di filter Rekap Absen diingat labelnya
+// supaya tetap tampil walau daftar opsi berganti karena pencarian baru --
+// lihat komentar pada loadPegawaiOptions.
 watch(
-  () => [selectedPegawai.value, ...kolektifForm.id_pegawai],
+  () => [selectedPegawai.value],
   (ids) => ingatOpsiTerpilih(ids),
+)
+// sama, tapi untuk daftar penerima Input Surat Kolektif -- pakai cache
+// TERPISAH (lihat komentar pada loadKolektifPegawaiOptions) karena
+// dropdownnya juga terpisah dari filter Rekap Absen.
+watch(
+  () => [...kolektifForm.id_pegawai],
+  (ids) => ingatOpsiKolektifTerpilih(ids),
 )
 
 // ------------------------------------------------------------
@@ -825,7 +899,8 @@ const pegawaiKolektifTerpilih = computed(() =>
   kolektifForm.id_pegawai
     .map(
       (id) =>
-        pegawaiOptions.value.find((o) => o.value === id) || pegawaiTerpilihCache.value.find((o) => o.value === id),
+        kolektifPegawaiOptions.value.find((o) => o.value === id) ||
+        kolektifPegawaiTerpilihCache.value.find((o) => o.value === id),
     )
     .filter(Boolean),
 )
@@ -890,8 +965,10 @@ async function submitKolektif() {
     kolektifKeteranganPilihan.value = null
     kolektifKeteranganLainnya.value = ''
     kolektifFile.value = null
+    kolektifTempatTugas.value = []
+    kolektifPegawaiTerpilihCache.value = []
     // kembalikan daftar pegawai ke keadaan awal (tanpa kata kunci pencarian)
-    await Promise.all([loadRekap(), loadDokumenAdmin(), loadPegawaiOptions()])
+    await Promise.all([loadRekap(), loadDokumenAdmin(), loadKolektifPegawaiOptions()])
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
@@ -1530,31 +1607,50 @@ const defaultTab = computed(() => {
       </p>
       <div class="kolektif-form">
         <div class="kolektif-span">
+          <label class="field-label">Tempat Tugas</label>
+          <MultiSelect
+            v-model="kolektifTempatTugas"
+            :options="TEMPAT_TUGAS_KOLEKTIF_OPTIONS"
+            optionLabel="label"
+            optionValue="value"
+            display="chip"
+            showClear
+            placeholder="Semua tempat tugas (Dinas &amp; Sekolah)"
+            style="width: 100%; max-width: 360px"
+          />
+          <small class="text-muted">
+            Pilih "Dinas/Kantor" saja, "Sekolah" saja, atau KEDUANYA sekaligus untuk mempersempit pilihan pegawai di
+            bawah -- dikosongkan berarti semua tempat tugas ikut ditampilkan.
+          </small>
+        </div>
+
+        <div class="kolektif-span">
           <label class="field-label">Pegawai</label>
           <MultiSelect
             v-model="kolektifForm.id_pegawai"
-            :options="pegawaiOptions"
+            :options="kolektifPegawaiOptions"
             optionLabel="label"
             optionValue="value"
             filter
             display="chip"
-            :loading="loadingPegawai"
+            :loading="kolektifLoadingPegawai"
             :maxSelectedLabels="20"
             filterPlaceholder="Ketik nama atau NIP pegawai"
             emptyFilterMessage="Pegawai tidak ditemukan -- coba nama atau NIP yang lain"
             placeholder="Pilih satu atau beberapa pegawai"
             style="width: 100%"
-            @filter="onPegawaiFilter"
+            @filter="onKolektifPegawaiFilter"
           />
-          <small v-if="pegawaiKeyword" class="text-muted">
-            {{ pegawaiHasil }} pegawai cocok dengan pencarian "{{ pegawaiKeyword }}"<span v-if="pegawaiHasil > PEGAWAI_PAGE_SIZE">
+          <small v-if="kolektifPegawaiKeyword" class="text-muted">
+            {{ kolektifPegawaiHasil }} pegawai cocok dengan pencarian "{{ kolektifPegawaiKeyword }}"<span v-if="kolektifPegawaiHasil > PEGAWAI_PAGE_SIZE">
               -- ditampilkan {{ PEGAWAI_PAGE_SIZE }} teratas, persempit pencarian bila pegawai yang dicari belum
               terlihat</span
             >.
           </small>
           <small v-else class="text-muted">
-            Menampilkan {{ Math.min(PEGAWAI_PAGE_SIZE, pegawaiTotal) }} dari {{ pegawaiTotal }} pegawai -- ketik nama
-            atau NIP pada kotak cari untuk menemukan pegawai lainnya.
+            Menampilkan {{ Math.min(PEGAWAI_PAGE_SIZE, kolektifPegawaiTotal) }} dari {{ kolektifPegawaiTotal }} pegawai
+            {{ kolektifTempatTugas.length === 1 ? `(tempat tugas: ${TEMPAT_TUGAS_KOLEKTIF_OPTIONS.find((o) => o.value === kolektifTempatTugas[0])?.label})` : '' }}
+            -- ketik nama atau NIP pada kotak cari untuk menemukan pegawai lainnya.
           </small>
         </div>
 

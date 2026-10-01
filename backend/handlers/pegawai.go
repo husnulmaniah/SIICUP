@@ -816,6 +816,29 @@ func listPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			countQuery = countQuery.Where("id_unit_kerja IN (?)", sub)
 		}
 	}
+	// tempat_kerja: filter pegawai berdasarkan kategori tempat tugas UNIT
+	// KERJA-nya ("dinas" dan/atau "sekolah", dipisah koma kalau keduanya) --
+	// dipakai filter "Tempat Tugas" pada dropdown pilih pegawai di Input
+	// Surat Kolektif (RekapAbsensiView.vue), supaya admin bisa memilih
+	// pegawai kantor dinas saja, sekolah saja, ATAU KEDUANYA sekaligus.
+	// Nilai yang diterima HANYA models.TempatKerjaDinas/TempatKerjaSekolah --
+	// nilai lain diabaikan diam-diam (tidak dianggap error, biar aman kalau
+	// frontend kirim nilai kosong/salah ketik).
+	if tempatKerja := strings.TrimSpace(q.Get("tempat_kerja")); tempatKerja != "" {
+		allowed := map[string]bool{models.TempatKerjaDinas: true, models.TempatKerjaSekolah: true}
+		var vals []string
+		for _, part := range strings.Split(tempatKerja, ",") {
+			part = strings.TrimSpace(strings.ToLower(part))
+			if allowed[part] {
+				vals = append(vals, part)
+			}
+		}
+		if len(vals) > 0 {
+			sub := db.Model(&models.UnitKerja{}).Select("id").Where("tempat_kerja IN ?", vals)
+			query = query.Where("id_unit_kerja IN (?)", sub)
+			countQuery = countQuery.Where("id_unit_kerja IN (?)", sub)
+		}
+	}
 
 	var total int64
 	countQuery.Count(&total)

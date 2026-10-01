@@ -11,6 +11,7 @@ import InputNumber from 'primevue/inputnumber'
 import DatePicker from 'primevue/datepicker'
 import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
+import RadioButton from 'primevue/radiobutton'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Checkbox from 'primevue/checkbox'
@@ -77,6 +78,13 @@ const tahunAktif = computed(() => tanggalSurat.value?.getFullYear() || new Date(
 
 const nomorInfo = ref({ nomor_urut: 1, editable: true })
 const nomorUrutAwal = ref(null)
+// modeNomor/nomorUrutAwalManual: HANYA relevan saat nomorInfo.editable === false
+// (sudah ada surat tahun ini) -- admin boleh pilih "lanjut" (kelanjutan otomatis,
+// perilaku lama/default) ATAU "manual" (sengaja mulai ulang dari nomor baru di
+// tengah tahun, mis. untuk memperbaiki kesalahan penomoran). Lihat validasi
+// bentrok nomor di backend (buatSuratRekomendasi, surat_rekomendasi.go).
+const modeNomor = ref('lanjut')
+const nomorUrutAwalManual = ref(null)
 let nomorInfoTimer = null
 
 async function refreshNomorInfo() {
@@ -85,6 +93,9 @@ async function refreshNomorInfo() {
     nomorInfo.value = data.data
     if (data.data.editable) {
       nomorUrutAwal.value = nomorUrutAwal.value || data.data.nomor_urut
+    } else {
+      modeNomor.value = 'lanjut'
+      nomorUrutAwalManual.value = null
     }
   } catch {
     nomorInfo.value = { nomor_urut: 1, editable: true }
@@ -180,6 +191,8 @@ function bukaKirimDialog() {
   judul.value = `Surat Rekomendasi Tahun ${new Date().getFullYear()}`
   tanggalSurat.value = new Date()
   nomorUrutAwal.value = null
+  modeNomor.value = 'lanjut'
+  nomorUrutAwalManual.value = null
   filterIdStatus.value = []
   filterTahunTmt.value = null
   filterCariNama.value = ''
@@ -215,6 +228,10 @@ async function kirimSurat() {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: `Ini surat pertama untuk tahun ${tahunAktif.value} -- isi nomor urut awal`, life: 5000 })
     return
   }
+  if (!nomorInfo.value.editable && modeNomor.value === 'manual' && (!nomorUrutAwalManual.value || nomorUrutAwalManual.value < 1)) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Isi nomor urut awal yang baru', life: 4000 })
+    return
+  }
   kirimSubmitting.value = true
   try {
     const payload = {
@@ -224,6 +241,7 @@ async function kirimSurat() {
       id_pegawai: Array.from(selectedIds.value),
     }
     if (nomorInfo.value.editable) payload.nomor_urut_awal = nomorUrutAwal.value
+    else if (modeNomor.value === 'manual') payload.nomor_urut_awal = nomorUrutAwalManual.value
     const { data } = await http.post('/surat-rekomendasi', payload)
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
     kirimDialog.value = false
@@ -424,13 +442,34 @@ async function unduhExcel() {
         &amp; bulan/tahun otomatis mengikuti). Surat berikutnya di tahun {{ tahunAktif }} akan melanjutkan nomor ini
         secara otomatis.
       </Message>
-      <Message v-else severity="info" :closable="false" style="margin-bottom: 1rem">
-        Nomor urut tahun {{ tahunAktif }} otomatis melanjutkan dari surat sebelumnya: <b>{{ nomorInfo.nomor_urut }}</b>
-      </Message>
       <div v-if="nomorInfo.editable" class="form-field">
         <label>Nomor Urut Awal</label>
         <InputNumber v-model="nomorUrutAwal" :min="1" :useGrouping="false" showButtons style="width: 12rem" />
       </div>
+
+      <template v-else>
+        <div class="form-field">
+          <label>Nomor Urut Surat Baru</label>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.4rem">
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 400; cursor: pointer">
+              <RadioButton v-model="modeNomor" value="lanjut" />
+              Lanjutkan otomatis dari surat sebelumnya (nomor <b>{{ nomorInfo.nomor_urut }}</b>)
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 400; cursor: pointer">
+              <RadioButton v-model="modeNomor" value="manual" />
+              Mulai dari nomor baru
+            </label>
+          </div>
+        </div>
+        <div v-if="modeNomor === 'manual'" class="form-field">
+          <label>Nomor Urut Awal (Baru)</label>
+          <InputNumber v-model="nomorUrutAwalManual" :min="1" :useGrouping="false" showButtons style="width: 12rem" />
+          <small style="display: block; margin-top: 0.35rem; color: var(--p-text-muted-color, #64748b)">
+            Hanya berlaku untuk pegawai BARU di pengiriman ini -- pegawai yang sudah pernah dikirimi surat tahun
+            {{ tahunAktif }} tetap mempertahankan nomor &amp; tanggal surat lamanya.
+          </small>
+        </div>
+      </template>
 
       <div class="divider-label">Pilih Pegawai Penerima</div>
       <div class="filter-row">

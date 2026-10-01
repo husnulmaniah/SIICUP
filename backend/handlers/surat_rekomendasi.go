@@ -494,6 +494,18 @@ type buatSuratRekomendasiPayload struct {
 // nomor urut per tahun). Ini mencegah satu pegawai punya dua nomor surat
 // berbeda di tahun yang sama hanya karena admin tidak sadar sudah pernah
 // mengirim sebelumnya.
+//
+// MODE NOMOR URUT -- p.NomorUrutAwal boleh diisi KAPAN SAJA (bukan cuma
+// untuk surat pertama tahun ini): kalau diisi, dipakai sebagai nomor awal
+// untuk pegawai-pegawai BARU di batch ini (override "mulai nomor baru");
+// kalau dikosongkan DAN sudah pernah ada surat tahun ini, otomatis
+// melanjutkan dari nomor_urut terbesar + 1 ("lanjutkan otomatis") --
+// pilihan ini yang ditampilkan sebagai radio button di frontend
+// (SuratRekomendasiView.vue, modeNomor). Kalau belum ada surat SAMA
+// SEKALI untuk tahun itu, p.NomorUrutAwal WAJIB diisi (tidak ada "nomor
+// sebelumnya" untuk dilanjutkan). Override nomor awal divalidasi supaya
+// TIDAK bentrok dengan nomor urut surat lain yang sudah terbit tahun yang
+// sama (lihat pengecekan "bentrok" di bawah).
 func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p buatSuratRekomendasiPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -564,10 +576,11 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// SEMUA yang dipilih ternyata sudah punya surat tahun ini (murni
 	// kirim ulang/perbarui), tidak ada nomor baru yang dipakai sama sekali.
 	adaYangBaru := false
+	jumlahBaru := 0
 	for _, id := range idList {
 		if _, ada := existingByPegawai[id]; !ada {
 			adaYangBaru = true
-			break
+			jumlahBaru++
 		}
 	}
 
@@ -575,13 +588,46 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	db.Model(&models.SuratRekomendasi{}).Where("tahun = ?", tahun).
 		Select("COALESCE(MAX(nomor_urut), 0)").Scan(&maxNomor)
 
+	// nomorMulai: default "lanjutkan otomatis" (maxNomor+1). Kalau admin
+	// mengisi p.NomorUrutAwal -- baik karena ini surat pertama tahun ini
+	// (wajib) ATAU karena admin SENGAJA memilih mode "mulai dari nomor
+	// baru" di tengah tahun -- nomor itu dipakai sebagai override.
 	nomorMulai := maxNomor + 1
-	if maxNomor == 0 && adaYangBaru {
-		if p.NomorUrutAwal == nil || *p.NomorUrutAwal < 1 {
+	if adaYangBaru {
+		if p.NomorUrutAwal != nil {
+			if *p.NomorUrutAwal < 1 {
+				utils.Error(w, http.StatusBadRequest, "nomor urut awal tidak valid")
+				return
+			}
+			nomorMulai = *p.NomorUrutAwal
+		} else if maxNomor == 0 {
 			utils.Error(w, http.StatusBadRequest, fmt.Sprintf("ini surat rekomendasi pertama untuk tahun %d -- isi nomor urut awal terlebih dahulu", tahun))
 			return
 		}
-		nomorMulai = *p.NomorUrutAwal
+	}
+
+	// bentrok nomor urut: kalau admin meng-override nomor awal (bukan
+	// kelanjutan otomatis), pastikan rentang nomor yang akan dipakai untuk
+	// pegawai BARU di batch ini (nomorMulai..nomorMulai+jumlahBaru-1) belum
+	// dipakai surat lain milik pegawai manapun di tahun yang sama --
+	// mencegah dua surat berbeda terbit dengan nomor urut sama persis.
+	if p.NomorUrutAwal != nil && jumlahBaru > 0 {
+		var nomorDipakai []int
+		db.Model(&models.SuratRekomendasi{}).Where("tahun = ?", tahun).Pluck("nomor_urut", &nomorDipakai)
+		dipakaiSet := make(map[int]bool, len(nomorDipakai))
+		for _, n := range nomorDipakai {
+			dipakaiSet[n] = true
+		}
+		var bentrok []string
+		for i := 0; i < jumlahBaru; i++ {
+			if n := nomorMulai + i; dipakaiSet[n] {
+				bentrok = append(bentrok, strconv.Itoa(n))
+			}
+		}
+		if len(bentrok) > 0 {
+			utils.Error(w, http.StatusBadRequest, fmt.Sprintf("nomor urut %s di tahun %d sudah dipakai surat lain -- pilih nomor urut awal yang lain", strings.Join(bentrok, ", "), tahun))
+			return
+		}
 	}
 
 	claims, _ := middleware.GetClaims(r)
