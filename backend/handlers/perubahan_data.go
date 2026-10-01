@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -169,6 +170,18 @@ func listPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		query = query.Where("status = ?", status)
 	}
 
+	// q: cari nama/NIP pegawai -- dipakai kotak pencarian di menu admin
+	// "Perubahan Data Pegawai" supaya admin bisa menelusuri HISTORI
+	// pengajuan seorang pegawai tertentu lintas waktu (gabungkan dengan
+	// filter status "Semua" di frontend untuk melihat seluruh riwayatnya,
+	// bukan cuma yang masih menunggu/disetujui/ditolak). Perlu JOIN ke
+	// pegawai karena Preload saja tidak bisa dipakai memfilter kolom tabel
+	// relasi.
+	if search := strings.TrimSpace(r.URL.Query().Get("q")); search != "" {
+		query = query.Joins("JOIN pegawai ON pegawai.id = perubahan_data_pegawai.id_pegawai").
+			Where("pegawai.nama ILIKE ? OR pegawai.nip ILIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
 	var items []models.PerubahanDataPegawai
 	if err := query.Order("created_at desc").Find(&items).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data")
@@ -318,6 +331,19 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	skPangkatNamaFile, skPangkatFileData, ok := optionalSkFile(w, r, "file_pangkat", "SK Kenaikan Pangkat")
 	if !ok {
+		return
+	}
+
+	// tolak pengajuan kalau TIDAK ADA yang benar-benar berubah -- baik data
+	// (dibandingkan field-demi-field dengan pegawaiSnapshot saat ini) maupun
+	// berkas (SK terakhir yang diganti, atau SK KGB/Pangkat baru yang
+	// dilampirkan). fh != nil berarti pegawai memang memilih berkas SK
+	// terakhir baru di dialog (meski isinya sama persis dengan yang lama,
+	// itu tetap dihitung sebagai niat mengubah). Ini menghindari pengajuan
+	// "kosong" yang cuma membebani antrean persetujuan administrator/admin
+	// tanpa ada maksud apa pun.
+	if reflect.DeepEqual(baru, pegawaiSnapshot(pegawai)) && fh == nil && skKgbNamaFile == "" && skPangkatNamaFile == "" {
+		utils.Error(w, http.StatusBadRequest, "tidak ada data yang diubah -- ubah minimal satu data (atau unggah berkas SK baru) sebelum mengirim pengajuan")
 		return
 	}
 

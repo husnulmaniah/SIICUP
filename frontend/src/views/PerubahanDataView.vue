@@ -15,6 +15,9 @@ import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import SelectButton from 'primevue/selectbutton'
 import InputNumber from 'primevue/inputnumber'
+import InputText from 'primevue/inputtext'
+import IconField from 'primevue/iconfield'
+import InputIcon from 'primevue/inputicon'
 import Tabs from 'primevue/tabs'
 import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
@@ -33,6 +36,12 @@ const statusFilterOptions = [
   { label: 'Ditolak', value: 'ditolak' },
   { label: 'Semua', value: null },
 ]
+// search: cari nama/NIP pegawai -- supaya admin bisa menelusuri HISTORI
+// pengajuan perubahan data seorang pegawai tertentu lintas waktu. Gabungkan
+// dengan filter status "Semua" di atas untuk melihat seluruh riwayatnya
+// (bukan cuma yang masih menunggu/disetujui/ditolak).
+const search = ref('')
+let searchTimer = null
 
 const refJabatan = ref([])
 const refUnitKerja = ref([])
@@ -59,7 +68,9 @@ async function loadRefs() {
 async function fetchList() {
   loading.value = true
   try {
-    const { data } = await http.get('/perubahan-data', { params: { status: statusFilter.value || undefined } })
+    const params = { status: statusFilter.value || undefined }
+    if (search.value.trim()) params.q = search.value.trim()
+    const { data } = await http.get('/perubahan-data', { params })
     items.value = data.data || []
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat data', detail: e.response?.data?.message || e.message, life: 4000 })
@@ -69,6 +80,10 @@ async function fetchList() {
 }
 
 watch(statusFilter, fetchList)
+watch(search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(fetchList, 300)
+})
 
 onMounted(() => {
   loadRefs()
@@ -382,6 +397,16 @@ async function simpanPengaturanKgb() {
       <TabPanels>
         <TabPanel value="perubahan">
           <div class="card">
+            <div class="perubahan-toolbar">
+              <IconField class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
+                <InputText v-model="search" placeholder="Cari nama atau NIP pegawai..." style="width: 100%" />
+                <InputIcon class="pi pi-search" />
+              </IconField>
+            </div>
+            <Message v-if="search.trim()" severity="info" :closable="false" style="margin-bottom: 1rem">
+              Menampilkan histori pengajuan untuk pencarian "{{ search.trim() }}" -- pilih tab "Semua" di bawah supaya
+              seluruh riwayatnya ikut tampil, tidak cuma yang sesuai status yang sedang dipilih.
+            </Message>
             <SelectButton
               v-model="statusFilter"
               :options="statusFilterOptions"
@@ -556,6 +581,13 @@ async function simpanPengaturanKgb() {
 </template>
 
 <style scoped>
+.perubahan-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
 .field-label {
   display: block;
   font-size: 0.85rem;

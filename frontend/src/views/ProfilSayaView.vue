@@ -537,6 +537,13 @@ function normalizeTempatTgs(v) {
   return lower.includes('sekolah') ? 'sekolah' : 'dinas'
 }
 
+// formSnapshotJSON: potret payload persis saat dialog dibuka (lihat
+// buildPayloadFromForm) -- dibandingkan lagi saat submitAjukan untuk
+// mendeteksi pengajuan yang TIDAK mengubah apa pun (lihat komentar pada
+// submitAjukan). Bukan ref/reactive karena tidak perlu dipantau di
+// template, cukup variabel biasa.
+let formSnapshotJSON = ''
+
 function openAjukan() {
   if (!profile.value) return
   form.nama = profile.value.nama || ''
@@ -555,6 +562,7 @@ function openAjukan() {
   skKgbFile.value = null
   skPangkatFile.value = null
   formErrors.value = ''
+  formSnapshotJSON = JSON.stringify(buildPayloadFromForm())
   dialogVisible.value = true
 }
 
@@ -663,6 +671,28 @@ function toDateStr(d) {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
 }
 
+// buildPayloadFromForm: bentuk objek payload persis seperti yang dikirim ke
+// POST /perubahan-data -- dipakai DUA kali: untuk potret "data awal" saat
+// dialog dibuka (formSnapshotJSON di openAjukan) dan untuk payload yang
+// benar-benar dikirim di submitAjukan, supaya keduanya pasti dibandingkan
+// apple-to-apple (format tanggal dkk sama persis).
+function buildPayloadFromForm() {
+  return {
+    nama: form.nama,
+    id_jabatan: form.id_jabatan,
+    id_unit_kerja: form.id_unit_kerja,
+    id_pangkat_gol: form.id_pangkat_gol,
+    tempat_tgs: form.tempat_tgs,
+    tmt: toDateStr(form.tmt),
+    tgl_lahir: toDateStr(form.tgl_lahir),
+    tgl_kenaikan_gaji_berkala_terakhir: toDateStr(form.tgl_kenaikan_gaji_berkala_terakhir),
+    tgl_kenaikan_pangkat_terakhir: toDateStr(form.tgl_kenaikan_pangkat_terakhir),
+    no_hp: form.no_hp,
+    id_status: form.id_status,
+    email: form.email,
+  }
+}
+
 async function submitAjukan() {
   formErrors.value = ''
   if (!form.nama?.trim()) {
@@ -673,22 +703,20 @@ async function submitAjukan() {
     formErrors.value = 'Berkas SK Terakhir wajib diupload sebagai dasar perubahan data'
     return
   }
+  const payload = buildPayloadFromForm()
+  // tolak di sisi ini (sebelum sempat mengirim ke server) kalau TIDAK ADA
+  // field yang berubah dibanding data saat dialog dibuka, DAN tidak ada
+  // berkas SK baru yang dipilih -- backend (createPerubahanData) juga
+  // memvalidasi hal yang sama sebagai jaring pengaman kedua, tapi
+  // pengecekan di sini memberi tahu pegawai LEBIH CEPAT tanpa menunggu
+  // respons server.
+  const adaBerkasBaru = !!skFile.value || !!skKgbFile.value || !!skPangkatFile.value
+  if (!adaBerkasBaru && JSON.stringify(payload) === formSnapshotJSON) {
+    formErrors.value = 'Tidak ada data yang diubah -- ubah minimal satu data, atau unggah berkas SK baru, sebelum mengirim pengajuan'
+    return
+  }
   saving.value = true
   try {
-    const payload = {
-      nama: form.nama,
-      id_jabatan: form.id_jabatan,
-      id_unit_kerja: form.id_unit_kerja,
-      id_pangkat_gol: form.id_pangkat_gol,
-      tempat_tgs: form.tempat_tgs,
-      tmt: toDateStr(form.tmt),
-      tgl_lahir: toDateStr(form.tgl_lahir),
-      tgl_kenaikan_gaji_berkala_terakhir: toDateStr(form.tgl_kenaikan_gaji_berkala_terakhir),
-      tgl_kenaikan_pangkat_terakhir: toDateStr(form.tgl_kenaikan_pangkat_terakhir),
-      no_hp: form.no_hp,
-      id_status: form.id_status,
-      email: form.email,
-    }
     const fd = new FormData()
     fd.append('data', JSON.stringify(payload))
     if (skFile.value) fd.append('file', skFile.value)
