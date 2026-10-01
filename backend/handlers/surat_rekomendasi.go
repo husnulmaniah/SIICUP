@@ -360,7 +360,10 @@ func buildPermohonanPerpanjanganKontrak(item models.SuratRekomendasi) ([]byte, e
 		"Dengan ini mengajukan permohonan perpanjangan perjanjian kerja (Kontrak) sebagai %s untuk jangka waktu selanjutnya, karena kontrak kerja saya akan berakhir pada 30 September %d.",
 		jenisPppk, item.Tahun,
 	)
-	y = p.MultilineText(marginX, y, rightX-marginX, lineH, paragraf1) + lineH*0.6
+	// JustifiedText (rata kiri-kanan) dipakai untuk semua paragraf isi surat
+	// permohonan ini (sesuai permintaan), BUKAN MultilineText biasa yang
+	// rata kiri saja -- lihat JustifiedText di utils/pdfwriter.go.
+	y = p.JustifiedText(marginX, y, rightX-marginX, lineH, paragraf1) + lineH*0.6
 
 	p.Text(marginX, y, "Sebagai bahan pertimbangan, saya lampirkan :")
 	y += lineH
@@ -371,12 +374,12 @@ func buildPermohonanPerpanjanganKontrak(item models.SuratRekomendasi) ([]byte, e
 		"3. ASLI Rekomendasi Perpanjangan Kontrak dari atasan langsung.",
 	}
 	for _, butir := range poin {
-		y = p.MultilineText(marginX+14, y, rightX-marginX-14, lineH, butir) + lineH*0.3
+		y = p.JustifiedText(marginX+14, y, rightX-marginX-14, lineH, butir) + lineH*0.3
 	}
 	y += lineH * 0.4
 
 	penutup := "Demikian permohonan ini saya sampaikan, kiranya dapat dipertimbangkan untuk terus mengabdi bagi daerah dan masyarakat Kabupaten Morowali Utara. Atas perhatian bapak Bupati, saya ucapkan terima kasih."
-	y = p.MultilineText(marginX, y, rightX-marginX, lineH, penutup) + lineH*2.6
+	y = p.JustifiedText(marginX, y, rightX-marginX, lineH, penutup) + lineH*2.6
 
 	// blok tanda tangan -- ruang kosong di atas nama (SENGAJA TIDAK ada
 	// garis tanda tangan maupun QR) untuk pegawai tanda tangan sendiri

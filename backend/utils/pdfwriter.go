@@ -170,6 +170,42 @@ func (p *PDFPage) MultilineText(x, yTop, maxWidth, lineHeight float64, s string)
 	return y
 }
 
+// JustifiedText wraps s to fit maxWidth exactly like MultilineText, but
+// stretches every line EXCEPT the last (and any one-word line) so its words
+// span the full maxWidth -- left edge AND right edge both align, like
+// CSS `text-align: justify` -- by distributing the leftover width evenly
+// into the gaps between words rather than drawing a single justified string
+// (this tiny PDF writer has no native word-spacing operator). Returns the
+// yTop position just below the last line drawn, same contract as
+// MultilineText.
+func (p *PDFPage) JustifiedText(x, yTop, maxWidth, lineHeight float64, s string) float64 {
+	lines := WrapText(s, maxWidth, p.size)
+	y := yTop
+	for i, line := range lines {
+		words := strings.Fields(line)
+		if i == len(lines)-1 || len(words) < 2 {
+			// baris terakhir paragraf (atau baris satu kata) TIDAK
+			// direntangkan -- sama seperti CSS text-align: justify, cuma
+			// baris-baris SEBELUM baris terakhir yang dipaksa rata kanan.
+			p.Text(x, y, line)
+			y += lineHeight
+			continue
+		}
+		wordsWidth := 0.0
+		for _, w := range words {
+			wordsWidth += TextWidth(w, p.size)
+		}
+		gap := (maxWidth - wordsWidth) / float64(len(words)-1)
+		cx := x
+		for _, w := range words {
+			p.Text(cx, y, w)
+			cx += TextWidth(w, p.size) + gap
+		}
+		y += lineHeight
+	}
+	return y
+}
+
 func (p *PDFPage) Line(x1, y1Top, x2, y2Top float64) {
 	fmt.Fprintf(&p.buf, "%.2f %.2f m %.2f %.2f l S\n", x1, p.H-y1Top, x2, p.H-y2Top)
 }
