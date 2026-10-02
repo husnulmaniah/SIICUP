@@ -124,6 +124,7 @@ export const tableConfigs = {
       { field: 'kecamatan.nama', header: 'Kecamatan', width: '160px' },
       { field: 'tempat_kerja', header: 'Tempat Kerja', type: 'lookup', map: tempatKerjaLabels, width: '130px' },
       { field: 'singkatan', header: 'Singkatan', width: '120px' },
+      { field: 'atasan.nama', header: 'Atasan Langsung', width: '180px' },
       { field: 'lat', header: 'Titik Koordinat Absen', type: 'coords', latField: 'lat', lngField: 'lng', width: '160px' },
     ],
     // filters: dropdown "Titik Koordinat Absen" (Semua/Sudah diatur/Belum
@@ -167,6 +168,15 @@ export const tableConfigs = {
         lngField: 'lng',
         radiusField: 'radius_meter',
         hint: 'Untuk unit kerja bertempat Dinas/Kantor: BOLEH dikosongkan -- otomatis memakai titik kantor pusat yang sudah ditetapkan di menu Rekap Absen -> Pengaturan, jadi tidak perlu isi satu-satu. Untuk unit bertempat Sekolah: SEBAIKNYA diisi sendiri satu-satu -- kalau dikosongkan, absen di sekolah itu TIDAK otomatis memakai titik kantor dinas (supaya tidak salah lokasi), geofence-nya dianggap belum diatur sampai titik ini diisi.',
+      },
+      {
+        field: 'id_atasan_langsung',
+        label: 'Atasan Langsung',
+        type: 'select',
+        ref: 'pegawai',
+        optionLabel: (o) => `${o.nama} (${o.nip})`,
+        optionValue: 'id',
+        hint: 'Satu atasan untuk SEMUA pegawai di unit kerja ini (mis. Kepala Sekolah). Begitu dipilih/diganti, seluruh pegawai yang SAAT INI ada di unit kerja ini (kecuali atasan itu sendiri) otomatis ikut atasan ini, dan pegawai baru yang ditambahkan ke unit ini nanti juga otomatis ikut -- tidak perlu diisi manual satu-satu lagi di menu Data Pegawai. Pegawai tertentu masih bisa di-override manual kalau memang perlu atasan yang berbeda.',
       },
     ],
     searchPlaceholder: 'Cari unit kerja...',

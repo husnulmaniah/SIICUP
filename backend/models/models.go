@@ -155,6 +155,48 @@ type UnitKerja struct {
 	// assets.TutWuriPNG) ditampilkan di sisi KANAN kop surat, berdampingan
 	// dengan logo Kabupaten yang TETAP selalu ada di kiri.
 	TampilkanLogoTutwuri bool `json:"tampilkan_logo_tutwuri" gorm:"column:tampilkan_logo_tutwuri;not null;default:false"`
+	// ------------------------------------------------------------
+	// IDAtasanLangsung/AtasanLangsung: "Atasan Langsung" BERSAMA untuk
+	// seluruh pegawai di unit kerja ini (mis. Kepala Sekolah untuk satu
+	// sekolah), diisi SEKALI di menu Unit Kerja -- menggantikan cara lama
+	// yang mengharuskan admin mengisi field Atasan Langsung satu-satu di
+	// tiap data Pegawai.
+	//
+	// Begitu diisi/diganti di sini, SEMUA pegawai yang SAAT INI bertugas di
+	// unit kerja ini otomatis ikut disamakan ke atasan ini (lihat
+	// syncAtasanUnitKerja di routes/master_routes.go, dipasang lewat
+	// CrudConfig.AfterSave) -- KECUALI pegawai yang jadi atasan itu sendiri
+	// (tidak mungkin jadi atasan dirinya sendiri). Pegawai yang BARU
+	// ditambahkan/dipindahkan ke unit kerja ini SETELAHNYA juga otomatis
+	// ikut field ini selama field Atasan Langsung pada data pegawai itu
+	// dibiarkan kosong (lihat applyPegawaiPayload di handlers/pegawai.go) --
+	// admin tetap BOLEH override manual dengan memilih atasan lain khusus
+	// untuk satu pegawai tertentu lewat menu Data Pegawai seperti biasa.
+	//
+	// Field ini sendiri TIDAK dipakai langsung sebagai sumber kebenaran di
+	// tempat lain (Lampiran 3, approval Pengajuan Cuti/Surat Rekomendasi,
+	// dll) -- semua itu TETAP membaca Pegawai.IDAtasan seperti sebelumnya,
+	// field ini hanya alat bantu pengisian massal supaya admin tidak perlu
+	// mengulang pilihan yang sama di tiap pegawai.
+	//
+	// NB -- PENTING: field INI (skalar maupun relasinya) SENGAJA diberi
+	// nama Go, nama kolom DB, DAN key JSON yang SEMUANYA beda dari
+	// "IDAtasan"/"id_atasan" milik models.Pegawai (yang juga relasi ke
+	// *Pegawai, tapi self-relation). Sudah diverifikasi langsung di
+	// sandbox: kalau nama field Go ATAU nama kolom DB sama-sama persis
+	// "IDAtasan"/"id_atasan" di KEDUA model ini, GORM jadi salah kaprah --
+	// baik saat AutoMigrate (foreign key constraint untuk relasi ini malah
+	// terpasang di tabel pegawai, bukan unit_kerja) MAUPUN saat Preload
+	// (query yang dihasilkan malah mencari "pegawai.id_atasan = <id unit
+	// kerja>", arah kebalik dari yang seharusnya) -- walau hanya SATU dari
+	// dua nama itu (field Go atau kolom DB) yang dibedakan, bug-nya tetap
+	// muncul. Relasi AtasanLangsung juga diberi tag "-:migration" supaya
+	// GORM tetap memakainya untuk Preload/query seperti biasa TAPI
+	// melewatinya sepenuhnya saat AutoMigrate (kolomnya sendiri tetap
+	// dibuat lewat field skalar IDAtasanLangsung di bawah).
+	// ------------------------------------------------------------
+	IDAtasanLangsung *uint    `json:"id_atasan_langsung" gorm:"column:id_atasan_langsung"`
+	AtasanLangsung   *Pegawai `json:"atasan,omitempty" gorm:"-:migration;foreignKey:IDAtasanLangsung;references:ID"`
 }
 
 // PerataanKopKiri/PerataanKopKanan/PerataanKopTengah: nilai valid untuk

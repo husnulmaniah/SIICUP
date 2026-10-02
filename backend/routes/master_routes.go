@@ -45,6 +45,40 @@ func parseTempatKerjaLabel(raw string) (string, error) {
 	}
 }
 
+// syncAtasanUnitKerja menyamakan Atasan Langsung ke semua pegawai yang SAAT
+// INI bertugas di unit kerja "item" begitu field IDAtasanLangsung unit kerja
+// ini SENDIRI berubah (lihat komentar lengkap pada
+// models.UnitKerja.IDAtasanLangsung) -- dipasang sebagai CrudConfig.AfterSave
+// untuk /api/unit-kerja di atas.
+//
+// SENGAJA hanya jalan kalau IDAtasanLangsung BENAR-BENAR berubah (bukan
+// field lain, mis. jam absen/titik koordinat) supaya edit unit kerja yang
+// tidak terkait atasan tidak ikut menimpa ulang pegawai yang mungkin sudah
+// di-override manual oleh admin ke atasan yang berbeda. "old" bernilai nil
+// kalau unit kerja ini baru dibuat (lihat createCrud di
+// handlers/crud_generic.go).
+//
+// Atasan itu sendiri DIKECUALIKAN dari penyamaan (tidak mungkin jadi atasan
+// dirinya sendiri) -- lihat kondisi "id <> ?" di bawah. Mengosongkan Atasan
+// Langsung unit kerja (IDAtasanLangsung diisi null) TIDAK ikut mengosongkan
+// id_atasan pegawai yang sudah terisi -- hanya pengisian BARU/PENGGANTIAN
+// yang disebarkan, supaya aksi ini tidak pernah mengurangi data yang sudah
+// ada tanpa sengaja.
+func syncAtasanUnitKerja(db *gorm.DB, old *models.UnitKerja, item *models.UnitKerja) {
+	var oldID *uint
+	if old != nil {
+		oldID = old.IDAtasanLangsung
+	}
+	newID := item.IDAtasanLangsung
+	sama := (oldID == nil && newID == nil) || (oldID != nil && newID != nil && *oldID == *newID)
+	if sama || newID == nil {
+		return
+	}
+	db.Model(&models.Pegawai{}).
+		Where("id_unit_kerja = ? AND id <> ?", item.ID, *newID).
+		Update("id_atasan", *newID)
+}
+
 // jamUnitKerjaColumn membuat satu kolom Excel untuk salah satu dari kelima
 // field jam kerja KHUSUS unit kerja/sekolah pada models.UnitKerja (lihat
 // komentar pada struct itu) -- field yang mana ditentukan lewat fieldPtr
@@ -147,7 +181,14 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 	handlers.RegisterCrud(mux, db, "/api/unit-kerja", handlers.CrudConfig[models.UnitKerja]{
 		FileBaseName: "unit_kerja",
 		SearchFields: []string{"unit"},
-		Preloads:     []string{"Kecamatan"},
+		Preloads:     []string{"Kecamatan", "AtasanLangsung"},
+		// AfterSave: lihat syncAtasanUnitKerja di bawah -- menyamakan Atasan
+		// Langsung ke semua pegawai yang SAAT INI ada di unit kerja ini begitu
+		// field IDAtasanLangsung (models.UnitKerja) diisi/diganti (lihat
+		// komentar lengkap pada models.UnitKerja.IDAtasanLangsung).
+		AfterSave: func(db *gorm.DB, old *models.UnitKerja, item *models.UnitKerja) {
+			syncAtasanUnitKerja(db, old, item)
+		},
 		// ExtraFilters "koordinat": menyaring daftar berdasarkan status titik
 		// koordinat absen unit kerja -- "diatur" (lat & lng sudah keduanya
 		// terisi) atau "belum" (salah satu/kedua kosong), dipakai dropdown

@@ -968,6 +968,37 @@ func applyPegawaiPayload(item *models.Pegawai, p pegawaiPayload) error {
 	return nil
 }
 
+// autoFillAtasanDariUnitKerja mengisi otomatis Atasan Langsung pegawai dari
+// Atasan Langsung yang sudah diatur di Unit Kerja-nya (lihat komentar
+// lengkap pada models.UnitKerja.IDAtasanLangsung) -- HANYA kalau admin
+// membiarkan field Atasan Langsung pegawai ini kosong (item.IDAtasan == nil
+// setelah applyPegawaiPayload); kalau admin SENGAJA memilih atasan lain di
+// form, pilihan itu dihormati apa adanya (tidak ditimpa).
+//
+// Dipanggil dari createPegawai (pegawai baru) & updatePegawai (termasuk saat
+// pegawai dipindah ke unit kerja lain) -- supaya "pegawai yang baru
+// ditambahkan/dipindahkan nanti" ikut otomatis tersambung seperti yang sudah
+// ada, tanpa admin perlu mengulang pilihan yang sama satu-satu.
+//
+// Atasan itu sendiri DIKECUALIKAN (kalau pegawai yang diedit ternyata adalah
+// si atasan itu sendiri, jangan jadikan dirinya atasan dirinya sendiri).
+func autoFillAtasanDariUnitKerja(db *gorm.DB, item *models.Pegawai) {
+	if item.IDAtasan != nil || item.IDUnitKerja == nil {
+		return
+	}
+	var uk models.UnitKerja
+	if err := db.Select("id_atasan_langsung").First(&uk, "id = ?", *item.IDUnitKerja).Error; err != nil {
+		return
+	}
+	if uk.IDAtasanLangsung == nil {
+		return
+	}
+	if item.ID != 0 && *uk.IDAtasanLangsung == item.ID {
+		return
+	}
+	item.IDAtasan = uk.IDAtasanLangsung
+}
+
 func createPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p pegawaiPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -983,6 +1014,7 @@ func createPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	autoFillAtasanDariUnitKerja(db, &item)
 	if err := db.Create(&item).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan data (NIP mungkin sudah dipakai): "+err.Error())
 		return
@@ -1006,6 +1038,7 @@ func updatePegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	autoFillAtasanDariUnitKerja(db, &item)
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal memperbarui data: "+err.Error())
 		return
@@ -1144,6 +1177,10 @@ func importPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			rowErrors = append(rowErrors, rowError{Row: i + 2, Errors: errs})
 			continue
 		}
+		// Sama seperti createPegawai/updatePegawai: baris import yang kolom
+		// "NIP Atasan"-nya dikosongkan ikut otomatis memakai Atasan Langsung
+		// unit kerjanya (lihat autoFillAtasanDariUnitKerja).
+		autoFillAtasanDariUnitKerja(db, &item)
 		if err := db.Create(&item).Error; err != nil {
 			rowErrors = append(rowErrors, rowError{Row: i + 2, Errors: []string{"gagal simpan: " + err.Error()}})
 			continue

@@ -31,6 +31,17 @@ type CrudConfig[T any] struct {
 	// triggering a recalculation of every still-active pengajuan cuti's
 	// jumlah_hari (see master_routes.go / resyncActivePengajuanDays).
 	AfterChange func(db *gorm.DB)
+	// AfterSave runs right after a SINGLE create or update successfully
+	// commits -- beda dari AfterChange di atas, hook ini TAHU baris mana
+	// yang berubah beserta isinya SEBELUM (old, nil kalau baris baru dibuat)
+	// & SESUDAH (item) perubahan, dipakai untuk side effect yang perlu
+	// membandingkan nilai lama vs baru SATU baris tertentu, misalnya
+	// syncAtasanUnitKerja di master_routes.go (menyamakan Atasan Langsung ke
+	// semua pegawai di unit kerja itu HANYA kalau field Atasan Langsung-nya
+	// sendiri yang berubah, supaya edit field lain yang tidak terkait tidak
+	// ikut menimpa ulang). TIDAK dipanggil untuk delete/import (lihat
+	// AfterChange untuk itu).
+	AfterSave func(db *gorm.DB, old *T, item *T)
 	// ExtraFilters: filter tambahan lewat query param di luar kotak cari
 	// bebas (q) & di luar filter berbasis foreign key yang sudah ditangani
 	// handler khusus (mis. Data Pegawai) -- dipakai untuk filter berbasis
@@ -237,6 +248,9 @@ func createCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan data: "+err.Error())
 		return
 	}
+	if cfg.AfterSave != nil {
+		cfg.AfterSave(db, nil, &item)
+	}
 	if cfg.AfterChange != nil {
 		cfg.AfterChange(db)
 	}
@@ -256,11 +270,24 @@ func updateCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 		return
 	}
 	delete(payload, "id")
+	// old: salinan nilai SEBELUM Updates, dipakai cfg.AfterSave di bawah
+	// membandingkan lama vs baru -- SENGAJA diambil lewat query baru
+	// (bukan sekadar "old := existing") karena field pointer (*uint, dst)
+	// pada salinan struct biasa tetap menunjuk ke alamat memori yang SAMA
+	// dengan "existing"; begitu GORM Updates() di bawah mengisi nilai baru
+	// ke alamat itu juga (bukan mengalokasikan pointer baru), salinan "old"
+	// ikut berubah tanpa sengaja -- sudah diverifikasi langsung di sandbox
+	// (AfterSave sampai melihat old == baru, padahal belum sempat diubah).
+	var old T
+	db.First(&old, "id = ?", id)
 	if err := db.Model(&existing).Updates(payload).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal memperbarui data: "+err.Error())
 		return
 	}
 	db.First(&existing, "id = ?", id)
+	if cfg.AfterSave != nil {
+		cfg.AfterSave(db, &old, &existing)
+	}
 	if cfg.AfterChange != nil {
 		cfg.AfterChange(db)
 	}
