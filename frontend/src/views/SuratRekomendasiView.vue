@@ -386,6 +386,40 @@ async function toggleTampil(item, nilaiBaru) {
   }
 }
 
+// ------------------------------------------------------------
+// sembunyikanSemuaLampiran3 -- tombol "Sembunyikan Semua Lampiran 3 dari
+// Akun Pegawai": menyembunyikan SEKALIGUS SEMUA surat sekolah/puskesmas
+// dari SEMUA tahun dalam satu klik, pengganti toggle satu-satu per kartu
+// kalau administrator ingin menyembunyikan semuanya sekaligus. Lihat
+// sembunyikanSemuaLampiran3 di handlers/surat_rekomendasi.go.
+// ------------------------------------------------------------
+const sembunyikanSemuaLoading = ref(false)
+
+function konfirmasiSembunyikanSemuaLampiran3() {
+  confirm.require({
+    message: 'Sembunyikan SEMUA surat sekolah/puskesmas (Lampiran 3) dari SEMUA tahun dari menu Arsip Surat akun pegawai? Surat Dinas/Kantor (Lampiran 2) tidak terpengaruh, dan akun atasan tetap bisa melihat & menyetujui bawahannya seperti biasa. Bisa ditampilkan lagi satu-satu lewat toggle di tiap kartu.',
+    header: 'Sembunyikan Semua Lampiran 3?',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Sembunyikan Semua',
+    rejectLabel: 'Batal',
+    acceptProps: { severity: 'warn' },
+    accept: doSembunyikanSemuaLampiran3,
+  })
+}
+
+async function doSembunyikanSemuaLampiran3() {
+  sembunyikanSemuaLoading.value = true
+  try {
+    const { data } = await http.put('/surat-rekomendasi/sembunyikan-semua-lampiran3')
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+    await loadItems()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyembunyikan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    sembunyikanSemuaLoading.value = false
+  }
+}
+
 // ============================================================
 // unduh Excel (Nomor Surat -> Nama Pegawai) -- difilter dari TANGGAL
 // SURAT (tanggal dikirimnya surat rekomendasi, bukan tanggal dibuatnya
@@ -450,6 +484,14 @@ async function unduhExcel() {
         </p>
       </div>
       <div class="page-header-actions">
+        <Button
+          label="Sembunyikan Semua Lampiran 3"
+          icon="pi pi-eye-slash"
+          severity="warn"
+          outlined
+          :loading="sembunyikanSemuaLoading"
+          @click="konfirmasiSembunyikanSemuaLampiran3"
+        />
         <Button label="Unduh Excel" icon="pi pi-file-excel" severity="secondary" outlined @click="bukaExcelDialog" />
         <Button label="Kirim Surat Rekomendasi" icon="pi pi-send" @click="bukaKirimDialog" />
       </div>

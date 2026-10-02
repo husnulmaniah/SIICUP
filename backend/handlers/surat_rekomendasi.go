@@ -1438,6 +1438,43 @@ func updateTampilSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *go
 	utils.Success(w, msg, toSuratRekomendasiOut(item))
 }
 
+// sembunyikanSemuaLampiran3 menangani PUT /api/surat-rekomendasi/
+// sembunyikan-semua-lampiran3 -- KHUSUS administrator/admin, tombol
+// "Sembunyikan Semua Lampiran 3 dari Akun Pegawai" di menu Surat
+// Rekomendasi: menyembunyikan SEKALIGUS SEMUA surat sekolah/puskesmas
+// ("Lampiran 3", lihat isSekolahPegawai) dari SEMUA tahun sekaligus
+// (TampilKePegawai -> false), pengganti toggle satu-satu per kartu
+// (updateTampilSuratRekomendasi) kalau administrator ingin menyembunyikan
+// semuanya sekaligus dalam satu kali klik (mis. baru pindah ke alur
+// administrasi sekolah mandiri). TIDAK menyentuh surat Dinas/Kantor
+// ("Lampiran 2", selalu tampil) maupun surat sekolah yang SUDAH
+// disembunyikan sebelumnya (tidak ikut terhitung lagi) -- dan TIDAK
+// memengaruhi akses akun atasan (tetap selalu melihat bawahannya, perlu
+// untuk menyetujui).
+func sembunyikanSemuaLampiran3(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	var rows []models.SuratRekomendasi
+	if err := db.Preload("Pegawai").Preload("Pegawai.UnitKerja").
+		Where("tampil_ke_pegawai = ?", true).Find(&rows).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data surat rekomendasi")
+		return
+	}
+	var idList []uint
+	for _, it := range rows {
+		if it.Pegawai != nil && isSekolahPegawai(*it.Pegawai) {
+			idList = append(idList, it.ID)
+		}
+	}
+	if len(idList) == 0 {
+		utils.Success(w, "tidak ada surat sekolah (Lampiran 3) yang masih tampil ke akun pegawai", map[string]interface{}{"jumlah": 0})
+		return
+	}
+	if err := db.Model(&models.SuratRekomendasi{}).Where("id IN ?", idList).Update("tampil_ke_pegawai", false).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyembunyikan surat: "+err.Error())
+		return
+	}
+	utils.Success(w, fmt.Sprintf("%d surat sekolah/puskesmas (Lampiran 3) disembunyikan dari akun pegawai", len(idList)), map[string]interface{}{"jumlah": len(idList)})
+}
+
 // exportSuratRekomendasi menangani GET /api/surat-rekomendasi/export?
 // tanggal_mulai=YYYY-MM-DD&tanggal_selesai=YYYY-MM-DD -- mengunduh daftar
 // Nomor Surat -> Nama Pegawai (beserta beberapa kolom pendukung) sebagai
@@ -1659,6 +1696,7 @@ func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("POST /api/surat-rekomendasi", manage(func(w http.ResponseWriter, r *http.Request) { buatSuratRekomendasi(w, r, db) }))
 	mux.Handle("DELETE /api/surat-rekomendasi/{id}", manage(func(w http.ResponseWriter, r *http.Request) { hapusSuratRekomendasi(w, r, db) }))
 	mux.Handle("PUT /api/surat-rekomendasi/{id}/tampil", manage(func(w http.ResponseWriter, r *http.Request) { updateTampilSuratRekomendasi(w, r, db) }))
+	mux.Handle("PUT /api/surat-rekomendasi/sembunyikan-semua-lampiran3", manage(func(w http.ResponseWriter, r *http.Request) { sembunyikanSemuaLampiran3(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf-permohonan", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfPermohonanSuratRekomendasi(w, r, db) }))
 	mux.Handle("PUT /api/surat-rekomendasi/{id}/approve", approverRoles(func(w http.ResponseWriter, r *http.Request) { approveSuratRekomendasi(w, r, db) }))
