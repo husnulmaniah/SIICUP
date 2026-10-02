@@ -194,7 +194,7 @@ async function doApprove(item) {
           <div class="arsip-card-meta">{{ formatTanggal(item.tanggal_surat) }}</div>
           <Tag
             v-if="item.is_sekolah"
-            :value="item.status_approval === 'pending' ? 'Menunggu Persetujuan' : 'Disetujui'"
+            :value="item.status_approval === 'pending' ? (authStore.isAtasan ? 'Menunggu Persetujuan' : 'Menunggu Persetujuan Kepala Sekolah') : 'Disetujui'"
             :severity="item.status_approval === 'pending' ? 'warn' : 'success'"
             class="arsip-card-status"
           />
