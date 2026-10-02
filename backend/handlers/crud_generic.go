@@ -39,9 +39,28 @@ type CrudConfig[T any] struct {
 	// syncAtasanUnitKerja di master_routes.go (menyamakan Atasan Langsung ke
 	// semua pegawai di unit kerja itu HANYA kalau field Atasan Langsung-nya
 	// sendiri yang berubah, supaya edit field lain yang tidak terkait tidak
-	// ikut menimpa ulang). TIDAK dipanggil untuk delete/import (lihat
-	// AfterChange untuk itu).
+	// ikut menimpa ulang). Dipanggil juga dari importCrud di bawah -- baik
+	// untuk baris BARU yang dibuat (old=nil, SAMA seperti createCrud) maupun
+	// baris LAMA yang diperbarui lewat UpsertMatch (lihat field itu) --
+	// TIDAK dipanggil untuk delete (lihat AfterChange untuk itu).
 	AfterSave func(db *gorm.DB, old *T, item *T)
+	// UpsertMatch: opsional -- kalau diisi, import excel (importCrud di
+	// bawah) akan mencari baris yang SUDAH ADA lebih dulu untuk setiap baris
+	// Excel yang dibaca (menerima baris itu SEBELUM disimpan), lewat kondisi
+	// WHERE yang dikembalikan di sini (mis. "unit ILIKE ?" dengan nama unit
+	// kerja baris ini) -- KALAU KETEMU, baris lama itu DIPERBARUI (lewat GORM
+	// Updates dengan STRUCT, bukan map, supaya kolom Excel yang dikosongkan
+	// otomatis diabaikan/tidak menimpa nilai lama -- memanfaatkan perilaku
+	// bawaan GORM yang skip field ber-nilai zero/nil saat Updates diberi
+	// struct) alih-alih dibuat baris baru dobel. KALAU TIDAK ketemu, baris
+	// baru tetap dibuat seperti biasa (create). Dipakai KHUSUS Unit Kerja
+	// (lihat master_routes.go) supaya admin bisa Export -> edit kolom
+	// (mis. Atasan Langsung) untuk SEBAGIAN/SEMUA unit kerja yang SUDAH ADA
+	// -> Import lagi, TANPA membuat data dobel. Tabel lain (Pegawai, Jabatan,
+	// dst) SENGAJA tidak diberi ini -- tetap "tambah baris baru" seperti
+	// sebelumnya (default, TIDAK berubah untuk tabel yang tidak mengisi
+	// field ini).
+	UpsertMatch func(db *gorm.DB, item *T) *gorm.DB
 	// ExtraFilters: filter tambahan lewat query param di luar kotak cari
 	// bebas (q) & di luar filter berbasis foreign key yang sudah ditangani
 	// handler khusus (mis. Data Pegawai) -- dipakai untuk filter berbasis
@@ -361,7 +380,8 @@ func importCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 		Errors []string `json:"errors"`
 	}
 	var rowErrors []rowError
-	successCount := 0
+	createdCount := 0
+	updatedCount := 0
 
 	for i, row := range rows {
 		isBlank := true
@@ -386,22 +406,61 @@ func importCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 				continue
 			}
 		}
-		if err := db.Create(&item).Error; err != nil {
-			rowErrors = append(rowErrors, rowError{Row: i + 2, Errors: []string{"gagal simpan: " + err.Error()}})
-			continue
+
+		// UpsertMatch (lihat komentar lengkap pada field itu di CrudConfig):
+		// cari dulu baris lama yang cocok -- "old" SENGAJA diambil lewat
+		// query terpisah (bukan dipakai ulang sebagai target Updates di
+		// bawah) supaya tidak ada struct Go yang dibagikan antara snapshot
+		// "lama" & baris yang ditulis, meniru pola aman updateCrud (lihat
+		// komentar di sana perihal bug pointer-aliasing yang pernah
+		// ditemukan).
+		matched := false
+		if cfg.UpsertMatch != nil {
+			var old T
+			if err := cfg.UpsertMatch(db, &item).Session(&gorm.Session{}).First(&old).Error; err == nil {
+				if err := cfg.UpsertMatch(db, &item).Session(&gorm.Session{}).Updates(item).Error; err != nil {
+					rowErrors = append(rowErrors, rowError{Row: i + 2, Errors: []string{"gagal memperbarui: " + err.Error()}})
+					continue
+				}
+				matched = true
+				updatedCount++
+				if cfg.AfterSave != nil {
+					var after T
+					if err := cfg.UpsertMatch(db, &item).Session(&gorm.Session{}).First(&after).Error; err == nil {
+						cfg.AfterSave(db, &old, &after)
+					}
+				}
+			}
 		}
-		successCount++
+		if !matched {
+			if err := db.Create(&item).Error; err != nil {
+				rowErrors = append(rowErrors, rowError{Row: i + 2, Errors: []string{"gagal simpan: " + err.Error()}})
+				continue
+			}
+			createdCount++
+			if cfg.AfterSave != nil {
+				cfg.AfterSave(db, nil, &item)
+			}
+		}
 	}
 
+	successCount := createdCount + updatedCount
 	if successCount > 0 && cfg.AfterChange != nil {
 		cfg.AfterChange(db)
 	}
 
+	message := fmt.Sprintf("%d baris berhasil diimport, %d baris gagal", successCount, len(rowErrors))
+	if cfg.UpsertMatch != nil {
+		message = fmt.Sprintf("%d baris baru ditambahkan, %d baris diperbarui, %d baris gagal", createdCount, updatedCount, len(rowErrors))
+	}
+
 	utils.JSON(w, http.StatusOK, utils.APIResponse{
 		Success: len(rowErrors) == 0,
-		Message: fmt.Sprintf("%d baris berhasil diimport, %d baris gagal", successCount, len(rowErrors)),
+		Message: message,
 		Data: map[string]interface{}{
 			"success_count": successCount,
+			"created_count": createdCount,
+			"updated_count": updatedCount,
 			"failed_rows":   rowErrors,
 		},
 	})

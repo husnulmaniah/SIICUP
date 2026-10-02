@@ -192,9 +192,22 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 		// AfterSave: lihat syncAtasanUnitKerja di bawah -- menyamakan Atasan
 		// Langsung ke semua pegawai yang SAAT INI ada di unit kerja ini begitu
 		// field IDAtasanLangsung (models.UnitKerja) diisi/diganti (lihat
-		// komentar lengkap pada models.UnitKerja.IDAtasanLangsung).
+		// komentar lengkap pada models.UnitKerja.IDAtasanLangsung). Dipanggil
+		// juga dari importCrud (lihat UpsertMatch di bawah) -- jadi admin bisa
+		// mengisi/mengganti Atasan Langsung banyak unit kerja SEKALIGUS lewat
+		// Export -> edit kolom "Atasan Langsung" -> Import, bukan cuma lewat
+		// form satu-satu.
 		AfterSave: func(db *gorm.DB, old *models.UnitKerja, item *models.UnitKerja) {
 			syncAtasanUnitKerja(db, old, item)
+		},
+		// UpsertMatch: cocokkan baris Excel ke baris UnitKerja yang SUDAH ADA
+		// lewat NAMA Unit Kerja (case-insensitive, lihat komentar lengkap pada
+		// CrudConfig.UpsertMatch) -- KETEMU => baris lama itu DIPERBARUI (jadi
+		// Import bisa dipakai mengisi/mengganti Atasan Langsung, atau kolom
+		// lain, untuk unit kerja yang SUDAH ADA, bukan cuma menambah baris
+		// baru). TIDAK ketemu => tetap dibuat baris baru seperti biasa.
+		UpsertMatch: func(db *gorm.DB, item *models.UnitKerja) *gorm.DB {
+			return db.Model(&models.UnitKerja{}).Where("unit ILIKE ?", strings.TrimSpace(item.Unit))
 		},
 		// ExtraFilters "koordinat": menyaring daftar berdasarkan status titik
 		// koordinat absen unit kerja -- "diatur" (lat & lng sudah keduanya
@@ -289,6 +302,33 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 						return nil
 					}
 					i.(*models.UnitKerja).Singkatan = &raw
+					return nil
+				}},
+			// Atasan Langsung (NIP): lihat komentar lengkap pada
+			// models.UnitKerja.IDAtasanLangsung -- diisi lewat NIP pegawai yang
+			// SUDAH terdaftar di menu Data Pegawai (bukan dipilih lewat Select
+			// seperti di form, karena Excel hanya mengenal teks). Kosongkan sel
+			// ini kalau TIDAK ingin mengubah Atasan Langsung unit kerja ini
+			// (lihat UpsertMatch di atas: sel kosong tidak menimpa nilai lama).
+			{Header: "Atasan Langsung (NIP, opsional)", Example: "197001011995011001",
+				Get: func(i interface{}) string {
+					uk := i.(models.UnitKerja)
+					if uk.AtasanLangsung != nil {
+						return uk.AtasanLangsung.NIP
+					}
+					return ""
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						return nil
+					}
+					var p models.Pegawai
+					if err := db.Where("nip = ?", raw).First(&p).Error; err != nil {
+						return fmt.Errorf("pegawai dengan NIP '%s' tidak ditemukan (sebagai calon Atasan Langsung)", raw)
+					}
+					id := p.ID
+					i.(*models.UnitKerja).IDAtasanLangsung = &id
 					return nil
 				}},
 			{Header: "Latitude", Example: "-1.976688",

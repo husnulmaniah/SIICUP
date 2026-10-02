@@ -167,6 +167,12 @@ function hapusKoordinat(f) {
 // ---- detail dialog (khusus tabel Data Pegawai) ----
 const isPegawaiTable = computed(() => props.config.endpoint === '/pegawai')
 
+// ---- import Unit Kerja: KHUSUS tabel ini, Import boleh memperbarui baris
+// yang SUDAH ADA (dicocokkan lewat nama Unit Kerja, lihat UpsertMatch di
+// backend/routes/master_routes.go) -- dipakai menjelaskan perilaku khusus
+// ini di dialog Import (tabel lain tetap "tambah baris baru" seperti biasa).
+const isUnitKerjaTable = computed(() => props.config.endpoint === '/unit-kerja')
+
 // ---- generate akun otomatis dari data pegawai (khusus tabel Akun Pengguna) ----
 const isUserTable = computed(() => props.config.endpoint === '/user')
 const generateDialogVisible = ref(false)
@@ -1129,6 +1135,13 @@ const canManage = computed(() => true) // route guard already restricts page acc
       <p style="margin-top: 0; color: var(--p-text-muted-color); font-size: 0.9rem">
         Unduh template terlebih dahulu, isi data sesuai format (tanggal: DD-MM-YYYY), lalu upload file excel (.xlsx) di bawah ini.
       </p>
+      <Message v-if="isUnitKerjaTable" severity="info" :closable="false" style="margin-bottom: 1rem">
+        Khusus Unit Kerja: baris yang <strong>Nama Unit Kerja</strong>-nya SUDAH ADA di database akan <strong>diperbarui</strong> (termasuk
+        kolom Atasan Langsung), TIDAK dibuat dobel -- kolom yang anda kosongkan di excel tidak akan menimpa data yang sudah ada. Baris
+        dengan nama yang belum ada tetap dibuat sebagai unit kerja baru. Jadi untuk mengisi/mengganti Atasan Langsung banyak sekolah
+        sekaligus: klik <strong>Export</strong> dulu, edit kolom Atasan Langsung (isi NIP-nya) di file hasil export itu, lalu Import
+        file yang sama di sini.
+      </Message>
       <Button label="Download Template" icon="pi pi-download" severity="secondary" outlined @click="downloadTemplate" style="margin-bottom: 1rem" />
 
       <input ref="fileInputRef" type="file" accept=".xlsx" style="display: none" @change="onFileChosen" />
@@ -1150,7 +1163,11 @@ const canManage = computed(() => true) // route guard already restricts page acc
 
       <div v-if="importResult" style="margin-top: 1rem">
         <Message :severity="importResult.failed_rows?.length ? 'warn' : 'success'" :closable="false">
-          {{ importResult.success_count }} baris berhasil diimport, {{ importResult.failed_rows?.length || 0 }} baris gagal.
+          <span v-if="isUnitKerjaTable">
+            {{ importResult.created_count ?? importResult.success_count }} baris baru ditambahkan,
+            {{ importResult.updated_count || 0 }} baris diperbarui, {{ importResult.failed_rows?.length || 0 }} baris gagal.
+          </span>
+          <span v-else> {{ importResult.success_count }} baris berhasil diimport, {{ importResult.failed_rows?.length || 0 }} baris gagal. </span>
         </Message>
         <div v-if="importResult.failed_rows?.length" class="responsive-table-wrap" style="margin-top: 0.75rem; max-height: 220px; overflow-y: auto">
           <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem">
