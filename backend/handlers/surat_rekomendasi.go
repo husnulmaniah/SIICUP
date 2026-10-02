@@ -578,6 +578,13 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 	const qrSide = 110.0
 	suratSudahDisetujui := item.StatusApproval == models.StatusDisetuju
 
+	// Header masing-masing kolom (label "Mengetahui :"/tanggal + baris
+	// jabatan, yang jumlah barisnya BISA BEDA tiap kolom tergantung panjang
+	// teks jabatan) digambar dulu, BARU baris QR disamakan lewat qrY = nilai
+	// Y TERBESAR dari kedua kolom -- supaya kedua QR (dan nama/NIP di
+	// bawahnya) selalu SEJAJAR apa pun jumlah baris jabatannya (lihat
+	// laporan pengguna: kolom dengan jabatan 2 baris membuat QR-nya lebih
+	// turun dari kolom sebelah kalau tiap kolom pakai Y sendiri-sendiri).
 	leftX := marginX
 	yL := sigYStart
 	p.SetFont(false, 12)
@@ -589,31 +596,6 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 		p.Text(leftX, yL, jl)
 		yL += dinasJabatanSize + 2
 	}
-
-	dinasNamaDisp := truncateToWidth(strings.ToUpper(namaOrDash(dinasNama)), (halfW-20)*boldWidthSafety, 12)
-	dinasNameW := utils.TextWidth(dinasNamaDisp, 12)
-	dinasQrCenterX := leftX + dinasNameW/2
-	if dinasQrCenterX-qrSide/2 < leftX {
-		dinasQrCenterX = leftX + qrSide/2
-	}
-	if dinasQrCenterX+qrSide/2 > leftX+halfW-20 {
-		dinasQrCenterX = leftX + halfW - 20 - qrSide/2
-	}
-	if suratSudahDisetujui {
-		if qrPng, err := buildSignatureQRRekomendasi(item, pegawai, dinasNama, dinasJabatan, nomorLengkap); err == nil {
-			if err := doc.RegisterImage("ttd_qr_surat_rekomendasi_sekolah_dinas", qrPng); err == nil {
-				p.Image("ttd_qr_surat_rekomendasi_sekolah_dinas", dinasQrCenterX-qrSide/2, yL+4, qrSide, qrSide)
-			}
-		}
-	}
-	yL += qrSide + 14
-
-	p.SetFont(true, 12)
-	p.Text(leftX, yL, dinasNamaDisp)
-	p.Line(leftX, yL+3, leftX+dinasNameW, yL+3)
-	yL += 16
-	p.SetFont(false, 12)
-	p.Text(leftX, yL, "NIP: "+namaOrDash(dinasNip)+".")
 
 	sigX := centerX + 10
 	sigColW := rightX - sigX
@@ -630,9 +612,30 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 	}
 	p.SetFont(false, 12)
 
+	qrY := yL
+	if yR > qrY {
+		qrY = yR
+	}
+
+	dinasNamaDisp := truncateToWidth(strings.ToUpper(namaOrDash(dinasNama)), (halfW-20)*boldWidthSafety, 12)
+	dinasNameW := utils.TextWidth(dinasNamaDisp, 12)
+	dinasQrCenterX := leftX + dinasNameW/2
+	if dinasQrCenterX-qrSide/2 < leftX {
+		dinasQrCenterX = leftX + qrSide/2
+	}
+	if dinasQrCenterX+qrSide/2 > leftX+halfW-20 {
+		dinasQrCenterX = leftX + halfW - 20 - qrSide/2
+	}
+	if suratSudahDisetujui {
+		if qrPng, err := buildSignatureQRRekomendasi(item, pegawai, dinasNama, dinasJabatan, nomorLengkap); err == nil {
+			if err := doc.RegisterImage("ttd_qr_surat_rekomendasi_sekolah_dinas", qrPng); err == nil {
+				p.Image("ttd_qr_surat_rekomendasi_sekolah_dinas", dinasQrCenterX-qrSide/2, qrY+4, qrSide, qrSide)
+			}
+		}
+	}
+
 	signerNamaDisp := truncateToWidth(strings.ToUpper(namaOrDash(signerNama)), sigColW*boldWidthSafety, 12)
 	nameW := utils.TextWidth(signerNamaDisp, 12)
-
 	qrCenterX := sigX + nameW/2
 	if qrCenterX-qrSide/2 < sigX {
 		qrCenterX = sigX + qrSide/2
@@ -649,11 +652,20 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 	if atasan != nil && strings.TrimSpace(signerNip) != "" && suratSudahDisetujui {
 		if qrPng, err := buildSignatureQRRekomendasi(item, pegawai, signerNama, signerJabatan, nomorLengkap); err == nil {
 			if err := doc.RegisterImage("ttd_qr_surat_rekomendasi_sekolah", qrPng); err == nil {
-				p.Image("ttd_qr_surat_rekomendasi_sekolah", qrCenterX-qrSide/2, yR+4, qrSide, qrSide)
+				p.Image("ttd_qr_surat_rekomendasi_sekolah", qrCenterX-qrSide/2, qrY+4, qrSide, qrSide)
 			}
 		}
 	}
-	yR += qrSide + 14
+
+	yL = qrY + qrSide + 14
+	yR = qrY + qrSide + 14
+
+	p.SetFont(true, 12)
+	p.Text(leftX, yL, dinasNamaDisp)
+	p.Line(leftX, yL+3, leftX+dinasNameW, yL+3)
+	yL += 16
+	p.SetFont(false, 12)
+	p.Text(leftX, yL, "NIP: "+namaOrDash(dinasNip)+".")
 
 	p.SetFont(true, 12)
 	p.Text(sigX, yR, signerNamaDisp)
