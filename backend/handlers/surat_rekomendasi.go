@@ -53,6 +53,19 @@ func nomorSuratRekomendasiLengkap(nomorUrut, tahun int, tanggalSurat time.Time) 
 	return fmt.Sprintf("%s/%d/Disdikbud /%s/ %d", models.KodeKlasifikasiSuratRekomendasi, nomorUrut, romanMonth(tanggalSurat.Month()), tahun)
 }
 
+// nomorSuratRekomendasiSekolahLengkap merangkai nomor surat "Lampiran 3"
+// (khusus pegawai bertempat tugas Sekolah/Puskesmas) -- BEDA dari
+// nomorSuratRekomendasiLengkap di atas dalam dua hal: (1) bagian nomor urut
+// SENGAJA dikosongkan ("......", bukan nomor urut gabungan Dinas) karena
+// penomoran surat keluar sekolah itu urusan administrasi sekolah
+// masing-masing, dicetak lalu diisi tangan; (2) "Disdikbud" diganti dengan
+// singkatan Unit Kerja (sekolah/puskesmas) pegawai sendiri, lihat field baru
+// models.UnitKerja.Singkatan (mis. "SDN-LMR") -- diisi manual admin di menu
+// Unit Kerja, tampil "-" kalau belum diisi.
+func nomorSuratRekomendasiSekolahLengkap(tahun int, tanggalSurat time.Time, singkatanUnitKerja string) string {
+	return fmt.Sprintf("%s/....../%s/%s/ %d", models.KodeKlasifikasiSuratRekomendasi, singkatanUnitKerja, romanMonth(tanggalSurat.Month()), tahun)
+}
+
 // buildSignatureQRRekomendasi meniru gaya buildSignatureQR di formulir.go
 // (query Google Search berlabel jelas) tapi untuk konteks Surat
 // Rekomendasi perpanjangan kontrak PPPK, bukan izin cuti.
@@ -259,6 +272,377 @@ func buildSuratRekomendasiPppk(item models.SuratRekomendasi, signerNama, signerN
 }
 
 // ============================================================
+// Lampiran 3: Surat Rekomendasi khusus pegawai bertempat tugas Sekolah/
+// Puskesmas (kop surat unit kerja sendiri, ditandatangani atasan langsung)
+// ============================================================
+
+// drawLetterheadUnitKerjaKustom menggambar kop surat "Lampiran 3" --
+// dipakai KHUSUS untuk Lampiran 3 (lihat buildSuratRekomendasiSekolah),
+// berbeda dari drawLetterhead di formulir.go yang kopnya tetap/fixed Dinas
+// (dipakai Lampiran 2 untuk pegawai Dinas/Kantor). Logo Kabupaten
+// (assets.LogoPNG) SELALU digambar di kiri.
+//
+// Kalau sekolah (atasan langsungnya, lewat menu "Kop Surat Sekolah" --
+// lihat handlers/kop_surat.go) SUDAH mengisi UnitKerja.NamaSekolahKop,
+// dipakai kop KUSTOM sekolah itu: judul (boleh multi-baris) + opsional
+// alamat kop kiri/kanan (dua kolom kalau keduanya diisi) + opsional logo
+// Tut Wuri Handayani di kanan (UnitKerja.TampilkanLogoTutwuri, lihat
+// assets.TutWuriPNG) + perataan sesuai UnitKerja.PerataanKop. Kalau BELUM
+// pernah diisi (uk nil atau NamaSekolahKop kosong), jatuh kembali ke kop
+// teks polos bawaan (nama pemerintah + nama unit kerja) seperti
+// sebelumnya, supaya sekolah yang belum mengatur kopnya sendiri tetap
+// mendapat surat yang wajar.
+func drawLetterheadUnitKerjaKustom(doc *utils.PDFDoc, p *utils.PDFPage, marginX, rightX float64, unitKerjaNama string, uk *models.UnitKerja) float64 {
+	const logoW, logoH = 44.0, 58.0
+
+	hasLogoKiri := false
+	if err := doc.RegisterImage("logo_kop_sekolah_kiri", assets.LogoPNG); err == nil {
+		p.Image("logo_kop_sekolah_kiri", marginX, 20, logoW, logoH)
+		hasLogoKiri = true
+	}
+	// Logo Tut Wuri Handayani OPSIONAL di kanan -- lihat komentar
+	// assets.TutWuriPNG: berkasnya belum ditambahkan, jadi untuk sementara
+	// len(...) selalu 0 & logo ini belum pernah benar-benar tergambar
+	// sampai berkasnya ditambahkan ke package assets.
+	hasLogoKanan := false
+	if uk != nil && uk.TampilkanLogoTutwuri && len(assets.TutWuriPNG) > 0 {
+		if err := doc.RegisterImage("logo_kop_sekolah_kanan", assets.TutWuriPNG); err == nil {
+			p.Image("logo_kop_sekolah_kanan", rightX-logoW, 20, logoW, logoH)
+			hasLogoKanan = true
+		}
+	}
+
+	textLeft, textRight := marginX, rightX
+	if hasLogoKiri {
+		textLeft = marginX + logoW + 10
+	}
+	if hasLogoKanan {
+		textRight = rightX - logoW - 10
+	}
+	textCenterX := textLeft + (textRight-textLeft)/2
+
+	perataan := models.PerataanKopTengah
+	if uk != nil && uk.PerataanKop != nil && strings.TrimSpace(*uk.PerataanKop) != "" {
+		perataan = strings.ToLower(strings.TrimSpace(*uk.PerataanKop))
+	}
+	drawAligned := func(y float64, bold bool, size float64, s string) {
+		p.SetFont(bold, size)
+		switch perataan {
+		case models.PerataanKopKiri:
+			p.Text(textLeft, y, s)
+		case models.PerataanKopKanan:
+			p.TextRight(textRight, y, s)
+		default:
+			p.TextCentered(textCenterX, y, s)
+		}
+	}
+
+	customKop := uk != nil && uk.NamaSekolahKop != nil && strings.TrimSpace(*uk.NamaSekolahKop) != ""
+
+	y := 26.0
+	const titleLineH = 16.0
+	const addrLineH = 14.0
+
+	var titleLines []string
+	if customKop {
+		titleLines = strings.Split(strings.ReplaceAll(*uk.NamaSekolahKop, "\r\n", "\n"), "\n")
+	} else {
+		titleLines = []string{"PEMERINTAH KABUPATEN MOROWALI UTARA", strings.ToUpper(namaOrDash(unitKerjaNama)), "Kabupaten Morowali Utara"}
+	}
+	for i, line := range titleLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		sz, bold := 13.0, true
+		if !customKop && i == len(titleLines)-1 {
+			// baris terakhir mode bawaan ("Kabupaten Morowali Utara") tetap
+			// kecil & reguler seperti sebelumnya.
+			sz, bold = 10, false
+		}
+		drawAligned(y, bold, sz, line)
+		y += titleLineH
+	}
+
+	// Alamat kop kiri/kanan -- opsional, hanya terisi kalau sekolah sudah
+	// mengaturnya lewat menu Kop Surat Sekolah.
+	var kiriLines, kananLines []string
+	if uk != nil && uk.AlamatKopKiri != nil && strings.TrimSpace(*uk.AlamatKopKiri) != "" {
+		kiriLines = strings.Split(strings.ReplaceAll(*uk.AlamatKopKiri, "\r\n", "\n"), "\n")
+	}
+	if uk != nil && uk.AlamatKopKanan != nil && strings.TrimSpace(*uk.AlamatKopKanan) != "" {
+		kananLines = strings.Split(strings.ReplaceAll(*uk.AlamatKopKanan, "\r\n", "\n"), "\n")
+	}
+	if len(kiriLines) > 0 && len(kananLines) > 0 {
+		// Dua kolom (kiri rata kiri, kanan rata kanan) -- SENGAJA
+		// mengabaikan PerataanKop di sini supaya dua kolomnya tetap jelas.
+		maxLines := len(kiriLines)
+		if len(kananLines) > maxLines {
+			maxLines = len(kananLines)
+		}
+		p.SetFont(false, 10)
+		for i := 0; i < maxLines; i++ {
+			if i < len(kiriLines) {
+				if l := strings.TrimSpace(kiriLines[i]); l != "" {
+					p.Text(textLeft, y, l)
+				}
+			}
+			if i < len(kananLines) {
+				if l := strings.TrimSpace(kananLines[i]); l != "" {
+					p.TextRight(textRight, y, l)
+				}
+			}
+			y += addrLineH
+		}
+	} else if len(kiriLines) > 0 {
+		for _, line := range kiriLines {
+			if line = strings.TrimSpace(line); line != "" {
+				drawAligned(y, false, 10, line)
+				y += addrLineH
+			}
+		}
+	}
+
+	y += 8
+	p.SetLineWidth(1.4)
+	p.Line(marginX, y, rightX, y)
+	p.SetLineWidth(0.75)
+	return y
+}
+
+// buildSuratRekomendasiSekolah menggambar PDF "Lampiran 3" -- varian Surat
+// Rekomendasi perpanjangan kontrak KHUSUS pegawai dengan tempat tugas
+// Sekolah/Puskesmas (lihat isSekolahPegawai di pengajuan_cuti.go). Isi &
+// susunan paragraf SAMA seperti buildSuratRekomendasiPppk ("Lampiran 2",
+// khusus Dinas/Kantor), tapi beda pada 3 hal sesuai permintaan pengguna:
+//  1. Kop surat memakai nama Unit Kerja (sekolah/puskesmas) milik pegawai
+//     sendiri (drawLetterheadUnitKerja), BUKAN kop Dinas tetap.
+//  2. Penandatangan UTAMA ("Yang bertanda tangan dibawah ini", blok tanda
+//     tangan kanan + QR) diambil dari data ATASAN LANGSUNG pegawai
+//     (item.Pegawai.Atasan == Kepala Sekolah/Kepala Puskesmas) -- BUKAN
+//     Kepala Dinas. Jika data Atasan pegawai belum diisi admin, kolom ini
+//     tampil "-" (surat tetap bisa dibuat, tapi sebaiknya admin segera
+//     melengkapi data Atasan pegawai tersebut).
+//  3. Ditambahkan blok tanda tangan KEDUA di kiri "Mengetahui : Kepala
+//     Dinas" (tetap pakai resolveSignerFullRekomendasi/PengaturanSurat,
+//     SAMA seperti penandatangan Lampiran 2) sesuai contoh Lampiran 3.
+//
+// Semua paragraf memakai JustifiedText (rata kiri-kanan) sesuai permintaan.
+func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinasNip, dinasJabatan string) ([]byte, error) {
+	doc := utils.NewPDFDoc()
+	p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
+	doc.AddPage(p)
+
+	marginX := 42.0
+	pageW := utils.PageWidthA4
+	rightX := pageW - marginX
+	centerX := marginX + (rightX-marginX)/2
+
+	pegawai := models.Pegawai{}
+	if item.Pegawai != nil {
+		pegawai = *item.Pegawai
+	}
+	unitKerjaNama := "-"
+	if pegawai.UnitKerja != nil {
+		unitKerjaNama = pegawai.UnitKerja.Unit
+	}
+
+	var unitKerjaForKop *models.UnitKerja
+	if pegawai.UnitKerja != nil {
+		unitKerjaForKop = pegawai.UnitKerja
+	}
+	kopBawahY := drawLetterheadUnitKerjaKustom(doc, p, marginX, rightX, unitKerjaNama, unitKerjaForKop)
+
+	// signerNama..signerUnitKerja: identitas penandatangan utama (Kepala
+	// Sekolah/Kepala Puskesmas), diambil dari atasan langsung pegawai.
+	signerNama, signerNip, signerJabatan, signerPangkatGol, signerUnitKerja := "-", "-", "Kepala Sekolah", "-", unitKerjaNama
+	var atasan *models.Pegawai
+	if pegawai.Atasan != nil {
+		atasan = pegawai.Atasan
+		signerNama = atasan.Nama
+		signerNip = atasan.NIP
+		if atasan.Jabatan != nil {
+			signerJabatan = atasan.Jabatan.Jabatan
+		}
+		if atasan.UnitKerja != nil {
+			signerUnitKerja = atasan.UnitKerja.Unit
+		}
+		if atasan.PangkatGol != nil {
+			pk, gol := "-", "-"
+			if atasan.PangkatGol.Pangkat != nil {
+				pk = atasan.PangkatGol.Pangkat.Pangkat
+			}
+			if atasan.PangkatGol.Gol != nil {
+				gol = atasan.PangkatGol.Gol.Gol
+			}
+			signerPangkatGol = pk + " / " + gol
+		}
+	}
+
+	const lineH = 15.0
+	y := kopBawahY + 16
+
+	p.SetFont(true, 13)
+	const judulSurat = "SURAT REKOMENDASI"
+	p.TextCentered(centerX, y, judulSurat)
+	titleW := utils.TextWidth(judulSurat, 13)
+	p.Line(centerX-titleW/2, y+3, centerX+titleW/2, y+3)
+	y += lineH
+
+	// nomorLengkap: nomor urut SENGAJA dikosongkan ("......"), diganti
+	// singkatan Unit Kerja (sekolah/puskesmas) pegawai sendiri -- lihat
+	// nomorSuratRekomendasiSekolahLengkap & models.UnitKerja.Singkatan
+	// (diisi manual admin di menu Unit Kerja, "-" kalau belum diisi).
+	singkatanUnitKerja := "-"
+	if pegawai.UnitKerja != nil && pegawai.UnitKerja.Singkatan != nil && strings.TrimSpace(*pegawai.UnitKerja.Singkatan) != "" {
+		singkatanUnitKerja = *pegawai.UnitKerja.Singkatan
+	}
+	nomorLengkap := nomorSuratRekomendasiSekolahLengkap(item.Tahun, item.TanggalSurat, singkatanUnitKerja)
+	p.SetFont(false, 12)
+	p.TextCentered(centerX, y, "Nomor : "+nomorLengkap)
+	y += lineH * 1.8
+
+	const labelW = 132.0
+	drawField := func(label, val string) {
+		p.Text(marginX, y, label)
+		p.Text(marginX+labelW, y, ": "+namaOrDash(val))
+		y += lineH
+	}
+
+	p.Text(marginX, y, "Yang bertanda tangan dibawah ini :")
+	y += lineH
+	drawField("Nama", strings.ToUpper(namaOrDash(signerNama)))
+	drawField("NIP", signerNip)
+	drawField("Pangkat/Gol. Ruang", signerPangkatGol)
+	drawField("Jabatan", signerJabatan)
+	drawField("Unit Kerja", signerUnitKerja)
+	y += lineH * 0.6
+
+	statusNama := "-"
+	if pegawai.Status != nil {
+		statusNama = pegawai.Status.Status
+	}
+	jabatanNama := "-"
+	if pegawai.Jabatan != nil {
+		jabatanNama = pegawai.Jabatan.Jabatan
+	}
+	golNama := "-"
+	if pegawai.PangkatGol != nil && pegawai.PangkatGol.Gol != nil {
+		golNama = pegawai.PangkatGol.Gol.Gol
+	}
+
+	p.Text(marginX, y, "Dengan ini menyatakan bahwa saudara :")
+	y += lineH
+	drawField("Nama", strings.ToUpper(namaOrDash(pegawai.Nama)))
+	drawField("NI PPPK", pegawai.NIP)
+	drawField("Golongan", golNama)
+	drawField("Jabatan", jabatanNama)
+	drawField("Status Kepegawaian", "ASN "+statusNama)
+	drawField("Unit Kerja", unitKerjaNama)
+	y += lineH
+
+	jenisPppk := "Pegawai Pemerintah dengan Perjanjian Kerja (PPPK)"
+	if strings.Contains(strings.ToLower(statusNama), "paruh waktu") {
+		jenisPppk = "Pegawai Pemerintah dengan Perjanjian Kerja Paruh Waktu (PPPK Paruh Waktu)"
+	}
+	tmtText := "-"
+	if pegawai.TMT != nil {
+		tmtText = formatDateID(*pegawai.TMT)
+	}
+
+	poin1 := fmt.Sprintf(
+		"1. Benar merupakan %s pada Unit Kerja %s terhitung mulai tanggal %s sampai dengan saat ini melaksanakan tugas secara nyata dan sah secara terus-menerus;",
+		jenisPppk, unitKerjaNama, tmtText,
+	)
+	y = p.JustifiedText(marginX, y, rightX-marginX, lineH, poin1) + lineH*0.4
+
+	poin2 := "2. Berdasarkan point 1 (satu) diatas, maka kami merekomendasikan yang bersangkutan dapat dipertimbangkan untuk proses perpanjangan perjanjian kerja (kontrak)."
+	y = p.JustifiedText(marginX, y, rightX-marginX, lineH, poin2) + lineH*0.4
+
+	poin3 := "3. Apabila dikemudian hari, terdapat hal-hal yang tidak sesuai, maka kami siap mempertanggungjawabkan secara hukum tanpa melibatkan siapapun."
+	y = p.JustifiedText(marginX, y, rightX-marginX, lineH, poin3) + lineH*1.4
+
+	penutup := "Demikian rekomendasi ini kami buat untuk dipergunakan sebagaimana mestinya."
+	y = p.JustifiedText(marginX, y, rightX-marginX, lineH, penutup) + lineH*1.8
+
+	// Blok tanda tangan: KIRI "Mengetahui" Kepala Dinas (saksi, tanpa QR),
+	// KANAN penandatangan utama (Kepala Sekolah/Kepala Puskesmas = atasan
+	// langsung pegawai, dengan QR tanda tangan otomatis) -- sesuai tata
+	// letak dua kolom pada contoh Lampiran 3.
+	sigYStart := y
+	halfW := (rightX - marginX) / 2
+
+	leftX := marginX
+	yL := sigYStart
+	p.SetFont(false, 12)
+	p.Text(leftX, yL, "Mengetahui :")
+	yL += lineH
+	dinasJabatanLines, dinasJabatanSize := wrapJabatan(namaOrDash(dinasJabatan), halfW-20, 2, []float64{12, 11, 10.5, 10, 9.5, 9, 8.5, 8})
+	for _, jl := range dinasJabatanLines {
+		p.SetFont(false, dinasJabatanSize)
+		p.Text(leftX, yL, jl)
+		yL += dinasJabatanSize + 2
+	}
+	yL += lineH * 3.4
+	dinasNamaDisp := truncateToWidth(strings.ToUpper(namaOrDash(dinasNama)), (halfW-20)*boldWidthSafety, 12)
+	p.SetFont(true, 12)
+	p.Text(leftX, yL, dinasNamaDisp)
+	p.Line(leftX, yL+3, leftX+utils.TextWidth(dinasNamaDisp, 12), yL+3)
+	yL += 16
+	p.SetFont(false, 12)
+	p.Text(leftX, yL, "NIP: "+namaOrDash(dinasNip)+".")
+
+	sigX := centerX + 10
+	sigColW := rightX - sigX
+	yR := sigYStart
+	p.SetFont(false, 12)
+	p.Text(sigX, yR, "Kolonodale, "+formatDateID(item.TanggalSurat)+".")
+	yR += lineH
+	signerJabatanLines, signerJabatanSize := wrapJabatan(namaOrDash(signerJabatan), sigColW, 2, []float64{12, 11, 10.5, 10, 9.5, 9, 8.5, 8})
+	jabatanLineH := signerJabatanSize + 2
+	for _, jl := range signerJabatanLines {
+		p.SetFont(false, signerJabatanSize)
+		p.Text(sigX, yR, jl)
+		yR += jabatanLineH
+	}
+	p.SetFont(false, 12)
+
+	signerNamaDisp := truncateToWidth(strings.ToUpper(namaOrDash(signerNama)), sigColW*boldWidthSafety, 12)
+	nameW := utils.TextWidth(signerNamaDisp, 12)
+
+	const qrSide = 110.0
+	qrCenterX := sigX + nameW/2
+	if qrCenterX-qrSide/2 < sigX {
+		qrCenterX = sigX + qrSide/2
+	}
+	if qrCenterX+qrSide/2 > rightX {
+		qrCenterX = rightX - qrSide/2
+	}
+	// QR tanda tangan HANYA ditampilkan kalau atasan langsung (Kepala
+	// Sekolah/Kepala Puskesmas) SUDAH menyetujui lewat menu Arsip Surat di
+	// akunnya (lihat approveSuratRekomendasi) -- sebelum disetujui, surat
+	// ini TETAP bisa dilihat/diunduh, hanya saja ruang QR-nya dikosongkan
+	// (Nama & NIP atasan tetap tercetak seperti biasa di bawahnya).
+	if atasan != nil && strings.TrimSpace(signerNip) != "" && item.StatusApproval == models.StatusDisetuju {
+		if qrPng, err := buildSignatureQRRekomendasi(item, pegawai, signerNama, signerJabatan, nomorLengkap); err == nil {
+			if err := doc.RegisterImage("ttd_qr_surat_rekomendasi_sekolah", qrPng); err == nil {
+				p.Image("ttd_qr_surat_rekomendasi_sekolah", qrCenterX-qrSide/2, yR+4, qrSide, qrSide)
+			}
+		}
+	}
+	yR += qrSide + 14
+
+	p.SetFont(true, 12)
+	p.Text(sigX, yR, signerNamaDisp)
+	p.Line(sigX, yR+3, sigX+nameW, yR+3)
+	yR += 16
+	p.SetFont(false, 12)
+	p.Text(sigX, yR, "NIP: "+namaOrDash(signerNip)+".")
+
+	return doc.Output()
+}
+
+// ============================================================
 // Lampiran 1: surat permohonan perpanjangan kontrak (diajukan PEGAWAI
 // SENDIRI ke Bupati)
 // ============================================================
@@ -417,19 +801,36 @@ type suratRekomendasiOut struct {
 	StatusKepegawaian string `json:"status_kepegawaian"`
 	DibuatOlehNama    string `json:"dibuat_oleh_nama"`
 	CreatedAt         string `json:"created_at"`
+	// IsSekolah: true kalau pegawai penerima surat ini bertempat tugas
+	// Sekolah/Puskesmas (lihat isSekolahPegawai) -- dipakai frontend untuk
+	// tahu surat ini pakai "Lampiran 3" (butuh persetujuan atasan) atau
+	// "Lampiran 2" biasa (Dinas/Kantor, otomatis "disetujui", tanpa approval).
+	IsSekolah bool `json:"is_sekolah"`
+	// StatusApproval & AtasanApproveNama/TglApproval: lihat komentar field
+	// senama di models.SuratRekomendasi -- HANYA relevan kalau IsSekolah
+	// true (surat Dinas/Kantor selalu "disetujui" sejak dibuat).
+	StatusApproval    string `json:"status_approval"`
+	AtasanApproveNama string `json:"atasan_approve_nama,omitempty"`
+	TglApproval       string `json:"tgl_approval,omitempty"`
 }
 
 func toSuratRekomendasiOut(item models.SuratRekomendasi) suratRekomendasiOut {
 	out := suratRekomendasiOut{
 		ID:             item.ID,
 		Judul:          item.Judul,
-		NomorSurat:     nomorSuratRekomendasiLengkap(item.NomorUrut, item.Tahun, item.TanggalSurat),
 		NomorUrut:      item.NomorUrut,
 		Tahun:          item.Tahun,
 		TanggalSurat:   item.TanggalSurat.Format("2006-01-02"),
 		IDPegawai:      item.IDPegawai,
 		DibuatOlehNama: item.DibuatOlehNama,
 		CreatedAt:      item.CreatedAt.Format(time.RFC3339),
+		StatusApproval: item.StatusApproval,
+	}
+	if item.AtasanApprove != nil {
+		out.AtasanApproveNama = item.AtasanApprove.Nama
+	}
+	if item.TglApproval != nil {
+		out.TglApproval = item.TglApproval.Format(time.RFC3339)
 	}
 	if item.Pegawai != nil {
 		out.NamaPegawai = item.Pegawai.Nama
@@ -443,20 +844,45 @@ func toSuratRekomendasiOut(item models.SuratRekomendasi) suratRekomendasiOut {
 		if item.Pegawai.Status != nil {
 			out.StatusKepegawaian = item.Pegawai.Status.Status
 		}
+		out.IsSekolah = isSekolahPegawai(*item.Pegawai)
+		if out.IsSekolah {
+			singkatan := "-"
+			if item.Pegawai.UnitKerja != nil && item.Pegawai.UnitKerja.Singkatan != nil && strings.TrimSpace(*item.Pegawai.UnitKerja.Singkatan) != "" {
+				singkatan = *item.Pegawai.UnitKerja.Singkatan
+			}
+			out.NomorSurat = nomorSuratRekomendasiSekolahLengkap(item.Tahun, item.TanggalSurat, singkatan)
+		} else {
+			out.NomorSurat = nomorSuratRekomendasiLengkap(item.NomorUrut, item.Tahun, item.TanggalSurat)
+		}
+	} else {
+		out.NomorSurat = nomorSuratRekomendasiLengkap(item.NomorUrut, item.Tahun, item.TanggalSurat)
 	}
 	return out
 }
 
+// suratRekomendasiPreload juga memuat relasi Pegawai.Atasan (dengan
+// Jabatan/UnitKerja/PangkatGol-nya) -- dibutuhkan untuk membangun "Lampiran
+// 3" (lihat buildSuratRekomendasiSekolah) yang mengambil Nama/NIP/Jabatan
+// penandatangan utama (Kepala Sekolah/Kepala Puskesmas) dari data ATASAN
+// LANGSUNG pegawai, bukan dari Kepala Dinas.
 func suratRekomendasiPreload(db *gorm.DB) *gorm.DB {
 	return db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).
 		Preload("Pegawai.Jabatan").Preload("Pegawai.UnitKerja").Preload("Pegawai.Status").
-		Preload("Pegawai.PangkatGol.Pangkat").Preload("Pegawai.PangkatGol.Gol")
+		Preload("Pegawai.PangkatGol.Pangkat").Preload("Pegawai.PangkatGol.Gol").
+		Preload("Pegawai.Atasan").Preload("Pegawai.Atasan.Jabatan").Preload("Pegawai.Atasan.UnitKerja").
+		Preload("Pegawai.Atasan.PangkatGol.Pangkat").Preload("Pegawai.Atasan.PangkatGol.Gol").
+		Preload("AtasanApprove")
 }
 
 func canManageSuratRekomendasi(claims *utils.Claims) bool {
 	return claims != nil && (claims.RoleName == "administrator" || claims.RoleName == "admin")
 }
 
+// canAccessSuratRekomendasi: administrator/admin bebas, pegawai hanya
+// suratnya sendiri, ATASAN (Kepala Sekolah/Kepala Puskesmas dkk.) juga boleh
+// melihat/mengunduh surat BAWAHAN LANGSUNGNYA -- dibutuhkan supaya atasan
+// bisa meninjau isi surat sebelum menyetujuinya (lihat approveSuratRekomendasi
+// & isAtasanLangsungSuratRekomendasi).
 func canAccessSuratRekomendasi(claims *utils.Claims, item models.SuratRekomendasi) bool {
 	if claims == nil {
 		return false
@@ -464,7 +890,21 @@ func canAccessSuratRekomendasi(claims *utils.Claims, item models.SuratRekomendas
 	if canManageSuratRekomendasi(claims) {
 		return true
 	}
-	return claims.IDPegawai != nil && *claims.IDPegawai == item.IDPegawai
+	if claims.IDPegawai == nil {
+		return false
+	}
+	if *claims.IDPegawai == item.IDPegawai {
+		return true
+	}
+	return isAtasanLangsungSuratRekomendasi(claims, item)
+}
+
+// isAtasanLangsungSuratRekomendasi mengecek apakah akun yang login (role
+// "atasan") adalah atasan langsung (Pegawai.IDAtasan) dari pegawai penerima
+// surat ini -- item.Pegawai WAJIB sudah dipreload oleh pemanggil.
+func isAtasanLangsungSuratRekomendasi(claims *utils.Claims, item models.SuratRekomendasi) bool {
+	return claims != nil && claims.RoleName == "atasan" && claims.IDPegawai != nil &&
+		item.Pegawai != nil && item.Pegawai.IDAtasan != nil && *item.Pegawai.IDAtasan == *claims.IDPegawai
 }
 
 // ============================================================
@@ -501,6 +941,17 @@ func listSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		if idStatus != "" {
 			base = base.Where("pegawai.id_status = ?", idStatus)
 		}
+	} else if claims.RoleName == "atasan" {
+		// atasan (mis. Kepala Sekolah/Kepala Puskesmas) melihat surat
+		// BAWAHAN LANGSUNGNYA di sini (bukan suratnya sendiri) -- supaya bisa
+		// meninjau & menyetujui surat Lampiran 3 yang masih "pending" (lihat
+		// approveSuratRekomendasi), pola sama seperti listPengajuanCuti role
+		// "atasan" di pengajuan_cuti.go.
+		if claims.IDPegawai == nil {
+			utils.Success(w, "ok", []suratRekomendasiOut{})
+			return
+		}
+		base = base.Where("surat_rekomendasi.id_pegawai IN (SELECT id FROM pegawai WHERE id_atasan = ?)", *claims.IDPegawai)
 	} else {
 		if claims.IDPegawai == nil {
 			utils.Success(w, "ok", []suratRekomendasiOut{})
@@ -688,7 +1139,10 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	var pegawaiList []models.Pegawai
-	if err := db.Where("id IN ?", idList).Find(&pegawaiList).Error; err != nil {
+	// Preload UnitKerja supaya isSekolahPegawai di bawah memeriksa field
+	// TempatKerja yang otoritatif (bukan jatuh ke tebakan teks TempatTgs) --
+	// dipakai menentukan StatusApproval baris baru (lihat komentar di bawah).
+	if err := db.Preload("UnitKerja").Where("id IN ?", idList).Find(&pegawaiList).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pegawai")
 		return
 	}
@@ -797,6 +1251,15 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 				diperbarui++
 				continue
 			}
+			// StatusApproval baris baru: pegawai Sekolah/Puskesmas ("Lampiran
+			// 3") mulai "pending" -- butuh persetujuan atasan langsung dulu
+			// sebelum QR tanda tangannya tampil (lihat buildSuratRekomendasiSekolah
+			// & approveSuratRekomendasi). Pegawai Dinas/Kantor ("Lampiran 2")
+			// tetap langsung "disetujui" seperti sebelumnya, tidak berubah.
+			statusApproval := models.StatusDisetuju
+			if isSekolahPegawai(pg) {
+				statusApproval = models.StatusPending
+			}
 			row := models.SuratRekomendasi{
 				IDPegawai:      id,
 				Judul:          judul,
@@ -804,6 +1267,7 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 				Tahun:          tahun,
 				TanggalSurat:   tanggalSurat,
 				DibuatOlehNama: dibuatOleh,
+				StatusApproval: statusApproval,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return fmt.Errorf("gagal menyimpan surat untuk %s: %w", pg.Nama, err)
@@ -949,7 +1413,21 @@ func pdfSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 	pengaturan := pengaturanSuratOrDefault(db)
 	signerNama, signerNip, signerJabatan, signerPangkatGol, signerUnitKerja := resolveSignerFullRekomendasi(db, pengaturan)
-	pdfBytes, err := buildSuratRekomendasiPppk(item, signerNama, signerNip, signerJabatan, signerPangkatGol, signerUnitKerja)
+
+	// Alur surat bercabang menurut tempat tugas pegawai (lihat
+	// isSekolahPegawai di pengajuan_cuti.go): pegawai di Dinas/Kantor tetap
+	// memakai "Lampiran 2" (buildSuratRekomendasiPppk, kop Dinas tetap,
+	// ditandatangani Kepala Dinas) -- TIDAK berubah. Pegawai bertempat
+	// tugas Sekolah/Puskesmas memakai "Lampiran 3" (buildSuratRekomendasiSekolah,
+	// kop unit kerja sendiri, ditandatangani atasan langsung pegawai,
+	// Kepala Dinas tampil sebagai "Mengetahui").
+	var pdfBytes []byte
+	var err error
+	if isSekolahPegawai(*item.Pegawai) {
+		pdfBytes, err = buildSuratRekomendasiSekolah(item, signerNama, signerNip, signerJabatan)
+	} else {
+		pdfBytes, err = buildSuratRekomendasiPppk(item, signerNama, signerNip, signerJabatan, signerPangkatGol, signerUnitKerja)
+	}
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat surat: "+err.Error())
 		return
@@ -989,6 +1467,54 @@ func pdfPermohonanSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *g
 	writePDFResponse(w, r, pdfBytes, fmt.Sprintf("permohonan_perpanjangan_kontrak_%s.pdf", item.Pegawai.NIP))
 }
 
+// approveSuratRekomendasi menangani PUT /api/surat-rekomendasi/{id}/approve
+// -- KHUSUS surat "Lampiran 3" (pegawai bertempat tugas Sekolah/Puskesmas,
+// lihat isSekolahPegawai) yang masih berstatus "pending": atasan langsung
+// pegawai (Kepala Sekolah/Kepala Puskesmas, role "atasan", dikenali dari
+// Pegawai.IDAtasan) menyetujuinya di sini -- begitu disetujui, QR tanda
+// tangan otomatis langsung muncul di PDF surat ini (lihat gating
+// item.StatusApproval pada buildSuratRekomendasiSekolah). administrator/admin
+// juga boleh memakai endpoint ini (jaga-jaga, mis. atasan belum punya akun).
+// Surat "Lampiran 2" (Dinas/Kantor) TIDAK memerlukan ini -- selalu sudah
+// "disetujui" sejak dibuat (lihat buatSuratRekomendasi).
+func approveSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.SuratRekomendasi
+	if err := suratRekomendasiPreload(db).First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "surat rekomendasi tidak ditemukan")
+		return
+	}
+	if item.Pegawai == nil {
+		utils.Error(w, http.StatusInternalServerError, "data pegawai penerima surat tidak ditemukan")
+		return
+	}
+	if !canManageSuratRekomendasi(claims) && !isAtasanLangsungSuratRekomendasi(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda hanya dapat menyetujui surat rekomendasi bawahan langsung anda")
+		return
+	}
+	if !isSekolahPegawai(*item.Pegawai) {
+		utils.Error(w, http.StatusBadRequest, "surat rekomendasi pegawai Dinas/Kantor tidak memerlukan persetujuan atasan")
+		return
+	}
+	if item.StatusApproval == models.StatusDisetuju {
+		utils.Error(w, http.StatusBadRequest, "surat ini sudah disetujui sebelumnya")
+		return
+	}
+	now := time.Now()
+	item.StatusApproval = models.StatusDisetuju
+	item.TglApproval = &now
+	if claims.IDPegawai != nil {
+		item.IDAtasanApprove = claims.IDPegawai
+	}
+	if err := db.Save(&item).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyetujui surat rekomendasi: "+err.Error())
+		return
+	}
+	suratRekomendasiPreload(db).First(&item, item.ID)
+	utils.Success(w, "surat rekomendasi berhasil disetujui -- tanda tangan QR otomatis sudah muncul di surat ini", toSuratRekomendasiOut(item))
+}
+
 // RegisterSuratRekomendasiRoutes mendaftarkan semua endpoint
 // /api/surat-rekomendasi*.
 func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
@@ -997,6 +1523,10 @@ func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
+	// approverRoles: administrator/admin (jaga-jaga/override) + "atasan" --
+	// dipakai KHUSUS endpoint approve, pola sama seperti approverRoles di
+	// pengajuan_cuti.go.
+	approverRoles := func(h http.HandlerFunc) http.Handler { return authed(h, "atasan", "administrator", "admin") }
 
 	mux.Handle("GET /api/surat-rekomendasi", anyRole(func(w http.ResponseWriter, r *http.Request) { listSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/calon-pegawai", manage(func(w http.ResponseWriter, r *http.Request) { listCalonPegawaiSuratRekomendasi(w, r, db) }))
@@ -1006,4 +1536,5 @@ func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("DELETE /api/surat-rekomendasi/{id}", manage(func(w http.ResponseWriter, r *http.Request) { hapusSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf-permohonan", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfPermohonanSuratRekomendasi(w, r, db) }))
+	mux.Handle("PUT /api/surat-rekomendasi/{id}/approve", approverRoles(func(w http.ResponseWriter, r *http.Request) { approveSuratRekomendasi(w, r, db) }))
 }

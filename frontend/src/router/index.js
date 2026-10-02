@@ -21,6 +21,7 @@ import Kp4AdminView from '../views/Kp4AdminView.vue'
 import PengaturanKp4View from '../views/PengaturanKp4View.vue'
 import SuratRekomendasiView from '../views/SuratRekomendasiView.vue'
 import ArsipSuratView from '../views/ArsipSuratView.vue'
+import KopSuratSekolahView from '../views/KopSuratSekolahView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -64,6 +65,11 @@ const routes = [
       // lihat backend/handlers/surat_rekomendasi.go.
       { path: 'surat-rekomendasi', name: 'surat-rekomendasi', component: SuratRekomendasiView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'arsip-surat', name: 'arsip-surat', component: ArsipSuratView, meta: { roles: ['pegawai', 'atasan'] } },
+      // Kop Surat Sekolah: KHUSUS atasan yang bertugas di Sekolah/Puskesmas
+      // (lihat auth.isSekolah, flag is_sekolah dari backend saat login) --
+      // pengecekan tambahan requireKopSuratAccess di beforeEach karena
+      // meta.roles saja tidak bisa membedakan atasan sekolah vs. dinas.
+      { path: 'kop-surat-sekolah', name: 'kop-surat-sekolah', component: KopSuratSekolahView, meta: { roles: ['atasan'], requireKopSuratAccess: true } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },
@@ -100,6 +106,9 @@ router.beforeEach((to) => {
     }
   }
   if (to.meta.requireTemplateSuratAccess && !auth.canViewTemplateSurat) {
+    return { name: 'dashboard' }
+  }
+  if (to.meta.requireKopSuratAccess && !(auth.isAtasan && auth.isSekolah)) {
     return { name: 'dashboard' }
   }
   return true

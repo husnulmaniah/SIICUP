@@ -1,22 +1,31 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
+import { useAuthStore } from '../stores/auth'
 import http from '../api/http'
 
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
+import Tag from 'primevue/tag'
 
 // ArsipSuratView -- menu "Arsip Surat" (pegawai/atasan): daftar surat
-// rekomendasi perpanjangan kontrak yang DIKIRIM administrator/admin untuk
-// akun ini (lihat SuratRekomendasiView.vue di sisi administrator), bisa
-// dilihat/diunduh sebagai PDF kapan saja -- TANPA harus mencetak dulu atau
-// menunggu proses approval apa pun. Backend GET /api/surat-rekomendasi
-// otomatis hanya mengembalikan surat milik pegawai yang login (lihat
-// listSuratRekomendasi di handlers/surat_rekomendasi.go).
-
+// rekomendasi perpanjangan kontrak, bisa dilihat/diunduh sebagai PDF kapan
+// saja. Backend GET /api/surat-rekomendasi mengembalikan isi yang BEDA
+// menurut role (lihat listSuratRekomendasi di handlers/surat_rekomendasi.go):
+//   - pegawai: surat MILIKNYA SENDIRI yang dikirim administrator/admin --
+//     TANPA proses approval apa pun (sama seperti sebelumnya).
+//   - atasan (mis. Kepala Sekolah/Kepala Puskesmas): surat BAWAHAN
+//     LANGSUNGNYA -- KHUSUS surat "Lampiran 3" (pegawai bertempat tugas
+//     Sekolah/Puskesmas, item.is_sekolah true) yang masih berstatus
+//     "pending", atasan WAJIB klik "Setujui" dulu (lihat doApprove) sebelum
+//     QR tanda tangannya muncul di surat bawahannya itu -- sebelum disetujui
+//     suratnya TETAP bisa dilihat/diunduh, hanya tanda tangannya kosong.
 const toast = useToast()
+const confirm = useConfirm()
+const authStore = useAuthStore()
 const items = ref([])
 const loading = ref(true)
 
@@ -118,12 +127,50 @@ async function unduhLampiran1(item) {
     toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
   }
 }
+
+// ------------------------------------------------------------
+// Persetujuan atasan (KHUSUS surat "Lampiran 3" pegawai Sekolah/Puskesmas,
+// item.is_sekolah true, status_approval masih "pending") -- lihat
+// approveSuratRekomendasi di handlers/surat_rekomendasi.go.
+// ------------------------------------------------------------
+
+const approving = ref(null)
+
+function confirmApprove(item) {
+  confirm.require({
+    message: `Setujui surat rekomendasi "${item.nomor_surat}" untuk ${item.nama_pegawai}? Tanda tangan QR otomatis akan langsung muncul di surat ini setelah disetujui.`,
+    header: 'Konfirmasi Persetujuan',
+    icon: 'pi pi-question-circle',
+    acceptLabel: 'Ya, Setujui',
+    rejectLabel: 'Batal',
+    acceptProps: { severity: 'success' },
+    accept: () => doApprove(item),
+  })
+}
+
+async function doApprove(item) {
+  approving.value = item.id
+  try {
+    await http.put(`/surat-rekomendasi/${item.id}/approve`)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Surat rekomendasi disetujui, tanda tangan QR otomatis sudah muncul', life: 4000 })
+    await loadItems()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyetujui', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    approving.value = null
+  }
+}
 </script>
 
 <template>
   <div class="page-wrap">
     <div class="page-title">Arsip Surat</div>
-    <p class="page-subtitle">
+    <p class="page-subtitle" v-if="authStore.isAtasan">
+      Surat rekomendasi bawahan langsung anda. Khusus surat pegawai Sekolah/Puskesmas yang masih "Menunggu
+      Persetujuan", klik "Setujui" supaya tanda tangan QR otomatis anda muncul di surat itu -- sebelum disetujui,
+      surat tetap bisa dilihat/diunduh pegawai, hanya tanda tangannya masih kosong.
+    </p>
+    <p class="page-subtitle" v-else>
       Surat rekomendasi yang dikirim administrator untuk anda, beserta Lampiran 1 (surat permohonan perpanjangan
       kontrak yang anda ajukan sendiri ke Bupati) -- dua berkas sekaligus untuk setiap pengiriman. Klik "Lihat" untuk
       membuka langsung, atau ikon unduh untuk menyimpan sebagai PDF.
@@ -134,7 +181,7 @@ async function unduhLampiran1(item) {
     </div>
 
     <Message v-else-if="!items.length" severity="info" :closable="false">
-      Belum ada surat rekomendasi yang dikirim untuk anda.
+      {{ authStore.isAtasan ? 'Belum ada surat rekomendasi bawahan anda.' : 'Belum ada surat rekomendasi yang dikirim untuk anda.' }}
     </Message>
 
     <div v-else class="arsip-grid">
@@ -142,14 +189,31 @@ async function unduhLampiran1(item) {
         <div class="arsip-card-icon"><i class="pi pi-file-pdf"></i></div>
         <div class="arsip-card-body">
           <div class="arsip-card-title" :title="item.judul">{{ item.judul }}</div>
+          <div v-if="authStore.isAtasan" class="arsip-card-pegawai">{{ item.nama_pegawai }}</div>
           <div class="arsip-card-nomor">{{ item.nomor_surat }}</div>
           <div class="arsip-card-meta">{{ formatTanggal(item.tanggal_surat) }}</div>
+          <Tag
+            v-if="item.is_sekolah"
+            :value="item.status_approval === 'pending' ? 'Menunggu Persetujuan' : 'Disetujui'"
+            :severity="item.status_approval === 'pending' ? 'warn' : 'success'"
+            class="arsip-card-status"
+          />
         </div>
         <div class="arsip-card-actions">
           <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
           <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh Surat Rekomendasi" />
         </div>
-        <div class="arsip-card-lampiran">
+        <div v-if="authStore.isAtasan && item.is_sekolah && item.status_approval === 'pending'" class="arsip-card-approve">
+          <Button
+            label="Setujui"
+            icon="pi pi-check"
+            size="small"
+            severity="success"
+            :loading="approving === item.id"
+            @click="confirmApprove(item)"
+          />
+        </div>
+        <div v-if="!authStore.isAtasan" class="arsip-card-lampiran">
           <span class="arsip-card-lampiran-label">Lampiran 1 (Permohonan):</span>
           <Button icon="pi pi-eye" size="small" severity="secondary" text @click="lihatLampiran1(item)" title="Lihat Lampiran 1" />
           <Button icon="pi pi-download" size="small" severity="secondary" text @click="unduhLampiran1(item)" title="Unduh Lampiran 1" />
@@ -201,11 +265,31 @@ async function unduhLampiran1(item) {
   font-size: 0.78rem;
 }
 
+.arsip-card-pegawai {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--p-text-color, #1e293b);
+}
+
+.arsip-card-status {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+}
+
 .arsip-card-actions {
   display: flex;
   gap: 0.4rem;
   flex-wrap: wrap;
   margin-top: auto;
+}
+
+.arsip-card-approve {
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--p-content-border-color, #e2e8f0);
+}
+
+.arsip-card-approve :deep(.p-button) {
+  width: 100%;
 }
 
 .arsip-card-lampiran {

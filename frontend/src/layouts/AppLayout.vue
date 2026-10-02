@@ -125,6 +125,13 @@ const navSections = computed(() => {
     sections.push({ header: null, items: [{ label: 'Arsip Surat', icon: 'pi pi-inbox', to: '/arsip-surat' }] })
   }
 
+  // Kop Surat Sekolah: KHUSUS atasan (Kepala Sekolah/Kepala Puskesmas)
+  // bertugas di SEKOLAH -- mengajukan/mengatur sendiri kop surat sekolahnya
+  // untuk Lampiran 3 (lihat backend/handlers/kop_surat.go).
+  if (auth.isAtasan && auth.isSekolah) {
+    sections.push({ header: null, items: [{ label: 'Kop Surat Sekolah', icon: 'pi pi-building', to: '/kop-surat-sekolah' }] })
+  }
+
   // Template Surat: administrator/admin mengelola, pegawai/atasan bertugas
   // di SEKOLAH hanya melihat/preview (lihat auth.canViewTemplateSurat,
   // dihitung dari flag is_sekolah yang dikirim backend saat login).

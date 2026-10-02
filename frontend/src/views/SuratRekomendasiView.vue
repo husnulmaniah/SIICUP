@@ -19,6 +19,7 @@ import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
+import Tag from 'primevue/tag'
 
 // SuratRekomendasiView -- menu "Surat Rekomendasi" (khusus administrator &
 // admin): mengirim surat rekomendasi perpanjangan kontrak untuk pegawai
@@ -452,6 +453,12 @@ async function unduhExcel() {
           <div class="rekom-card-meta">{{ item.status_kepegawaian || '-' }} &middot; {{ item.unit_kerja || '-' }}</div>
           <div class="rekom-card-nomor">{{ item.nomor_surat }}</div>
           <div class="rekom-card-meta">{{ formatTanggal(item.tanggal_surat) }}</div>
+          <Tag
+            v-if="item.is_sekolah"
+            :value="item.status_approval === 'pending' ? 'Menunggu Persetujuan Atasan' : 'Disetujui Atasan'"
+            :severity="item.status_approval === 'pending' ? 'warn' : 'success'"
+            class="rekom-card-status"
+          />
         </div>
         <div class="rekom-card-actions">
           <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
@@ -666,6 +673,11 @@ async function unduhExcel() {
   font-size: 0.8rem;
   font-family: monospace;
   color: #0d9488;
+}
+
+.rekom-card-status {
+  align-self: flex-start;
+  margin-top: 0.15rem;
 }
 
 .rekom-card-actions {

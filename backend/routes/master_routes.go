@@ -223,6 +223,26 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 					i.(*models.UnitKerja).TempatKerja = &v
 					return nil
 				}},
+			// Singkatan: kode singkatan unit kerja ini (lihat komentar pada
+			// models.UnitKerja.Singkatan) -- dipakai KHUSUS nomor surat
+			// "Lampiran 3" (Surat Rekomendasi pegawai Sekolah/Puskesmas, lihat
+			// nomorSuratRekomendasiSekolahLengkap di handlers/surat_rekomendasi.go).
+			{Header: "Singkatan (untuk nomor surat, mis. SDN-LMR)", Example: "SDN-LMR",
+				Get: func(i interface{}) string {
+					uk := i.(models.UnitKerja)
+					if uk.Singkatan == nil {
+						return ""
+					}
+					return *uk.Singkatan
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						return nil
+					}
+					i.(*models.UnitKerja).Singkatan = &raw
+					return nil
+				}},
 			{Header: "Latitude", Example: "-1.976688",
 				Get: func(i interface{}) string {
 					uk := i.(models.UnitKerja)

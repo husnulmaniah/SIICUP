@@ -123,6 +123,7 @@ export const tableConfigs = {
       { field: 'unit', header: 'Unit Kerja' },
       { field: 'kecamatan.nama', header: 'Kecamatan', width: '160px' },
       { field: 'tempat_kerja', header: 'Tempat Kerja', type: 'lookup', map: tempatKerjaLabels, width: '130px' },
+      { field: 'singkatan', header: 'Singkatan', width: '120px' },
       { field: 'lat', header: 'Titik Koordinat Absen', type: 'coords', latField: 'lat', lngField: 'lng', width: '160px' },
     ],
     // filters: dropdown "Titik Koordinat Absen" (Semua/Sudah diatur/Belum
@@ -151,6 +152,12 @@ export const tableConfigs = {
         staticOptions: tempatKerjaOptions,
         optionLabel: 'label',
         hint: 'Opsional. Kalau diisi, jam kerja absen, 5/6 hari kerja, & syarat dokumen cuti pegawai di unit kerja ini otomatis mengikuti kategori ini (lebih diutamakan daripada tebakan dari kata "sekolah" pada Tempat Tugas pegawai). Kosongkan untuk memakai tebakan otomatis seperti sebelumnya.',
+      },
+      {
+        field: 'singkatan',
+        label: 'Singkatan',
+        type: 'text',
+        hint: 'Opsional, tapi SEBAIKNYA diisi untuk unit kerja Sekolah/Puskesmas -- dipakai menggantikan "Disdikbud" pada nomor Surat Rekomendasi "Lampiran 3" milik pegawai di unit kerja ini (mis. "SDN-LMR"). Bebas formatnya, tidak ditebak otomatis dari nama unit kerja.',
       },
       {
         field: 'lat',

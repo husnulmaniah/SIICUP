@@ -115,7 +115,55 @@ type UnitKerja struct {
 	JamTutupPagi   *string    `json:"jam_tutup_pagi" gorm:"column:jam_tutup_pagi;size:5"`
 	JamMulaiPulang *string    `json:"jam_mulai_pulang" gorm:"column:jam_mulai_pulang;size:5"`
 	JamTutupPulang *string    `json:"jam_tutup_pulang" gorm:"column:jam_tutup_pulang;size:5"`
+	// Singkatan: kode singkatan unit kerja ini, diisi BEBAS/manual oleh
+	// administrator (mis. "SDN-Koya", "SDN-LMR") -- polanya tidak bisa
+	// ditebak otomatis dari nama Unit Kerja, makanya berupa field terpisah.
+	// Dipakai KHUSUS pada nomor surat "Lampiran 3" (lihat
+	// buildSuratRekomendasiSekolah & nomorSuratRekomendasiSekolahLengkap di
+	// handlers/surat_rekomendasi.go) menggantikan "Disdikbud" yang dipakai
+	// nomor surat Dinas/Kantor biasa ("Lampiran 2").
+	Singkatan *string `json:"singkatan" gorm:"column:singkatan;size:30"`
+	// ------------------------------------------------------------
+	// Kop surat kustom -- KHUSUS unit kerja Sekolah/Puskesmas, diajukan
+	// SENDIRI oleh atasan langsung (Kepala Sekolah/Kepala Puskesmas, role
+	// "atasan") lewat menu "Kop Surat Sekolah" di akunnya (lihat
+	// handlers/kop_surat.go) -- LANGSUNG berlaku begitu disimpan, TANPA
+	// perlu persetujuan admin (beda dari Perubahan Data Pegawai). Dipakai
+	// menggantikan kop teks polos bawaan pada "Lampiran 3" (lihat
+	// drawLetterheadUnitKerjaKustom & buildSuratRekomendasiSekolah di
+	// handlers/surat_rekomendasi.go) begitu NamaSekolahKop sudah diisi --
+	// kalau masih kosong (belum pernah diajukan), Lampiran 3 pegawai di
+	// unit kerja ini tetap memakai kop teks polos seperti sebelumnya.
+	// ------------------------------------------------------------
+	// NamaSekolahKop: baris judul kop surat (BOLEH multi-baris, dipisah
+	// "\n" -- mis. "SD NEGERI LANUMOR\nTERAKREDITASI \"B\"") -- MENGGANTIKAN
+	// baris "PEMERINTAH KABUPATEN MOROWALI UTARA" + nama unit kerja bawaan.
+	NamaSekolahKop *string `json:"nama_sekolah_kop" gorm:"column:nama_sekolah_kop;size:300"`
+	// AlamatKopKiri/AlamatKopKanan: teks tambahan di bawah NamaSekolahKop
+	// (BOLEH multi-baris, mis. "NPSN/NSS: ...\nAlamat : ..."). Kalau
+	// KEDUANYA diisi, ditampilkan sebagai DUA KOLOM (kiri rata kiri, kanan
+	// rata kanan) terlepas dari PerataanKop -- kalau HANYA kiri yang diisi,
+	// ikut PerataanKop seperti NamaSekolahKop. AlamatKopKanan boleh kosong.
+	AlamatKopKiri  *string `json:"alamat_kop_kiri" gorm:"column:alamat_kop_kiri;size:500"`
+	AlamatKopKanan *string `json:"alamat_kop_kanan" gorm:"column:alamat_kop_kanan;size:500"`
+	// PerataanKop: "kiri"/"kanan"/"tengah" (lihat konstanta PerataanKop...
+	// di bawah) -- mengatur perataan SELURUH blok teks kop surat
+	// (NamaSekolahKop + AlamatKopKiri, kecuali saat mode dua kolom di
+	// atas). Default "tengah" kalau belum pernah diisi/kosong.
+	PerataanKop *string `json:"perataan_kop" gorm:"column:perataan_kop;size:10"`
+	// TampilkanLogoTutwuri: kalau true, logo Tut Wuri Handayani (lihat
+	// assets.TutWuriPNG) ditampilkan di sisi KANAN kop surat, berdampingan
+	// dengan logo Kabupaten yang TETAP selalu ada di kiri.
+	TampilkanLogoTutwuri bool `json:"tampilkan_logo_tutwuri" gorm:"column:tampilkan_logo_tutwuri;not null;default:false"`
 }
+
+// PerataanKopKiri/PerataanKopKanan/PerataanKopTengah: nilai valid untuk
+// UnitKerja.PerataanKop (lihat komentar field itu).
+const (
+	PerataanKopKiri   = "kiri"
+	PerataanKopKanan  = "kanan"
+	PerataanKopTengah = "tengah"
+)
 
 // ============================================================
 // SHIFT KERJA (menu Master Data -> Shift Kerja)
@@ -589,6 +637,24 @@ type SuratRekomendasi struct {
 	// tetap tercatat meskipun akun pembuatnya kelak dihapus/diubah.
 	DibuatOlehNama string    `json:"dibuat_oleh_nama" gorm:"column:dibuat_oleh_nama;size:150"`
 	CreatedAt      time.Time `json:"created_at"`
+	// StatusApproval ("disetujui"/StatusDisetuju atau "pending"/StatusPending,
+	// lihat konstanta di atas) -- KHUSUS surat pegawai bertempat tugas
+	// Sekolah/Puskesmas ("Lampiran 3", lihat buildSuratRekomendasiSekolah di
+	// handlers/surat_rekomendasi.go): begitu dikirim admin, baris baru untuk
+	// pegawai sekolah dibuat dengan status "pending" -- QR tanda tangan
+	// (Kepala Sekolah/Kepala Puskesmas = atasan langsung pegawai) BELUM
+	// ditampilkan sampai atasan langsung menyetujuinya sendiri lewat menu
+	// Arsip Surat di akunnya (lihat approveSuratRekomendasi). Baris untuk
+	// pegawai Dinas/Kantor ("Lampiran 2") TETAP langsung "disetujui" seperti
+	// sebelumnya -- tidak ada proses approval (tanda tangan Kepala Dinas
+	// tetap otomatis seperti semula, tidak terpengaruh field ini).
+	StatusApproval string `json:"status_approval" gorm:"column:status_approval;size:20;not null;default:disetujui"`
+	// IDAtasanApprove/AtasanApprove/TglApproval: siapa & kapan atasan
+	// menyetujui (diisi approveSuratRekomendasi) -- pola penamaan sama
+	// seperti models.PengajuanCuti.IDAtasanApprove/TglApproval.
+	IDAtasanApprove *uint      `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
+	AtasanApprove   *Pegawai   `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
+	TglApproval     *time.Time `json:"tgl_approval" gorm:"column:tgl_approval"`
 }
 
 func (SuratRekomendasi) TableName() string { return "surat_rekomendasi" }
