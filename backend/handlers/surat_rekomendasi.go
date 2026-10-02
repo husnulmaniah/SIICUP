@@ -565,12 +565,18 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 	penutup := "Demikian rekomendasi ini kami buat untuk dipergunakan sebagaimana mestinya."
 	y = p.JustifiedText(marginX, y, rightX-marginX, lineH, penutup) + lineH*1.8
 
-	// Blok tanda tangan: KIRI "Mengetahui" Kepala Dinas (saksi, tanpa QR),
-	// KANAN penandatangan utama (Kepala Sekolah/Kepala Puskesmas = atasan
-	// langsung pegawai, dengan QR tanda tangan otomatis) -- sesuai tata
-	// letak dua kolom pada contoh Lampiran 3.
+	// Blok tanda tangan: KIRI "Mengetahui" Kepala Dinas, KANAN penandatangan
+	// utama (Kepala Sekolah/Kepala Puskesmas = atasan langsung pegawai) --
+	// sesuai tata letak dua kolom pada contoh Lampiran 3. KEDUA kolom punya
+	// QR tanda tangan otomatis, dan KEDUANYA baru muncul BARENGAN begitu
+	// atasan langsung menyetujui surat ini lewat menu Arsip Surat (lihat
+	// approveSuratRekomendasi & kondisi item.StatusApproval di bawah) --
+	// sebelum disetujui, ruang QR kosong di KEDUA kolom, nama & NIP tetap
+	// tercetak seperti biasa.
 	sigYStart := y
 	halfW := (rightX - marginX) / 2
+	const qrSide = 110.0
+	suratSudahDisetujui := item.StatusApproval == models.StatusDisetuju
 
 	leftX := marginX
 	yL := sigYStart
@@ -583,11 +589,28 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 		p.Text(leftX, yL, jl)
 		yL += dinasJabatanSize + 2
 	}
-	yL += lineH * 3.4
+
 	dinasNamaDisp := truncateToWidth(strings.ToUpper(namaOrDash(dinasNama)), (halfW-20)*boldWidthSafety, 12)
+	dinasNameW := utils.TextWidth(dinasNamaDisp, 12)
+	dinasQrCenterX := leftX + dinasNameW/2
+	if dinasQrCenterX-qrSide/2 < leftX {
+		dinasQrCenterX = leftX + qrSide/2
+	}
+	if dinasQrCenterX+qrSide/2 > leftX+halfW-20 {
+		dinasQrCenterX = leftX + halfW - 20 - qrSide/2
+	}
+	if suratSudahDisetujui {
+		if qrPng, err := buildSignatureQRRekomendasi(item, pegawai, dinasNama, dinasJabatan, nomorLengkap); err == nil {
+			if err := doc.RegisterImage("ttd_qr_surat_rekomendasi_sekolah_dinas", qrPng); err == nil {
+				p.Image("ttd_qr_surat_rekomendasi_sekolah_dinas", dinasQrCenterX-qrSide/2, yL+4, qrSide, qrSide)
+			}
+		}
+	}
+	yL += qrSide + 14
+
 	p.SetFont(true, 12)
 	p.Text(leftX, yL, dinasNamaDisp)
-	p.Line(leftX, yL+3, leftX+utils.TextWidth(dinasNamaDisp, 12), yL+3)
+	p.Line(leftX, yL+3, leftX+dinasNameW, yL+3)
 	yL += 16
 	p.SetFont(false, 12)
 	p.Text(leftX, yL, "NIP: "+namaOrDash(dinasNip)+".")
@@ -610,7 +633,6 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 	signerNamaDisp := truncateToWidth(strings.ToUpper(namaOrDash(signerNama)), sigColW*boldWidthSafety, 12)
 	nameW := utils.TextWidth(signerNamaDisp, 12)
 
-	const qrSide = 110.0
 	qrCenterX := sigX + nameW/2
 	if qrCenterX-qrSide/2 < sigX {
 		qrCenterX = sigX + qrSide/2
@@ -621,9 +643,10 @@ func buildSuratRekomendasiSekolah(item models.SuratRekomendasi, dinasNama, dinas
 	// QR tanda tangan HANYA ditampilkan kalau atasan langsung (Kepala
 	// Sekolah/Kepala Puskesmas) SUDAH menyetujui lewat menu Arsip Surat di
 	// akunnya (lihat approveSuratRekomendasi) -- sebelum disetujui, surat
-	// ini TETAP bisa dilihat/diunduh, hanya saja ruang QR-nya dikosongkan
-	// (Nama & NIP atasan tetap tercetak seperti biasa di bawahnya).
-	if atasan != nil && strings.TrimSpace(signerNip) != "" && item.StatusApproval == models.StatusDisetuju {
+	// ini TETAP bisa dilihat/diunduh, hanya saja ruang QR-nya dikosongkan di
+	// KEDUA kolom (Kepala Dinas & Kepala Sekolah, lihat suratSudahDisetujui
+	// di atas) -- Nama & NIP tetap tercetak seperti biasa di bawahnya.
+	if atasan != nil && strings.TrimSpace(signerNip) != "" && suratSudahDisetujui {
 		if qrPng, err := buildSignatureQRRekomendasi(item, pegawai, signerNama, signerJabatan, nomorLengkap); err == nil {
 			if err := doc.RegisterImage("ttd_qr_surat_rekomendasi_sekolah", qrPng); err == nil {
 				p.Image("ttd_qr_surat_rekomendasi_sekolah", qrCenterX-qrSide/2, yR+4, qrSide, qrSide)
