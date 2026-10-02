@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 
 import InputText from 'primevue/inputtext'
@@ -20,6 +21,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 // lihat buildSuratRekomendasiSekolah di backend/handlers/surat_rekomendasi.go).
 
 const toast = useToast()
+const confirm = useConfirm()
 const loading = ref(true)
 const saving = ref(false)
 
@@ -37,6 +39,82 @@ const perataanOptions = [
   { label: 'Rata Kanan', value: 'kanan' },
 ]
 
+// ---- logo kustom kiri/kanan: sekolah boleh upload logo sendiri untuk
+// MENGGANTIKAN logo bawaan pada slot yang sama (kiri = logo Kabupaten,
+// SELALU tampil; kanan = kosong/Tut Wuri) -- lihat GET/POST/DELETE
+// /api/kop-surat-sekolah/logo/{sisi} di backend/handlers/kop_surat.go.
+// Pola upload/preview/hapusnya SAMA seperti foto profil & tanda tangan di
+// ProfilSayaView.vue (upload lewat FormData, preview lewat blob URL).
+const logoAda = ref({ kiri: false, kanan: false })
+const logoUrl = ref({ kiri: '', kanan: '' })
+const logoUploading = ref({ kiri: false, kanan: false })
+const logoKiriFileInputRef = ref(null)
+const logoKananFileInputRef = ref(null)
+
+function revokeLogoUrl(sisi) {
+  if (logoUrl.value[sisi]) {
+    window.URL.revokeObjectURL(logoUrl.value[sisi])
+    logoUrl.value[sisi] = ''
+  }
+}
+
+async function refreshLogo(sisi) {
+  revokeLogoUrl(sisi)
+  if (!logoAda.value[sisi]) return
+  try {
+    const res = await http.get(`/kop-surat-sekolah/logo/${sisi}`, { responseType: 'blob' })
+    logoUrl.value[sisi] = window.URL.createObjectURL(res.data)
+  } catch (e) {
+    // gagal muat pratinjau -- biarkan kosong, tombol Hapus tetap muncul
+    // karena logoAda tetap mengikuti data dari server
+  }
+}
+
+async function onLogoFileChosen(sisi, e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file) return
+  logoUploading.value[sisi] = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    await http.post(`/kop-surat-sekolah/logo/${sisi}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    logoAda.value[sisi] = true
+    await refreshLogo(sisi)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `Logo ${sisi} berhasil disimpan`, life: 3000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal upload logo', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    logoUploading.value[sisi] = false
+  }
+}
+
+function confirmHapusLogo(sisi) {
+  confirm.require({
+    message: `Hapus logo ${sisi} kustom ini? Kop surat akan kembali memakai logo bawaan sistem di sisi ${sisi}.`,
+    header: 'Konfirmasi Hapus Logo',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await http.delete(`/kop-surat-sekolah/logo/${sisi}`)
+        logoAda.value[sisi] = false
+        revokeLogoUrl(sisi)
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: `Logo ${sisi} berhasil dihapus`, life: 3000 })
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      }
+    },
+  })
+}
+
+onUnmounted(() => {
+  revokeLogoUrl('kiri')
+  revokeLogoUrl('kanan')
+})
+
 async function load() {
   loading.value = true
   try {
@@ -49,6 +127,9 @@ async function load() {
     perataanKop.value = d.perataan_kop || 'tengah'
     tampilkanLogoTutwuri.value = !!d.tampilkan_logo_tutwuri
     logoTutwuriTersedia.value = !!d.logo_tutwuri_tersedia
+    logoAda.value.kiri = !!d.logo_kiri_ada
+    logoAda.value.kanan = !!d.logo_kanan_ada
+    await Promise.all([refreshLogo('kiri'), refreshLogo('kanan')])
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
@@ -141,13 +222,70 @@ onMounted(load)
 
         <div class="field">
           <div style="display: flex; align-items: center; gap: 0.5rem">
-            <Checkbox v-model="tampilkanLogoTutwuri" binary inputId="logoTutwuri" />
+            <Checkbox v-model="tampilkanLogoTutwuri" binary inputId="logoTutwuri" :disabled="logoAda.kanan" />
             <label for="logoTutwuri">Tampilkan logo Tut Wuri Handayani di sisi kanan kop surat</label>
           </div>
-          <small v-if="!logoTutwuriTersedia" class="field-hint">
+          <small v-if="logoAda.kanan" class="field-hint">
+            Sisi kanan sedang memakai logo kustom yang anda upload sendiri (lihat di bawah) -- hapus logo kustom itu
+            dulu kalau ingin memakai Tut Wuri Handayani.
+          </small>
+          <small v-else-if="!logoTutwuriTersedia" class="field-hint">
             Berkas logo Tut Wuri Handayani belum ditambahkan ke sistem -- centang ini tetap bisa disimpan, logonya
             akan otomatis tampil begitu berkasnya ditambahkan oleh pengelola sistem.
           </small>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Logo Kustom Kop Surat (opsional)</label>
+          <small class="field-hint">
+            Upload logo anda sendiri untuk MENGGANTIKAN logo bawaan pada sisi yang sama -- sisi kiri bawaannya logo
+            Kabupaten (selalu tampil), sisi kanan bawaannya kosong/Tut Wuri Handayani seperti di atas.
+          </small>
+          <div class="logo-upload-row">
+            <div class="logo-upload-slot">
+              <div class="logo-upload-preview">
+                <img v-if="logoUrl.kiri" :src="logoUrl.kiri" alt="Logo kiri kustom" />
+                <i v-else class="pi pi-image"></i>
+              </div>
+              <div>
+                <div style="font-weight: 600; margin-bottom: 0.3rem; font-size: 0.85rem">Logo Kiri</div>
+                <input ref="logoKiriFileInputRef" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="(e) => onLogoFileChosen('kiri', e)" />
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap">
+                  <Button
+                    :label="logoAda.kiri ? 'Ganti' : 'Upload'"
+                    icon="pi pi-upload"
+                    size="small"
+                    outlined
+                    :loading="logoUploading.kiri"
+                    @click="logoKiriFileInputRef?.click()"
+                  />
+                  <Button v-if="logoAda.kiri" label="Hapus" icon="pi pi-trash" size="small" severity="danger" text @click="confirmHapusLogo('kiri')" />
+                </div>
+              </div>
+            </div>
+            <div class="logo-upload-slot">
+              <div class="logo-upload-preview">
+                <img v-if="logoUrl.kanan" :src="logoUrl.kanan" alt="Logo kanan kustom" />
+                <i v-else class="pi pi-image"></i>
+              </div>
+              <div>
+                <div style="font-weight: 600; margin-bottom: 0.3rem; font-size: 0.85rem">Logo Kanan</div>
+                <input ref="logoKananFileInputRef" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="(e) => onLogoFileChosen('kanan', e)" />
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap">
+                  <Button
+                    :label="logoAda.kanan ? 'Ganti' : 'Upload'"
+                    icon="pi pi-upload"
+                    size="small"
+                    outlined
+                    :loading="logoUploading.kanan"
+                    @click="logoKananFileInputRef?.click()"
+                  />
+                  <Button v-if="logoAda.kanan" label="Hapus" icon="pi pi-trash" size="small" severity="danger" text @click="confirmHapusLogo('kanan')" />
+                </div>
+              </div>
+            </div>
+          </div>
+          <small class="field-hint">Format JPG atau PNG, latar transparan (PNG) akan dipertahankan. Berlaku langsung setelah diupload, tanpa perlu klik "Simpan".</small>
         </div>
 
         <div>
@@ -159,10 +297,12 @@ onMounted(load)
         <div class="kop-preview-label">Pratinjau Kop Surat</div>
         <div class="kop-preview-box">
           <div class="kop-preview-logo kiri">
-            <i class="pi pi-shield"></i>
+            <img v-if="logoUrl.kiri" :src="logoUrl.kiri" alt="Logo kiri" />
+            <i v-else class="pi pi-shield"></i>
           </div>
-          <div v-if="tampilkanLogoTutwuri" class="kop-preview-logo kanan">
-            <i class="pi pi-shield"></i>
+          <div v-if="logoAda.kanan || tampilkanLogoTutwuri" class="kop-preview-logo kanan">
+            <img v-if="logoUrl.kanan" :src="logoUrl.kanan" alt="Logo kanan" />
+            <i v-else class="pi pi-shield"></i>
           </div>
           <div class="kop-preview-text" :style="{ textAlign: previewAlign }">
             <div v-for="(line, i) in previewTitleLines" :key="'t' + i" class="kop-preview-title">{{ line }}</div>
@@ -181,8 +321,9 @@ onMounted(load)
           <div class="kop-preview-rule"></div>
         </div>
         <small class="field-hint">
-          Pratinjau ini hanya ilustrasi kasar tata letak -- logo di atas berupa ikon pengganti, pada PDF sebenarnya
-          berupa logo Kabupaten (kiri, selalu tampil) dan logo Tut Wuri Handayani (kanan, kalau dicentang).
+          Pratinjau ini hanya ilustrasi kasar tata letak. Kalau belum ada logo kustom yang diupload, logo di atas
+          berupa ikon pengganti -- pada PDF sebenarnya berupa logo Kabupaten (kiri, selalu tampil) dan logo Tut Wuri
+          Handayani (kanan, kalau dicentang).
         </small>
       </div>
     </div>
@@ -261,6 +402,45 @@ onMounted(load)
 
 .kop-preview-logo.kanan {
   right: 0;
+}
+
+.kop-preview-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.logo-upload-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.logo-upload-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.logo-upload-preview {
+  width: 48px;
+  height: 60px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  color: #64748b;
+  border: 1px dashed var(--p-content-border-color, #cbd5e1);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--p-content-background, #fff);
+}
+
+.logo-upload-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }
 
 .kop-preview-text {

@@ -295,18 +295,32 @@ func buildSuratRekomendasiPppk(item models.SuratRekomendasi, signerNama, signerN
 func drawLetterheadUnitKerjaKustom(doc *utils.PDFDoc, p *utils.PDFPage, marginX, rightX float64, unitKerjaNama string, uk *models.UnitKerja) float64 {
 	const logoW, logoH = 44.0, 58.0
 
+	// Logo KIRI: bawaannya logo Kabupaten (assets.LogoPNG, SELALU tampil) --
+	// diganti logo kustom milik sekolah sendiri (UnitKerja.LogoKiriFile,
+	// lihat handlers/kop_surat.go) begitu sudah diupload lewat menu "Kop
+	// Surat Sekolah".
+	logoKiriBytes := assets.LogoPNG
+	if uk != nil && len(uk.LogoKiriFile) > 0 {
+		logoKiriBytes = uk.LogoKiriFile
+	}
 	hasLogoKiri := false
-	if err := doc.RegisterImage("logo_kop_sekolah_kiri", assets.LogoPNG); err == nil {
+	if err := doc.RegisterImage("logo_kop_sekolah_kiri", logoKiriBytes); err == nil {
 		p.Image("logo_kop_sekolah_kiri", marginX, 20, logoW, logoH)
 		hasLogoKiri = true
 	}
-	// Logo Tut Wuri Handayani OPSIONAL di kanan -- lihat komentar
-	// assets.TutWuriPNG: berkasnya belum ditambahkan, jadi untuk sementara
-	// len(...) selalu 0 & logo ini belum pernah benar-benar tergambar
-	// sampai berkasnya ditambahkan ke package assets.
+	// Logo KANAN: OPSIONAL -- kosong kecuali sekolah mengupload logo
+	// kustomnya sendiri (UnitKerja.LogoKananFile, MENDAHULUI/override Tut
+	// Wuri terlepas dari status centang TampilkanLogoTutwuri) atau
+	// mencentang "Tampilkan logo Tut Wuri Handayani" (assets.TutWuriPNG).
 	hasLogoKanan := false
-	if uk != nil && uk.TampilkanLogoTutwuri && len(assets.TutWuriPNG) > 0 {
-		if err := doc.RegisterImage("logo_kop_sekolah_kanan", assets.TutWuriPNG); err == nil {
+	logoKananBytes := []byte(nil)
+	if uk != nil && len(uk.LogoKananFile) > 0 {
+		logoKananBytes = uk.LogoKananFile
+	} else if uk != nil && uk.TampilkanLogoTutwuri && len(assets.TutWuriPNG) > 0 {
+		logoKananBytes = assets.TutWuriPNG
+	}
+	if len(logoKananBytes) > 0 {
+		if err := doc.RegisterImage("logo_kop_sekolah_kanan", logoKananBytes); err == nil {
 			p.Image("logo_kop_sekolah_kanan", rightX-logoW, 20, logoW, logoH)
 			hasLogoKanan = true
 		}

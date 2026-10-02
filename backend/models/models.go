@@ -155,6 +155,26 @@ type UnitKerja struct {
 	// assets.TutWuriPNG) ditampilkan di sisi KANAN kop surat, berdampingan
 	// dengan logo Kabupaten yang TETAP selalu ada di kiri.
 	TampilkanLogoTutwuri bool `json:"tampilkan_logo_tutwuri" gorm:"column:tampilkan_logo_tutwuri;not null;default:false"`
+	// LogoKiriNama/LogoKiriFile & LogoKananNama/LogoKananFile: logo KUSTOM
+	// opsional yang diupload SENDIRI oleh sekolah lewat menu "Kop Surat
+	// Sekolah" (lihat uploadLogoKopSurat/getLogoKopSurat/hapusLogoKopSurat
+	// di handlers/kop_surat.go) -- kalau diisi, MENGGANTIKAN logo bawaan
+	// pada slot yang sama di kop surat Lampiran 3 (lihat
+	// drawLetterheadUnitKerjaKustom di handlers/surat_rekomendasi.go):
+	//   - slot KIRI: bawaannya logo Kabupaten (assets.LogoPNG, SELALU
+	//     tampil) -- diganti logo kustom begitu LogoKiriFile diisi.
+	//   - slot KANAN: bawaannya KOSONG, kecuali TampilkanLogoTutwuri
+	//     dicentang (lalu tampil logo Tut Wuri Handayani) -- logo kustom di
+	//     LogoKananFile, kalau diisi, MENDAHULUI (override) Tut Wuri,
+	//     terlepas dari status centang TampilkanLogoTutwuri.
+	// Disimpan sebagai PNG (alpha/transparan dipertahankan, lihat
+	// resizeImageBoxAlpha di handlers/pegawai.go) apa adanya tanpa proses
+	// persetujuan admin -- sama seperti field kop surat lain di atas,
+	// berlaku langsung begitu disimpan.
+	LogoKiriNama  string `json:"logo_kiri_nama" gorm:"column:logo_kiri_nama;size:255"`
+	LogoKiriFile  []byte `json:"-" gorm:"column:logo_kiri_file;type:bytea"`
+	LogoKananNama string `json:"logo_kanan_nama" gorm:"column:logo_kanan_nama;size:255"`
+	LogoKananFile []byte `json:"-" gorm:"column:logo_kanan_file;type:bytea"`
 	// ------------------------------------------------------------
 	// IDAtasanLangsung/AtasanLangsung: "Atasan Langsung" BERSAMA untuk
 	// seluruh pegawai di unit kerja ini (mis. Kepala Sekolah untuk satu
