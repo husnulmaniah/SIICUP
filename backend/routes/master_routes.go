@@ -77,6 +77,13 @@ func syncAtasanUnitKerja(db *gorm.DB, old *models.UnitKerja, item *models.UnitKe
 	db.Model(&models.Pegawai{}).
 		Where("id_unit_kerja = ? AND id <> ?", item.ID, *newID).
 		Update("id_atasan", *newID)
+	// Akun login pegawai yang baru ditetapkan jadi Atasan Langsung ini ikut
+	// otomatis dinaikkan Role-nya jadi "atasan" (kalau masih "pegawai") --
+	// lihat komentar lengkap pada handlers.PromoteAkunKeAtasan untuk alasannya
+	// (field Atasan Langsung di atas cuma mengatur relasi DATA siapa bawahan
+	// siapa, sedangkan menu "Kop Surat Sekolah" & tombol approve di "Arsip
+	// Surat" dikunci terpisah oleh Role akun login).
+	handlers.PromoteAkunKeAtasan(db, *newID)
 }
 
 // jamUnitKerjaColumn membuat satu kolom Excel untuk salah satu dari kelima

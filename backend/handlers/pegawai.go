@@ -999,6 +999,42 @@ func autoFillAtasanDariUnitKerja(db *gorm.DB, item *models.Pegawai) {
 	item.IDAtasan = uk.IDAtasanLangsung
 }
 
+// PromoteAkunKeAtasan menaikkan Role akun login (models.User) yang terhubung
+// ke seorang pegawai (lewat User.IDPegawai) jadi "atasan" -- SATU ARAH, hanya
+// kalau Role akun itu SAAT INI masih "pegawai" (akun yang sudah
+// administrator/admin/atasan TIDAK disentuh). Dipanggil setiap kali seorang
+// pegawai BARU ditetapkan sebagai Atasan Langsung -- baik lewat field Atasan
+// Langsung di Unit Kerja (lihat syncAtasanUnitKerja di
+// routes/master_routes.go, package terpisah makanya fungsi ini diekspor)
+// maupun lewat field Atasan Langsung per-pegawai di bawah
+// (createPegawai/updatePegawai/importPegawai) -- supaya akun login atasan
+// tsb otomatis bisa akses menu "Kop Surat Sekolah" & tombol approve di
+// "Arsip Surat" (lihat frontend auth.isAtasan & canApproveSuratRekomendasi di
+// handlers/surat_rekomendasi.go, keduanya mensyaratkan Role akun PERSIS
+// "atasan" -- terpisah dari relasi data Pegawai.IDAtasan yang cuma menentukan
+// SIAPA bawahan siapa) -- tanpa admin perlu ingat mengubah Role-nya manual
+// lagi satu-satu di menu Akun Pengguna.
+//
+// SENGAJA tidak pernah menurunkan balik ke "pegawai" secara otomatis (mis.
+// saat atasan diganti/dihapus dari Unit Kerja atau dari pegawai ybs) -- itu
+// tetap keputusan manual admin lewat menu Akun Pengguna, supaya tidak ada
+// akun yang tiba-tiba kehilangan akses tanpa sepengetahuan admin. Aman
+// dipanggil berulang kali (no-op kalau akun tidak ada/sudah bukan "pegawai").
+func PromoteAkunKeAtasan(db *gorm.DB, idPegawai uint) {
+	var user models.User
+	if err := db.Preload("Role").Where("id_pegawai = ?", idPegawai).First(&user).Error; err != nil {
+		return
+	}
+	if user.Role == nil || !strings.EqualFold(user.Role.Role, "pegawai") {
+		return
+	}
+	var atasanRole models.Role
+	if err := db.Where("role ILIKE ?", "atasan").First(&atasanRole).Error; err != nil {
+		return
+	}
+	db.Model(&models.User{}).Where("id = ?", user.ID).Update("id_role", atasanRole.ID)
+}
+
 func createPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p pegawaiPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -1018,6 +1054,9 @@ func createPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if err := db.Create(&item).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan data (NIP mungkin sudah dipakai): "+err.Error())
 		return
+	}
+	if item.IDAtasan != nil {
+		PromoteAkunKeAtasan(db, *item.IDAtasan)
 	}
 	utils.Created(w, "pegawai berhasil ditambahkan", item)
 }
@@ -1042,6 +1081,9 @@ func updatePegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal memperbarui data: "+err.Error())
 		return
+	}
+	if item.IDAtasan != nil {
+		PromoteAkunKeAtasan(db, *item.IDAtasan)
 	}
 	utils.Success(w, "pegawai berhasil diperbarui", item)
 }
@@ -1184,6 +1226,9 @@ func importPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		if err := db.Create(&item).Error; err != nil {
 			rowErrors = append(rowErrors, rowError{Row: i + 2, Errors: []string{"gagal simpan: " + err.Error()}})
 			continue
+		}
+		if item.IDAtasan != nil {
+			PromoteAkunKeAtasan(db, *item.IDAtasan)
 		}
 		successCount++
 	}
