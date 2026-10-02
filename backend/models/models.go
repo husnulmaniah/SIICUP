@@ -667,6 +667,16 @@ func (PengajuanDokumen) TableName() string { return "pengajuan_dokumen" }
 // diisi manual lagi sekali (karena belum ada baris ber-Tahun itu),
 // menandakan dimulainya rentang nomor baru untuk tahun tersebut.
 //
+// KHUSUS pegawai Sekolah/Puskesmas ("Lampiran 3", lihat isSekolahPegawai
+// & nomorSuratRekomendasiSekolahLengkap di handlers/surat_rekomendasi.go):
+// baris barunya SELALU disimpan dengan NomorUrut = 0 -- SAMA SEKALI tidak
+// ikut memakai/menggeser nomor urut gabungan Dinas, karena nomor surat
+// Lampiran 3 memang tidak menampilkan nomor urut itu (sengaja dikosongkan
+// "......", penomoran surat keluar sekolah adalah urusan administrasi
+// sekolah sendiri). Ini supaya nomor urut Dinas yang dibagikan ke pegawai
+// Dinas/Kantor ("Lampiran 2") tetap berurutan rapat, tidak berlubang hanya
+// karena ikut dikirim bersamaan dengan pegawai sekolah dalam satu batch.
+//
 // Data pribadi pegawai (nama, NIP, pangkat/gol, jabatan, unit kerja,
 // status kepegawaian, TMT) TIDAK diduplikasi di sini -- selalu diambil
 // LIVE lewat relasi IDPegawai saat surat ditampilkan/dicetak (sama pola
@@ -717,6 +727,18 @@ type SuratRekomendasi struct {
 	IDAtasanApprove *uint      `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
 	AtasanApprove   *Pegawai   `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
 	TglApproval     *time.Time `json:"tgl_approval" gorm:"column:tgl_approval"`
+	// TampilKePegawai: administrator bisa menyembunyikan surat ini dari menu
+	// Arsip Surat akun PEGAWAI (lihat updateTampilSuratRekomendasi &
+	// listSuratRekomendasi di handlers/surat_rekomendasi.go) -- berguna
+	// KHUSUS surat sekolah ("Lampiran 3") yang administrasinya ditangani
+	// sekolah sendiri, jadi tidak semua surat perlu langsung tampil ke
+	// pegawai. TIDAK memengaruhi akses akun ATASAN (tetap selalu melihat
+	// surat bawahannya, perlu untuk menyetujui) maupun administrator/admin
+	// (selalu melihat semua surat apa adanya, lengkap dengan kontrol
+	// tampil/sembunyikan ini). Default true (tampil) supaya perilaku lama
+	// -- surat langsung muncul begitu dikirim -- tidak berubah kalau
+	// administrator tidak pernah menyentuh kontrol ini.
+	TampilKePegawai bool `json:"tampil_ke_pegawai" gorm:"column:tampil_ke_pegawai;not null;default:true"`
 }
 
 func (SuratRekomendasi) TableName() string { return "surat_rekomendasi" }

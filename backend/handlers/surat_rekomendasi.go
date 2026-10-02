@@ -861,19 +861,26 @@ type suratRekomendasiOut struct {
 	StatusApproval    string `json:"status_approval"`
 	AtasanApproveNama string `json:"atasan_approve_nama,omitempty"`
 	TglApproval       string `json:"tgl_approval,omitempty"`
+	// TampilKePegawai: lihat komentar field senama di models.SuratRekomendasi
+	// -- hanya dipakai administrator (lewat updateTampilSuratRekomendasi) untuk
+	// menampilkan/menyembunyikan toggle di menu "Surat Rekomendasi"; TIDAK
+	// pernah false pada data yang diterima pegawai sendiri (sudah difilter
+	// listSuratRekomendasi).
+	TampilKePegawai bool `json:"tampil_ke_pegawai"`
 }
 
 func toSuratRekomendasiOut(item models.SuratRekomendasi) suratRekomendasiOut {
 	out := suratRekomendasiOut{
-		ID:             item.ID,
-		Judul:          item.Judul,
-		NomorUrut:      item.NomorUrut,
-		Tahun:          item.Tahun,
-		TanggalSurat:   item.TanggalSurat.Format("2006-01-02"),
-		IDPegawai:      item.IDPegawai,
-		DibuatOlehNama: item.DibuatOlehNama,
-		CreatedAt:      item.CreatedAt.Format(time.RFC3339),
-		StatusApproval: item.StatusApproval,
+		ID:              item.ID,
+		Judul:           item.Judul,
+		NomorUrut:       item.NomorUrut,
+		Tahun:           item.Tahun,
+		TanggalSurat:    item.TanggalSurat.Format("2006-01-02"),
+		IDPegawai:       item.IDPegawai,
+		DibuatOlehNama:  item.DibuatOlehNama,
+		CreatedAt:       item.CreatedAt.Format(time.RFC3339),
+		StatusApproval:  item.StatusApproval,
+		TampilKePegawai: item.TampilKePegawai,
 	}
 	if item.AtasanApprove != nil {
 		out.AtasanApproveNama = item.AtasanApprove.Nama
@@ -1006,7 +1013,13 @@ func listSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			utils.Success(w, "ok", []suratRekomendasiOut{})
 			return
 		}
-		base = base.Where("surat_rekomendasi.id_pegawai = ?", *claims.IDPegawai)
+		// TampilKePegawai: administrator bisa menyembunyikan surat tertentu
+		// (khususnya surat sekolah "Lampiran 3") dari menu Arsip Surat milik
+		// pegawai sendiri -- lihat komentar field di models.SuratRekomendasi &
+		// updateTampilSuratRekomendasi di bawah. HANYA berlaku di cabang
+		// pegawai ini -- akun atasan & administrator/admin di atas tetap
+		// melihat semua surat apa adanya.
+		base = base.Where("surat_rekomendasi.id_pegawai = ? AND surat_rekomendasi.tampil_ke_pegawai = ?", *claims.IDPegawai, true)
 	}
 
 	var items []models.SuratRekomendasi
@@ -1215,16 +1228,25 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	// nomor urut awal HANYA perlu ditanyakan kalau memang ada pegawai BARU
-	// (belum punya surat tahun ini) yang bakal butuh nomor baru -- kalau
-	// SEMUA yang dipilih ternyata sudah punya surat tahun ini (murni
-	// kirim ulang/perbarui), tidak ada nomor baru yang dipakai sama sekali.
-	adaYangBaru := false
-	jumlahBaru := 0
+	// DINAS/KANTOR (belum punya surat tahun ini) yang bakal butuh nomor
+	// baru -- pegawai Sekolah/Puskesmas ("Lampiran 3") BARU TIDAK PERNAH
+	// butuh nomor urut sama sekali (lihat komentar NomorUrut di
+	// models.SuratRekomendasi & nomorSuratRekomendasiSekolahLengkap di
+	// atas), jadi tidak ikut dihitung di sini -- kalau SEMUA yang dipilih
+	// ternyata sudah punya surat tahun ini, ATAU semuanya pegawai sekolah
+	// baru, tidak ada nomor baru yang dipakai sama sekali.
+	adaYangBaruDinas := false
+	jumlahBaruDinas := 0
 	for _, id := range idList {
-		if _, ada := existingByPegawai[id]; !ada {
-			adaYangBaru = true
-			jumlahBaru++
+		if _, ada := existingByPegawai[id]; ada {
+			continue
 		}
+		pg, ok := pegawaiByID[id]
+		if ok && isSekolahPegawai(pg) {
+			continue
+		}
+		adaYangBaruDinas = true
+		jumlahBaruDinas++
 	}
 
 	var maxNomor int
@@ -1236,7 +1258,7 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// (wajib) ATAU karena admin SENGAJA memilih mode "mulai dari nomor
 	// baru" di tengah tahun -- nomor itu dipakai sebagai override.
 	nomorMulai := maxNomor + 1
-	if adaYangBaru {
+	if adaYangBaruDinas {
 		if p.NomorUrutAwal != nil {
 			if *p.NomorUrutAwal < 1 {
 				utils.Error(w, http.StatusBadRequest, "nomor urut awal tidak valid")
@@ -1251,10 +1273,11 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 	// bentrok nomor urut: kalau admin meng-override nomor awal (bukan
 	// kelanjutan otomatis), pastikan rentang nomor yang akan dipakai untuk
-	// pegawai BARU di batch ini (nomorMulai..nomorMulai+jumlahBaru-1) belum
-	// dipakai surat lain milik pegawai manapun di tahun yang sama --
-	// mencegah dua surat berbeda terbit dengan nomor urut sama persis.
-	if p.NomorUrutAwal != nil && jumlahBaru > 0 {
+	// pegawai Dinas/Kantor BARU di batch ini
+	// (nomorMulai..nomorMulai+jumlahBaruDinas-1) belum dipakai surat lain
+	// milik pegawai manapun di tahun yang sama -- mencegah dua surat
+	// berbeda terbit dengan nomor urut sama persis.
+	if p.NomorUrutAwal != nil && jumlahBaruDinas > 0 {
 		var nomorDipakai []int
 		db.Model(&models.SuratRekomendasi{}).Where("tahun = ?", tahun).Pluck("nomor_urut", &nomorDipakai)
 		dipakaiSet := make(map[int]bool, len(nomorDipakai))
@@ -1262,7 +1285,7 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			dipakaiSet[n] = true
 		}
 		var bentrok []string
-		for i := 0; i < jumlahBaru; i++ {
+		for i := 0; i < jumlahBaruDinas; i++ {
 			if n := nomorMulai + i; dipakaiSet[n] {
 				bentrok = append(bentrok, strconv.Itoa(n))
 			}
@@ -1279,7 +1302,7 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		dibuatOleh = claims.Username
 	}
 
-	var dibuat, diperbarui int
+	var dibuat, dibuatSekolah, diperbarui int
 	var dilewati []string
 	nomorBerjalan := nomorMulai
 	txErr := db.Transaction(func(tx *gorm.DB) error {
@@ -1305,24 +1328,35 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			// sebelum QR tanda tangannya tampil (lihat buildSuratRekomendasiSekolah
 			// & approveSuratRekomendasi). Pegawai Dinas/Kantor ("Lampiran 2")
 			// tetap langsung "disetujui" seperti sebelumnya, tidak berubah.
+			//
+			// NomorUrut: pegawai sekolah TIDAK memakai nomor urut gabungan
+			// Dinas sama sekali (lihat komentar NomorUrut di
+			// models.SuratRekomendasi) -- disimpan 0, nomorBerjalan TIDAK
+			// ikut bertambah untuk baris ini.
 			statusApproval := models.StatusDisetuju
-			if isSekolahPegawai(pg) {
+			nomorBarisIni := 0
+			isSekolah := isSekolahPegawai(pg)
+			if isSekolah {
 				statusApproval = models.StatusPending
+				dibuatSekolah++
+			} else {
+				nomorBarisIni = nomorBerjalan
+				nomorBerjalan++
 			}
 			row := models.SuratRekomendasi{
-				IDPegawai:      id,
-				Judul:          judul,
-				NomorUrut:      nomorBerjalan,
-				Tahun:          tahun,
-				TanggalSurat:   tanggalSurat,
-				DibuatOlehNama: dibuatOleh,
-				StatusApproval: statusApproval,
+				IDPegawai:       id,
+				Judul:           judul,
+				NomorUrut:       nomorBarisIni,
+				Tahun:           tahun,
+				TanggalSurat:    tanggalSurat,
+				DibuatOlehNama:  dibuatOleh,
+				StatusApproval:  statusApproval,
+				TampilKePegawai: true,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return fmt.Errorf("gagal menyimpan surat untuk %s: %w", pg.Nama, err)
 			}
 			dibuat++
-			nomorBerjalan++
 		}
 		return nil
 	})
@@ -1335,9 +1369,13 @@ func buatSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
+	dibuatDinas := dibuat - dibuatSekolah
 	var bagianPesan []string
-	if dibuat > 0 {
-		bagianPesan = append(bagianPesan, fmt.Sprintf("%d surat baru dikirim (nomor urut %d-%d/%d)", dibuat, nomorMulai, nomorBerjalan-1, tahun))
+	if dibuatDinas > 0 {
+		bagianPesan = append(bagianPesan, fmt.Sprintf("%d surat baru dikirim (nomor urut %d-%d/%d)", dibuatDinas, nomorMulai, nomorBerjalan-1, tahun))
+	}
+	if dibuatSekolah > 0 {
+		bagianPesan = append(bagianPesan, fmt.Sprintf("%d surat baru dikirim ke sekolah/puskesmas (tanpa nomor urut Dinas)", dibuatSekolah))
 	}
 	if diperbarui > 0 {
 		bagianPesan = append(bagianPesan, fmt.Sprintf("%d surat diperbarui (sudah pernah dikirim tahun %d -- nomor & tanggal surat lama dipertahankan)", diperbarui, tahun))
@@ -1361,6 +1399,43 @@ func hapusSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 		return
 	}
 	utils.Success(w, "surat rekomendasi berhasil dihapus", nil)
+}
+
+type updateTampilSuratRekomendasiPayload struct {
+	Tampil bool `json:"tampil"`
+}
+
+// updateTampilSuratRekomendasi menangani PUT /api/surat-rekomendasi/{id}/
+// tampil -- KHUSUS administrator/admin, menyalakan/mematikan apakah surat
+// ini tampil di menu Arsip Surat akun PEGAWAI penerimanya (lihat field
+// TampilKePegawai di models.SuratRekomendasi & filter di
+// listSuratRekomendasi). Berguna untuk surat sekolah ("Lampiran 3") yang
+// administrasinya ditangani sekolah sendiri -- administrator bisa memilih
+// surat mana yang sudah siap ditampilkan ke pegawai. TIDAK memengaruhi
+// akses akun atasan (tetap selalu melihat bawahannya, perlu untuk
+// menyetujui) maupun hak admin sendiri untuk melihat/mengubahnya lagi.
+func updateTampilSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	var p updateTampilSuratRekomendasiPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+		return
+	}
+	var item models.SuratRekomendasi
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "surat rekomendasi tidak ditemukan")
+		return
+	}
+	if err := db.Model(&item).Update("tampil_ke_pegawai", p.Tampil).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal memperbarui status tampil: "+err.Error())
+		return
+	}
+	suratRekomendasiPreload(db).First(&item, item.ID)
+	msg := "surat rekomendasi ditampilkan kembali ke akun pegawai"
+	if !p.Tampil {
+		msg = "surat rekomendasi disembunyikan dari akun pegawai"
+	}
+	utils.Success(w, msg, toSuratRekomendasiOut(item))
 }
 
 // exportSuratRekomendasi menangani GET /api/surat-rekomendasi/export?
@@ -1583,6 +1658,7 @@ func RegisterSuratRekomendasiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/surat-rekomendasi/export", manage(func(w http.ResponseWriter, r *http.Request) { exportSuratRekomendasi(w, r, db) }))
 	mux.Handle("POST /api/surat-rekomendasi", manage(func(w http.ResponseWriter, r *http.Request) { buatSuratRekomendasi(w, r, db) }))
 	mux.Handle("DELETE /api/surat-rekomendasi/{id}", manage(func(w http.ResponseWriter, r *http.Request) { hapusSuratRekomendasi(w, r, db) }))
+	mux.Handle("PUT /api/surat-rekomendasi/{id}/tampil", manage(func(w http.ResponseWriter, r *http.Request) { updateTampilSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfSuratRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/surat-rekomendasi/{id}/pdf-permohonan", anyRole(func(w http.ResponseWriter, r *http.Request) { pdfPermohonanSuratRekomendasi(w, r, db) }))
 	mux.Handle("PUT /api/surat-rekomendasi/{id}/approve", approverRoles(func(w http.ResponseWriter, r *http.Request) { approveSuratRekomendasi(w, r, db) }))

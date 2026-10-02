@@ -20,6 +20,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
 import Tag from 'primevue/tag'
+import ToggleSwitch from 'primevue/toggleswitch'
 
 // SuratRekomendasiView -- menu "Surat Rekomendasi" (khusus administrator &
 // admin): mengirim surat rekomendasi perpanjangan kontrak untuk pegawai
@@ -358,6 +359,33 @@ async function doHapus(item) {
   }
 }
 
+// ------------------------------------------------------------
+// toggleTampil: KHUSUS surat sekolah ("Lampiran 3", item.is_sekolah) --
+// administrator bisa menampilkan/menyembunyikan surat ini dari menu Arsip
+// Surat akun pegawai penerimanya (mis. kalau surat masih belum final atau
+// administrasinya masih ditangani sekolah sendiri). Lihat
+// updateTampilSuratRekomendasi di handlers/surat_rekomendasi.go --
+// perubahan berlaku langsung, tidak mempengaruhi akses akun atasan.
+// ------------------------------------------------------------
+const tampilSaving = ref(new Set())
+
+async function toggleTampil(item, nilaiBaru) {
+  const saving = new Set(tampilSaving.value)
+  saving.add(item.id)
+  tampilSaving.value = saving
+  try {
+    const { data } = await http.put(`/surat-rekomendasi/${item.id}/tampil`, { tampil: nilaiBaru })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 4000 })
+    item.tampil_ke_pegawai = nilaiBaru
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengubah', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    const s = new Set(tampilSaving.value)
+    s.delete(item.id)
+    tampilSaving.value = s
+  }
+}
+
 // ============================================================
 // unduh Excel (Nomor Surat -> Nama Pegawai) -- difilter dari TANGGAL
 // SURAT (tanggal dikirimnya surat rekomendasi, bukan tanggal dibuatnya
@@ -459,6 +487,14 @@ async function unduhExcel() {
             :severity="item.status_approval === 'pending' ? 'warn' : 'success'"
             class="rekom-card-status"
           />
+          <div v-if="item.is_sekolah" class="rekom-card-tampil">
+            <ToggleSwitch
+              :modelValue="item.tampil_ke_pegawai"
+              :disabled="tampilSaving.has(item.id)"
+              @update:modelValue="(v) => toggleTampil(item, v)"
+            />
+            <span>{{ item.tampil_ke_pegawai ? 'Tampil di akun pegawai' : 'Disembunyikan dari akun pegawai' }}</span>
+          </div>
         </div>
         <div class="rekom-card-actions">
           <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
@@ -678,6 +714,15 @@ async function unduhExcel() {
 .rekom-card-status {
   align-self: flex-start;
   margin-top: 0.15rem;
+}
+
+.rekom-card-tampil {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+  font-size: 0.76rem;
+  color: var(--p-text-muted-color, #64748b);
 }
 
 .rekom-card-actions {
