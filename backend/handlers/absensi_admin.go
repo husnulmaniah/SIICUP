@@ -234,7 +234,12 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 	var dokumenRows []models.AbsensiDokumen
 	if len(idList) > 0 {
 		db.Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", idList, start, end).Find(&absensiRows)
-		db.Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", idList, start, limit).Find(&dokumenRows)
+		// Omit("file") -- hanya ID/NamaFile dari baris ini yang dibutuhkan untuk
+		// membangun tanggalTercoverEntry (lihat tercoverEntryFromDokumen di
+		// absensi.go); berkasnya sendiri (bisa banyak & besar untuk satu bulan
+		// penuh pegawai) baru diambil lewat downloadAbsensiDokumen saat memang
+		// diminta tombol lihat/unduh di frontend.
+		db.Omit("file").Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", idList, start, limit).Find(&dokumenRows)
 	}
 	holidaySet := holidaySetInRange(db, start, limit)
 	jenisLookup := jenisSuratLookup(db)

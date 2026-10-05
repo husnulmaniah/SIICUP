@@ -1169,23 +1169,41 @@ async function downloadVerifikasiFile(item) {
   }
 }
 
-// ---- lihat (pratinjau) berkas surat kolektif sekolah sebelum diunduh ----
+// ---- lihat (pratinjau) berkas sebelum diunduh -- dipakai BERSAMA oleh tab
+// Surat Kolektif (/pengajuan-surat-kolektif/{id}/file) & daftar "Dinas
+// Dalam / Izin / Sakit (Bersurat)" di dialog Detail Absen
+// (/absensi/dokumen/{id}/file, lihat previewTercoverFile di bawah) --
+// keduanya cuma beda endpoint, tampilannya (iframe PDF/gambar) sama persis,
+// jadi dialog & refnya digeneralisasi menerima url lengkap + nama file
+// secara langsung alih-alih objek item yang berbeda bentuk. ----
 const previewVerifikasiDialog = ref(false)
 const previewVerifikasiUrl = ref('')
 const previewVerifikasiType = ref('pdf')
 const previewVerifikasiNamaFile = ref('')
 
-async function previewVerifikasiFile(item) {
+async function previewVerifikasiFile(url, namaFile) {
   try {
-    const res = await http.get(`/pengajuan-surat-kolektif/${item.id}/file`, { params: { inline: 1 }, responseType: 'blob' })
-    const ext = (item.nama_file || '').split('.').pop().toLowerCase()
+    const res = await http.get(url, { params: { inline: 1 }, responseType: 'blob' })
+    const ext = (namaFile || '').split('.').pop().toLowerCase()
     previewVerifikasiType.value = ['jpg', 'jpeg', 'png'].includes(ext) ? 'image' : ext === 'pdf' ? 'pdf' : 'other'
     previewVerifikasiUrl.value = window.URL.createObjectURL(res.data)
-    previewVerifikasiNamaFile.value = item.nama_file || 'surat'
+    previewVerifikasiNamaFile.value = namaFile || 'surat'
     previewVerifikasiDialog.value = true
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat dokumen', detail: await extractErrorMessage(e), life: 4000 })
   }
+}
+
+// previewTercoverFile: tombol lihat berkas pada daftar "Dinas Dalam / Izin /
+// Sakit (Bersurat)" di dialog Detail Absen (menu Rekap Absen) -- t.id_dokumen
+// & t.nama_file dikirim backend lewat tanggalTercoverEntry (lihat
+// tercoverEntryFromDokumen di handlers/absensi.go). Endpoint
+// /absensi/dokumen/{id}/file sudah mengizinkan administrator/admin/akun
+// "Admin Absen" (IsAdminAbsensi) melihat berkas SIAPA SAJA (lihat
+// canAccessAbsensiDokumen di handlers/absensi_dokumen.go) -- tidak perlu
+// perubahan hak akses apapun, cukup tombolnya saja yang belum ada.
+function previewTercoverFile(t) {
+  previewVerifikasiFile(`/absensi/dokumen/${t.id_dokumen}/file`, t.nama_file)
 }
 function closePreviewVerifikasi() {
   if (previewVerifikasiUrl.value) window.URL.revokeObjectURL(previewVerifikasiUrl.value)
@@ -1854,7 +1872,7 @@ const defaultTab = computed(() => {
         </Column>
         <Column header="Aksi">
           <template #body="{ data }">
-            <Button icon="pi pi-eye" size="small" text rounded title="Lihat berkas" @click="previewVerifikasiFile(data)" />
+            <Button icon="pi pi-eye" size="small" text rounded title="Lihat berkas" @click="previewVerifikasiFile(`/pengajuan-surat-kolektif/${data.id}/file`, data.nama_file)" />
             <Button icon="pi pi-download" size="small" text rounded title="Unduh berkas" @click="downloadVerifikasiFile(data)" />
             <template v-if="data.status === 'menunggu'">
               <Button icon="pi pi-check" size="small" text rounded severity="success" title="Setujui" @click="confirmSetujuiVerifikasi(data)" />
@@ -1992,6 +2010,18 @@ const defaultTab = computed(() => {
           <ul>
             <li v-for="t in detailItem.tanggal_tercover" :key="t.tanggal">
               {{ formatTanggal(t.tanggal) }} -- <Tag :value="t.kode" /> {{ t.label }}
+              <Button
+                v-if="t.nama_file"
+                icon="pi pi-eye"
+                size="small"
+                text
+                rounded
+                title="Lihat berkas"
+                @click="previewTercoverFile(t)"
+              />
+              <span v-if="t.keterangan" style="color: var(--p-text-muted-color, #64748b); font-size: 0.85rem">
+                -- {{ t.keterangan }}
+              </span>
             </li>
           </ul>
         </template>

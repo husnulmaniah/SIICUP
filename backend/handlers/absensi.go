@@ -1103,20 +1103,45 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 // oleh dokumen (surat) yang diinput administrator (Surat Tugas/Berita
 // Acara/Surat Izin/SKS) -- Kode/Label mengikuti models.AbsensiDokumenKode
 // (DD = Dinas Dalam, I = Izin, S = Sakit).
+//
+// IDDokumen/NamaFile: dipakai frontend (menu "Rekap Absen" -> dialog Detail
+// Absen, & menu "Absen" pegawai sendiri) untuk menampilkan tombol lihat/
+// unduh berkas lewat endpoint yang SUDAH ADA (GET /api/absensi/dokumen/
+// {id}/file, lihat downloadAbsensiDokumen & canAccessAbsensiDokumen di
+// absensi_dokumen.go -- administrator/admin/akun IsAdminAbsensi bebas
+// mengakses SEMUA berkas, pegawai/atasan cuma berkasnya sendiri). NamaFile
+// SENGAJA dikosongkan ("") kalau baris ini memang tidak punya berkas (jenis
+// surat ditandai TidakPerluBerkas, mis. WFH) -- frontend memakai ini untuk
+// tahu kapan tombol lihat/unduh perlu disembunyikan.
+//
+// Keterangan: catatan yang diisi administrator saat menginput dokumen ini
+// (WAJIB diisi, lihat validasi di inputAbsensiDokumenKolektif di
+// absensi_dokumen.go -- dipilih dari dropdown keterangan baku, atau teks
+// bebas kalau pilih "Lainnya") -- field senama di models.AbsensiDokumen,
+// sudah tampil di tabel "Surat yang Sudah Diinput Bulan Ini" & menu "Absen"
+// pegawai sendiri, TAPI belum pernah tampil di dialog Detail Absen ("Dinas
+// Dalam / Izin / Sakit (Bersurat)") -- ditambahkan di sini supaya ikut
+// tampil di situ juga.
 type tanggalTercoverEntry struct {
-	Tanggal string `json:"tanggal"`
-	Jenis   string `json:"jenis"`
-	Kode    string `json:"kode"`
-	Label   string `json:"label"`
+	Tanggal    string `json:"tanggal"`
+	Jenis      string `json:"jenis"`
+	Kode       string `json:"kode"`
+	Label      string `json:"label"`
+	IDDokumen  uint   `json:"id_dokumen"`
+	NamaFile   string `json:"nama_file"`
+	Keterangan string `json:"keterangan"`
 }
 
 func tercoverEntryFromDokumen(d models.AbsensiDokumen, jenisLookup map[string]models.JenisSurat) tanggalTercoverEntry {
 	kode := kodeUntukJenis(jenisLookup, d.Jenis)
 	return tanggalTercoverEntry{
-		Tanggal: d.Tanggal.Format("2006-01-02"),
-		Jenis:   d.Jenis,
-		Kode:    kode,
-		Label:   labelUntukJenis(jenisLookup, d.Jenis, kode),
+		Tanggal:    d.Tanggal.Format("2006-01-02"),
+		Jenis:      d.Jenis,
+		Kode:       kode,
+		Label:      labelUntukJenis(jenisLookup, d.Jenis, kode),
+		IDDokumen:  d.ID,
+		NamaFile:   d.NamaFile,
+		Keterangan: d.Keterangan,
 	}
 }
 
@@ -1224,7 +1249,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// menu admin Surat Kolektif) tidak muncul dobel sebagai pilihan pada
 	// tanggal_bisa_diajukan di bawah.
 	var dokumen []models.AbsensiDokumen
-	db.Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, end).
+	db.Omit("file").Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, end).
 		Order("tanggal desc").Find(&dokumen)
 	jenisLookup := jenisSuratLookup(db)
 	tercoverSet := map[string]bool{}
