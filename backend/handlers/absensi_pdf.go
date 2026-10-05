@@ -229,6 +229,18 @@ func hitungBarisRingkasanPDF(
 			kode := kodeUntukJenis(jenisLookup, dok.Jenis)
 			label := labelUntukJenis(jenisLookup, dok.Jenis, kode)
 			row.Status = fmt.Sprintf("%s (%s)", label, kode)
+			// Keterangan: catatan admin saat menginput surat ini (lihat komentar
+			// field senama di models.AbsensiDokumen -- dropdown baku "Surat
+			// Tugas"/"Absensi Manual"/dst, atau teks bebas) -- ditambahkan di
+			// belakang supaya tiap baris DD/Izin/Sakit tidak tampil generik sama
+			// semua (mis. "Dinas Dalam (DD)" polos untuk SEMUA baris), melainkan
+			// ikut menunjukkan surat/alasan spesifiknya, mis. "Dinas Dalam (DD) -
+			// Surat Tugas" atau "Dinas Dalam (DD) - Absensi Manual". Teks ini bisa
+			// jadi lebih dari satu baris di tabel kalau tidak cukup lebar -- lihat
+			// tulisStatus di gambarBaris yang membungkusnya otomatis.
+			if ket := strings.TrimSpace(dok.Keterangan); ket != "" {
+				row.Status += " - " + ket
+			}
 			switch kode {
 			case "DD":
 				ringkasan.DinasDalam++
@@ -468,13 +480,37 @@ func buildRekapAbsensiPDF(
 			x += lebar
 		}
 
+		// tulisStatus: KHUSUS kolom Status -- bisa lebih dari satu baris kalau
+		// teksnya (label + kode + keterangan surat, lihat hitungBarisRingkasanPDF
+		// di atas) tidak cukup lebar untuk satu baris, supaya keterangan surat
+		// (mis. "- Surat Tugas"/"- Absensi Manual") tidak terpotong atau
+		// tumpang tindih dengan kolom sebelahnya. Dibatasi maksimal 3 baris --
+		// masih muat dalam rowH (22pt) pada fontBaris (7.5pt).
+		tulisStatus := func(lebar float64, s string) {
+			pad := 2.0
+			maxW := lebar - 2*pad
+			lines := []string{s}
+			if utils.TextWidth(s, fontBaris) > maxW {
+				lines = utils.WrapText(s, maxW, fontBaris)
+				if len(lines) > 3 {
+					lines = lines[:3]
+				}
+			}
+			const lineH = 7.0
+			yStart := teksY - lineH*float64(len(lines)-1)/2
+			for i, line := range lines {
+				p.TextCentered(x+lebar/2, yStart+float64(i)*lineH, line)
+			}
+			x += lebar
+		}
+
 		tulisTengah(kolom[0].lebar, strconv.Itoa(no))
 		tulisTengah(kolom[1].lebar, b.Tanggal.Format("02-01-2006"))
 		tulisTengah(kolom[2].lebar, hariIndo[b.Tanggal.Weekday()])
 		tulisTengah(kolom[3].lebar, b.JamMasuk)
 		tulisTengah(kolom[4].lebar, b.Terlambat)
 		tulisTengah(kolom[5].lebar, b.JamPulang)
-		tulisTengah(kolom[6].lebar, b.Status)
+		tulisStatus(kolom[6].lebar, b.Status)
 
 		// dua kolom foto: gambar kalau ada, kalau tidak tulis "-"
 		for _, nama := range []string{b.FotoMasuk, b.FotoPulang} {
