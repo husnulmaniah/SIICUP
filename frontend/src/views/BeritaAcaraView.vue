@@ -177,7 +177,7 @@ function makePegawaiPicker() {
     const dikenal = new Map([...terpilihCache.value, ...options.value].map((o) => [o.value, o]))
     terpilihCache.value = [...new Set(terpilih)].map((id) => dikenal.get(id)).filter(Boolean)
   }
-  return { options, loading, total, hasil, keyword, load, onFilter, ingatTerpilih }
+  return { options, loading, total, hasil, keyword, terpilihCache, load, onFilter, ingatTerpilih }
 }
 
 const pegawaiPicker = makePegawaiPicker()
