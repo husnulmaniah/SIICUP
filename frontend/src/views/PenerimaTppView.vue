@@ -338,6 +338,62 @@ async function submitHapus() {
 }
 
 // ------------------------------------------------------------
+// hapus terpilih (centang-banyak) -- memakai ULANG seleksi checkbox
+// "Pilih" yang sudah ada di atas (dipakai juga untuk "Kirim Permintaan
+// SK"), supaya tidak perlu kolom centang kedua: centang pegawai, lalu
+// pilih salah satu aksi massal (Kirim Permintaan SK ATAU Hapus Terpilih).
+// Satu alasan yang dipilih berlaku untuk SEMUA baris yang dihapus dalam
+// satu aksi ini. Endpoint satuan (DELETE /tpp/penerima/:id) tetap dipanggil
+// berkali-kali secara paralel (Promise.allSettled) -- backend TIDAK punya
+// endpoint bulk delete, sama prinsipnya dengan composables/useBulkDelete.js,
+// tapi di sini dibuat dialog kustom sendiri (bukan lewat useBulkDelete)
+// karena perlu field input alasan yang tidak disediakan confirm.require
+// biasa.
+// ------------------------------------------------------------
+const hapusTerpilihDialog = ref(false)
+const hapusTerpilihLoading = ref(false)
+const hapusTerpilihAlasanPilihan = ref(null)
+const hapusTerpilihAlasanLainnya = ref('')
+
+const targetHapusTerpilih = computed(() => rows.value.filter((r) => selectedIds.value.has(r.id_pegawai)))
+
+function bukaHapusTerpilihDialog() {
+  if (!targetHapusTerpilih.value.length) return
+  hapusTerpilihAlasanPilihan.value = null
+  hapusTerpilihAlasanLainnya.value = ''
+  hapusTerpilihDialog.value = true
+}
+
+async function submitHapusTerpilih() {
+  const targets = targetHapusTerpilih.value
+  if (!targets.length) return
+  hapusTerpilihLoading.value = true
+  try {
+    const alasan = hapusTerpilihAlasanPilihan.value === 'Lainnya' ? hapusTerpilihAlasanLainnya.value.trim() : hapusTerpilihAlasanPilihan.value || ''
+    const results = await Promise.allSettled(targets.map((row) => http.delete(`/tpp/penerima/${row.id}`, { data: { alasan } })))
+    const gagal = results.filter((r) => r.status === 'rejected')
+    const berhasil = results.length - gagal.length
+    if (gagal.length === 0) {
+      toast.add({ severity: 'success', summary: 'Berhasil', detail: `${berhasil} pegawai berhasil dikeluarkan dari Penerima TPP`, life: 5000 })
+    } else if (berhasil === 0) {
+      toast.add({ severity: 'error', summary: 'Gagal', detail: `Semua ${targets.length} pegawai gagal dikeluarkan`, life: 6000 })
+    } else {
+      toast.add({
+        severity: 'warn',
+        summary: 'Sebagian berhasil',
+        detail: `${berhasil} berhasil dikeluarkan, ${gagal.length} gagal dikeluarkan`,
+        life: 6000,
+      })
+    }
+    hapusTerpilihDialog.value = false
+    selectedIds.value = new Set()
+    await muatData()
+  } finally {
+    hapusTerpilihLoading.value = false
+  }
+}
+
+// ------------------------------------------------------------
 // unduh SK Terakhir yang sudah ada (dipakai administrator untuk memeriksa
 // dokumen yang sudah diupload)
 // ------------------------------------------------------------
@@ -407,6 +463,14 @@ onMounted(() => {
           severity="warn"
           :disabled="jumlahTerpilih === 0"
           @click="bukaKirimDialog"
+        />
+        <Button
+          v-if="jumlahTerpilih > 0"
+          :label="`Hapus Terpilih (${jumlahTerpilih})`"
+          icon="pi pi-trash"
+          severity="danger"
+          outlined
+          @click="bukaHapusTerpilihDialog"
         />
       </div>
 
@@ -590,6 +654,34 @@ onMounted(() => {
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="hapusDialog = false" />
         <Button label="Keluarkan" icon="pi pi-trash" severity="danger" :loading="hapusLoading" @click="submitHapus" />
+      </template>
+    </Dialog>
+
+    <!-- Keluarkan terpilih (centang-banyak) dari Penerima TPP -->
+    <Dialog v-model:visible="hapusTerpilihDialog" header="Keluarkan Terpilih dari Penerima TPP" modal style="width: 26rem">
+      <p style="margin-top: 0">
+        Keluarkan <strong>{{ targetHapusTerpilih.length }}</strong> pegawai terpilih dari daftar Penerima TPP? Alasan
+        yang dipilih berlaku untuk semua pegawai terpilih. Pegawai yang dikeluarkan bisa ditambahkan kembali kapan
+        saja lewat "Tambah Pegawai".
+      </p>
+      <label class="field-label">Alasan (opsional)</label>
+      <Select
+        v-model="hapusTerpilihAlasanPilihan"
+        :options="ALASAN_HAPUS_OPTIONS"
+        showClear
+        placeholder="Pilih alasan..."
+        style="width: 100%"
+      />
+      <Textarea
+        v-if="hapusTerpilihAlasanPilihan === 'Lainnya'"
+        v-model="hapusTerpilihAlasanLainnya"
+        rows="2"
+        placeholder="Tulis alasan lainnya..."
+        style="width: 100%; margin-top: 0.5rem"
+      />
+      <template #footer>
+        <Button label="Batal" severity="secondary" outlined @click="hapusTerpilihDialog = false" />
+        <Button label="Keluarkan Semua" icon="pi pi-trash" severity="danger" :loading="hapusTerpilihLoading" @click="submitHapusTerpilih" />
       </template>
     </Dialog>
   </div>

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
+import { useBulkDelete } from '../composables/useBulkDelete'
 
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -31,6 +32,26 @@ import ToggleSwitch from 'primevue/toggleswitch'
 
 const toast = useToast()
 const confirm = useConfirm()
+// Tampilan kartu (bukan DataTable) -- checkbox centang-banyak dikelola
+// manual (push/splice ke `selected`, lihat komentar di useBulkDelete.js)
+// lewat isItemSelected/toggleItemSelect di bawah, bukan v-model:selection.
+const { selected: selectedItems, bulkDeleting, confirmBulkDelete } = useBulkDelete()
+
+function isItemSelected(item) {
+  return selectedItems.value.some((i) => i.id === item.id)
+}
+function toggleItemSelect(item) {
+  const idx = selectedItems.value.findIndex((i) => i.id === item.id)
+  if (idx === -1) selectedItems.value.push(item)
+  else selectedItems.value.splice(idx, 1)
+}
+function hapusTerpilih() {
+  confirmBulkDelete({
+    label: 'surat rekomendasi',
+    deleteOne: (item) => http.delete(`/surat-rekomendasi/${item.id}`),
+    onDone: loadItems,
+  })
+}
 
 const items = ref([])
 const loading = ref(true)
@@ -40,6 +61,7 @@ let searchTimer = null
 
 async function loadItems() {
   loading.value = true
+  selectedItems.value = []
   try {
     const params = {}
     if (search.value.trim()) params.q = search.value.trim()
@@ -485,6 +507,15 @@ async function unduhExcel() {
       </div>
       <div class="page-header-actions">
         <Button
+          v-if="selectedItems.length"
+          :label="`Hapus Terpilih (${selectedItems.length})`"
+          icon="pi pi-trash"
+          severity="danger"
+          outlined
+          :loading="bulkDeleting"
+          @click="hapusTerpilih"
+        />
+        <Button
           label="Sembunyikan Semua Lampiran 3"
           icon="pi pi-eye-slash"
           severity="warn"
@@ -515,6 +546,9 @@ async function unduhExcel() {
 
     <div v-else class="rekom-grid">
       <div v-for="item in items" :key="item.id" class="rekom-card">
+        <div class="rekom-card-select">
+          <Checkbox :modelValue="isItemSelected(item)" binary @update:modelValue="toggleItemSelect(item)" />
+        </div>
         <div class="rekom-card-icon"><i class="pi pi-file-pdf"></i></div>
         <div class="rekom-card-body">
           <div class="rekom-card-title" :title="item.judul">{{ item.judul }}</div>
@@ -718,6 +752,7 @@ async function unduhExcel() {
 }
 
 .rekom-card {
+  position: relative;
   background: var(--p-content-background, #fff);
   border-radius: 12px;
   padding: 1.1rem;
@@ -725,6 +760,12 @@ async function unduhExcel() {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+.rekom-card-select {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
 }
 
 .rekom-card-icon {

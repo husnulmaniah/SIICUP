@@ -5,6 +5,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useAuthStore } from '../stores/auth'
 import http from '../api/http'
 import { toApiDate } from '../utils/date'
+import { useBulkDelete } from '../composables/useBulkDelete'
 
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -26,6 +27,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 const auth = useAuthStore()
 const toast = useToast()
 const confirm = useConfirm()
+const { selected: selectedRows, bulkDeleting, confirmBulkDelete } = useBulkDelete()
 
 const items = ref([])
 const total = ref(0)
@@ -102,6 +104,14 @@ const isManage = computed(() => auth.isAdministrator || auth.isAdmin)
 const isAtasan = computed(() => auth.isAtasan)
 const isPegawai = computed(() => auth.isPegawai)
 
+// Baris boleh dihapus (satuan maupun lewat centang-banyak) kalau:
+// - isManage (administrator/admin): baris apa pun, status apa pun.
+// - pegawai: hanya pengajuan miliknya sendiri yang masih "pending" atau
+//   "dikembalikan" -- cermin persis dari v-if tombol hapus satuan di Aksi.
+function canDeleteRow(row) {
+  return (isPegawai.value && (row.status === 'pending' || row.status === 'dikembalikan')) || isManage.value
+}
+
 function statusSeverity(status) {
   if (status === 'disetujui') return 'success'
   if (status === 'ditolak') return 'danger'
@@ -139,6 +149,7 @@ async function loadOptions() {
 
 async function fetchList() {
   loading.value = true
+  selectedRows.value = []
   try {
     const { data } = await http.get('/pengajuan-cuti', {
       params: { page: page.value, pageSize: pageSize.value, status: statusFilter.value || undefined },
@@ -485,6 +496,21 @@ function confirmDelete(row) {
         toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
       }
     },
+  })
+}
+
+// Hapus terpilih (centang-banyak) -- cuma memanggil endpoint hapus satuan
+// yang sudah ada (DELETE /pengajuan-cuti/:id) berkali-kali lewat
+// useBulkDelete. Checkbox baris yang boleh dicentang sudah dibatasi lewat
+// :isDataSelectable="canDeleteRow" di <DataTable>, jadi selectedRows di
+// sini seharusnya selalu berisi baris yang memang boleh dihapus pemilik
+// akun ini -- tapi tetap aman kalau backend menolak baris yang ternyata
+// tidak berhak (lihat penanganan gagal-sebagian di useBulkDelete).
+function hapusTerpilih() {
+  confirmBulkDelete({
+    label: 'pengajuan cuti',
+    deleteOne: (row) => http.delete(`/pengajuan-cuti/${row.id}`),
+    onDone: fetchList,
   })
 }
 
@@ -844,6 +870,15 @@ onMounted(() => {
           <Select v-model="pageSize" :options="entriesOptions" @change="onEntriesChange" />
         </div>
         <div class="toolbar-actions" style="align-items: center; flex-wrap: wrap">
+          <Button
+            v-if="selectedRows.length"
+            icon="pi pi-trash"
+            :label="`Hapus Terpilih (${selectedRows.length})`"
+            severity="danger"
+            outlined
+            :loading="bulkDeleting"
+            @click="hapusTerpilih"
+          />
           <template v-if="isManage">
             <Button icon="pi pi-chevron-down" iconPos="right" label="Menu" class="overlay-menu-trigger" @click="toggleActionsMenu" aria-haspopup="true" />
             <Menu ref="actionsMenuRef" :model="actionsMenuItems" popup class="overlay-actions-menu" />
@@ -867,8 +902,11 @@ onMounted(() => {
           dataKey="id"
           size="small"
           style="min-width: 760px"
+          v-model:selection="selectedRows"
+          :isDataSelectable="({ data }) => canDeleteRow(data)"
         >
           <template #empty><div style="padding: 1.5rem; text-align: center; color: var(--p-text-muted-color)">Tidak ada data</div></template>
+          <Column selectionMode="multiple" headerStyle="width: 3rem" :exportable="false"></Column>
           <Column v-if="!isPegawai" field="pegawai.nama" header="Pegawai" />
           <Column field="jenis_cuti.jenis" header="Jenis Cuti" />
           <Column header="Tanggal">

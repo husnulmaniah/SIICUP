@@ -4,23 +4,48 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { useAuthStore } from '../stores/auth'
 import http from '../api/http'
+import { useBulkDelete } from '../composables/useBulkDelete'
 
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import ProgressSpinner from 'primevue/progressspinner'
 import Message from 'primevue/message'
+import Checkbox from 'primevue/checkbox'
 
 const toast = useToast()
 const confirm = useConfirm()
 const auth = useAuthStore()
 const canManage = computed(() => auth.canManageMaster)
 
+// Tampilan kartu (bukan DataTable) -- checkbox centang-banyak dikelola
+// manual lewat isItemSelected/toggleItemSelect, sama pola dengan
+// SuratRekomendasiView.vue. Hanya relevan untuk canManage (hanya role itu
+// yang punya tombol hapus satuan).
+const { selected: selectedItems, bulkDeleting, confirmBulkDelete } = useBulkDelete()
+
+function isItemSelected(item) {
+  return selectedItems.value.some((i) => i.id === item.id)
+}
+function toggleItemSelect(item) {
+  const idx = selectedItems.value.findIndex((i) => i.id === item.id)
+  if (idx === -1) selectedItems.value.push(item)
+  else selectedItems.value.splice(idx, 1)
+}
+function hapusTerpilih() {
+  confirmBulkDelete({
+    label: 'template surat',
+    deleteOne: (item) => http.delete(`/template-surat/${item.id}`),
+    onDone: loadTemplates,
+  })
+}
+
 const templates = ref([])
 const loading = ref(true)
 
 async function loadTemplates() {
   loading.value = true
+  selectedItems.value = []
   try {
     const { data } = await http.get('/template-surat')
     templates.value = data.data || []
@@ -262,7 +287,18 @@ onUnmounted(() => {
             : 'Template surat yang disediakan administrator -- klik "Lihat" untuk membuka tanpa perlu mengunduh.' }}
         </p>
       </div>
-      <Button v-if="canManage" label="Tambah Template" icon="pi pi-plus" @click="bukaTambah" />
+      <div v-if="canManage" style="display: flex; gap: 0.6rem; flex-wrap: wrap">
+        <Button
+          v-if="selectedItems.length"
+          :label="`Hapus Terpilih (${selectedItems.length})`"
+          icon="pi pi-trash"
+          severity="danger"
+          outlined
+          :loading="bulkDeleting"
+          @click="hapusTerpilih"
+        />
+        <Button label="Tambah Template" icon="pi pi-plus" @click="bukaTambah" />
+      </div>
     </div>
 
     <div v-if="loading" style="display: flex; justify-content: center; padding: 3rem">
@@ -275,6 +311,9 @@ onUnmounted(() => {
 
     <div v-else class="template-grid">
       <div v-for="item in templates" :key="item.id" class="template-card">
+        <div v-if="canManage" class="template-card-select">
+          <Checkbox :modelValue="isItemSelected(item)" binary @update:modelValue="toggleItemSelect(item)" />
+        </div>
         <div class="template-card-icon">
           <i :class="ikonFile(item.nama_file)"></i>
         </div>
@@ -345,6 +384,7 @@ onUnmounted(() => {
 }
 
 .template-card {
+  position: relative;
   background: var(--p-content-background, #fff);
   border-radius: 12px;
   padding: 1.1rem;
@@ -352,6 +392,12 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+}
+
+.template-card-select {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
 }
 
 .template-card-icon {

@@ -4,6 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
 import { toApiDate, hitungKelayakanKenaikan } from '../utils/date'
+import { useBulkDelete } from '../composables/useBulkDelete'
 
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -30,6 +31,12 @@ const props = defineProps({
 
 const toast = useToast()
 const confirm = useConfirm()
+// Hapus terpilih (centang banyak baris sekaligus) -- lihat komentar pada
+// useBulkDelete.js. selectedRows dipasang ke v-model:selection <DataTable>
+// di bawah, dan dikosongkan setiap fetchList() berjalan (ganti halaman/
+// filter/pencarian) supaya centangan tidak diam-diam "menempel" ke baris
+// lain yang kebetulan tampil di halaman berikutnya.
+const { selected: selectedRows, bulkDeleting, confirmBulkDelete } = useBulkDelete()
 
 // Pilihan "tampilkan N entri" -- dropdown custom di pojok kiri atas tabel
 // (dipisah dari paginator bawaan PrimeVue supaya tampilannya sesuai gaya
@@ -528,6 +535,7 @@ watch(
 
 async function fetchList() {
   loading.value = true
+  selectedRows.value = []
   try {
     const filterParams = {}
     for (const f of props.config.filters || []) {
@@ -749,6 +757,14 @@ function confirmDelete(row) {
   })
 }
 
+function hapusTerpilih() {
+  confirmBulkDelete({
+    label: `data ${props.config.title}`,
+    deleteOne: (row) => http.delete(`${props.config.endpoint}/${row.id}`),
+    onDone: fetchList,
+  })
+}
+
 async function downloadTemplate() {
   await downloadFile(`${props.config.endpoint}/template`, `template_${props.config.endpoint.replace('/', '')}.xlsx`)
 }
@@ -941,6 +957,18 @@ const canManage = computed(() => true) // route guard already restricts page acc
           <Select v-model="pageSize" :options="entriesOptions" @change="onEntriesChange" />
         </div>
         <div class="toolbar-actions" style="align-items: center; flex: 1; justify-content: flex-end">
+          <!-- Hapus Terpilih: muncul begitu ada baris yang dicentang di
+               tabel (kolom checkbox paling kiri) -- lihat useBulkDelete.js
+               & kolom selectionMode="multiple" pada DataTable di bawah. -->
+          <Button
+            v-if="selectedRows.length"
+            :label="`Hapus Terpilih (${selectedRows.length})`"
+            icon="pi pi-trash"
+            severity="danger"
+            outlined
+            :loading="bulkDeleting"
+            @click="hapusTerpilih"
+          />
           <IconField v-if="config.searchPlaceholder !== false" class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
             <InputText v-model="search" :placeholder="config.searchPlaceholder || 'Cari...'" style="width: 100%" />
             <InputIcon class="pi pi-search" />
@@ -979,6 +1007,7 @@ const canManage = computed(() => true) // route guard already restricts page acc
 
       <div class="responsive-table-wrap">
         <DataTable
+          v-model:selection="selectedRows"
           :value="items"
           :loading="loading"
           lazy
@@ -996,6 +1025,10 @@ const canManage = computed(() => true) // route guard already restricts page acc
           <template #empty>
             <div style="padding: 1.5rem; text-align: center; color: var(--p-text-muted-color)">Tidak ada data</div>
           </template>
+          <!-- Checkbox pilih baris -- centangan HANYA berlaku untuk baris
+               yang sedang tampil di halaman ini (selectedRows dikosongkan
+               setiap fetchList() berjalan, lihat komentar di script). -->
+          <Column selectionMode="multiple" headerStyle="width: 3rem" :exportable="false"></Column>
           <Column v-for="col in config.columns" :key="col.field" :field="col.field" :header="col.header" :style="col.width ? { width: col.width } : {}">
             <template #body="{ data }">
               <template v-if="col.type === 'date'">{{ formatDate(fieldValue(data, col.field)) }}</template>

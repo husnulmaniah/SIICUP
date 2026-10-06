@@ -6,6 +6,7 @@ import http from '../api/http'
 import { toApiDate } from '../utils/date'
 import { KETERANGAN_SURAT_DROPDOWN, KETERANGAN_LAINNYA, gabungkanKeterangan } from '../composables/keteranganSurat'
 import { useAuthStore } from '../stores/auth'
+import { useBulkDelete } from '../composables/useBulkDelete'
 
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
@@ -32,6 +33,12 @@ import Badge from 'primevue/badge'
 
 const toast = useToast()
 const confirm = useConfirm()
+// Dua instance useBulkDelete terpisah -- satu untuk tabel "Surat yang Sudah
+// Diinput Bulan Ini", satu untuk tabel "Riwayat Absen" di dalam dialog
+// detail -- supaya centang-banyak di satu tabel tidak ikut mempengaruhi
+// tabel lainnya (masing-masing panggilan useBulkDelete() independen).
+const { selected: dokumenSelected, bulkDeleting: dokumenBulkDeleting, confirmBulkDelete: confirmDokumenBulkDelete } = useBulkDelete()
+const { selected: riwayatSelected, bulkDeleting: riwayatBulkDeleting, confirmBulkDelete: confirmRiwayatBulkDelete } = useBulkDelete()
 const auth = useAuthStore()
 
 // ============================================================
@@ -612,6 +619,7 @@ const detailItem = ref(null)
 function openDetail(item) {
   detailItem.value = item
   detailDialog.value = true
+  riwayatSelected.value = []
   loadThumbnails(item.absensi)
 }
 
@@ -753,22 +761,43 @@ async function submitManualAbsen() {
 // diinput manual -- sama seperti tombol edit.
 // ------------------------------------------------------------
 
+// Dipakai setelah hapus (satuan maupun terpilih/bulk) pada tabel Riwayat
+// Absen -- muat ulang rekap lalu sinkronkan dialog detail yang masih
+// terbuka dengan data pegawai yang sama supaya baris yang baru dihapus
+// langsung hilang dari tampilan tanpa perlu menutup-buka dialog.
+async function reloadDetailItemAfterHapusAbsen() {
+  await loadRekap()
+  const idPegawai = detailItem.value?.pegawai?.id
+  if (idPegawai) {
+    const refreshed = rekap.value.find((it) => it.pegawai?.id === idPegawai)
+    if (refreshed) {
+      detailItem.value = refreshed
+      loadThumbnails(refreshed.absensi)
+    }
+  }
+}
+
 async function hapusAbsen(id, bagian) {
   try {
     const { data } = await http.delete(`/absensi/manual/${id}`, { params: { bagian } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
-    await loadRekap()
-    const idPegawai = detailItem.value?.pegawai?.id
-    if (idPegawai) {
-      const refreshed = rekap.value.find((it) => it.pegawai?.id === idPegawai)
-      if (refreshed) {
-        detailItem.value = refreshed
-        loadThumbnails(refreshed.absensi)
-      }
-    }
+    await reloadDetailItemAfterHapusAbsen()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
   }
+}
+
+// Hapus terpilih (centang-banyak) pada tabel Riwayat Absen -- selalu pakai
+// bagian=semua, sama seperti tombol trash satuan (hapus seluruh absen
+// tanggal itu), BUKAN bagian=pulang -- tombol "hapus pulang saja" sengaja
+// tetap satuan per baris saja, tidak ikut masuk ke centang-banyak.
+function hapusRiwayatTerpilih() {
+  confirmRiwayatBulkDelete({
+    label: 'absen',
+    deleteOne: (row) => http.delete(`/absensi/manual/${row.id}`, { params: { bagian: 'semua' } }),
+    onDone: reloadDetailItemAfterHapusAbsen,
+    extraMessage: 'Tanggal yang dihapus akan kembali masuk daftar "Tidak Melakukan Absensi".',
+  })
 }
 
 function confirmHapusAbsenPulang(row) {
@@ -1191,6 +1220,7 @@ watch(dokumenSearch, () => {
 
 async function loadDokumenAdmin() {
   loadingDokumenAdmin.value = true
+  dokumenSelected.value = []
   try {
     const params = { bulan: periodDate.value.getMonth() + 1, tahun: periodDate.value.getFullYear() }
     const { data } = await http.get('/absensi/dokumen/rekap', { params })
@@ -1219,6 +1249,17 @@ function confirmHapusDokumenAdmin(item) {
         toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
       }
     },
+  })
+}
+
+// Hapus terpilih (centang-banyak) pada tabel "Surat yang Sudah Diinput
+// Bulan Ini" -- memanggil endpoint hapus satuan yang sama (DELETE
+// /absensi/dokumen/:id) berkali-kali lewat useBulkDelete.
+function hapusDokumenTerpilih() {
+  confirmDokumenBulkDelete({
+    label: 'surat',
+    deleteOne: (item) => http.delete(`/absensi/dokumen/${item.id}`),
+    onDone: () => Promise.all([loadRekap(), loadDokumenAdmin()]),
   })
 }
 
@@ -1946,9 +1987,21 @@ const defaultTab = computed(() => {
           <InputIcon class="pi pi-search" />
         </IconField>
       </div>
-      <div class="entries-picker">
-        <span class="entries-picker-label">Tampilkan</span>
-        <Select v-model="dokumenPageSize" :options="entriesOptions" @change="dokumenFirst = 0" />
+      <div class="entries-picker" style="justify-content: space-between; display: flex; align-items: center; flex-wrap: wrap; gap: .5rem">
+        <div style="display: flex; align-items: center; gap: .5rem">
+          <span class="entries-picker-label">Tampilkan</span>
+          <Select v-model="dokumenPageSize" :options="entriesOptions" @change="dokumenFirst = 0" />
+        </div>
+        <Button
+          v-if="dokumenSelected.length"
+          icon="pi pi-trash"
+          :label="`Hapus Terpilih (${dokumenSelected.length})`"
+          severity="danger"
+          outlined
+          size="small"
+          :loading="dokumenBulkDeleting"
+          @click="hapusDokumenTerpilih"
+        />
       </div>
       <DataTable
         :value="dokumenFiltered"
@@ -1961,7 +2014,10 @@ const defaultTab = computed(() => {
         size="small"
         stripedRows
         responsiveLayout="scroll"
+        dataKey="id"
+        v-model:selection="dokumenSelected"
       >
+        <Column selectionMode="multiple" headerStyle="width: 3rem" :exportable="false"></Column>
         <Column header="Tanggal">
           <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
         </Column>
@@ -2092,14 +2148,29 @@ const defaultTab = computed(() => {
           />
         </div>
 
-        <h4>Riwayat Absen</h4>
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem">
+          <h4 style="margin: 0">Riwayat Absen</h4>
+          <Button
+            v-if="auth.isAdministrator && riwayatSelected.length"
+            icon="pi pi-trash"
+            :label="`Hapus Terpilih (${riwayatSelected.length})`"
+            severity="danger"
+            outlined
+            size="small"
+            :loading="riwayatBulkDeleting"
+            @click="hapusRiwayatTerpilih"
+          />
+        </div>
         <DataTable
           :value="detailItem.absensi"
           size="small"
           stripedRows
           responsiveLayout="scroll"
           :rowClass="rowClassRiwayat"
+          dataKey="id"
+          v-model:selection="riwayatSelected"
         >
+          <Column v-if="auth.isAdministrator" selectionMode="multiple" headerStyle="width: 3rem" :exportable="false"></Column>
           <Column header="Tanggal">
             <template #body="{ data }">{{ formatTanggal(dateKey(data.tanggal)) }}</template>
           </Column>

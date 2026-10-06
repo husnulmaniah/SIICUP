@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import http from '../api/http'
+import { useBulkDelete } from '../composables/useBulkDelete'
 
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -18,6 +19,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 
 const toast = useToast()
 const confirm = useConfirm()
+const { selected: selectedRows, bulkDeleting, confirmBulkDelete } = useBulkDelete()
 
 const KATEGORI_PILIHAN = ['5 Hari Kerja', '6 Hari Kerja', 'Shift Pagi', 'Shift Siang', 'Shift Malam']
 
@@ -48,6 +50,7 @@ const unitKerjaList = ref([])
 
 async function loadShiftList() {
   loading.value = true
+  selectedRows.value = []
   try {
     const { data } = await http.get('/shift-kerja')
     shiftList.value = data.data || []
@@ -254,6 +257,14 @@ function konfirmasiHapus(item) {
     },
   })
 }
+
+function hapusTerpilih() {
+  confirmBulkDelete({
+    label: 'shift kerja',
+    deleteOne: (item) => http.delete(`/shift-kerja/${item.id}`),
+    onDone: loadShiftList,
+  })
+}
 </script>
 
 <template>
@@ -269,11 +280,23 @@ function konfirmasiHapus(item) {
           kamera absen otomatis tertutup.
         </p>
       </div>
-      <Button label="Tambah Shift Kerja" icon="pi pi-plus" @click="bukaTambah" />
+      <div style="display: flex; gap: 0.6rem; flex-wrap: wrap">
+        <Button
+          v-if="selectedRows.length"
+          :label="`Hapus Terpilih (${selectedRows.length})`"
+          icon="pi pi-trash"
+          severity="danger"
+          outlined
+          :loading="bulkDeleting"
+          @click="hapusTerpilih"
+        />
+        <Button label="Tambah Shift Kerja" icon="pi pi-plus" @click="bukaTambah" />
+      </div>
     </div>
 
     <div v-if="loading" style="text-align: center; padding: 3rem 0"><ProgressSpinner style="width: 40px; height: 40px" /></div>
-    <DataTable v-else :value="shiftList" size="small" stripedRows responsiveLayout="scroll">
+    <DataTable v-else :value="shiftList" size="small" stripedRows responsiveLayout="scroll" dataKey="id" v-model:selection="selectedRows">
+      <Column selectionMode="multiple" headerStyle="width: 3rem" :exportable="false"></Column>
       <Column field="nama_shift" header="Nama Shift" />
       <Column field="kategori_shift" header="Kategori" />
       <Column header="Unit Kerja">
