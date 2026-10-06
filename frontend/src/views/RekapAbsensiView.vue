@@ -745,6 +745,57 @@ async function submitManualAbsen() {
 }
 
 // ------------------------------------------------------------
+// Hapus absen (DELETE /absensi/manual/{id}?bagian=pulang|semua) -- KHUSUS
+// role administrator, sama seperti input/edit manual di atas. Dua pilihan:
+// hapus absen pulang saja (baris tetap ada, absen masuknya utuh) atau hapus
+// seluruh baris absen hari itu (tanggal kembali masuk daftar "Tidak
+// Melakukan Absensi"). Berlaku untuk baris absen APA SAJA, bukan cuma yang
+// diinput manual -- sama seperti tombol edit.
+// ------------------------------------------------------------
+
+async function hapusAbsen(id, bagian) {
+  try {
+    const { data } = await http.delete(`/absensi/manual/${id}`, { params: { bagian } })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    await loadRekap()
+    const idPegawai = detailItem.value?.pegawai?.id
+    if (idPegawai) {
+      const refreshed = rekap.value.find((it) => it.pegawai?.id === idPegawai)
+      if (refreshed) {
+        detailItem.value = refreshed
+        loadThumbnails(refreshed.absensi)
+      }
+    }
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+function confirmHapusAbsenPulang(row) {
+  confirm.require({
+    message: `Hapus absen PULANG tanggal ${formatTanggal(dateKey(row.tanggal))} untuk ${detailItem.value?.pegawai?.nama || 'pegawai ini'}? Absen masuknya tetap tersimpan.`,
+    header: 'Konfirmasi Hapus Absen Pulang',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: () => hapusAbsen(row.id, 'pulang'),
+  })
+}
+
+function confirmHapusAbsenSemua(row) {
+  confirm.require({
+    message: `Hapus SELURUH absen tanggal ${formatTanggal(dateKey(row.tanggal))} (masuk & pulang) untuk ${detailItem.value?.pegawai?.nama || 'pegawai ini'}? Tanggal ini akan kembali masuk daftar "Tidak Melakukan Absensi".`,
+    header: 'Konfirmasi Hapus Absen',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-danger',
+    accept: () => hapusAbsen(row.id, 'semua'),
+  })
+}
+
+// ------------------------------------------------------------
 // unduh rekap absen SATU pegawai sebagai PDF (lihat
 // exportRekapAbsensiPegawaiPDF di handlers/absensi_pdf.go)
 // ------------------------------------------------------------
@@ -2131,12 +2182,14 @@ const defaultTab = computed(() => {
               </div>
             </template>
           </Column>
-          <!-- Kolom Aksi (edit absen manual) KHUSUS role administrator --
-               lihat komentar pada bukaManualAbsenEdit di script: menu ini
-               bisa menimpa jam/foto absen pegawai tanpa verifikasi
-               kamera/lokasi, jadi SENGAJA tidak ditampilkan untuk role admin
-               maupun akun yang hanya ditandai IsAdminAbsensi. -->
-          <Column v-if="auth.isAdministrator" header="Aksi" style="width: 70px">
+          <!-- Kolom Aksi (edit/hapus absen manual) KHUSUS role administrator
+               -- lihat komentar pada bukaManualAbsenEdit/confirmHapusAbsen*
+               di script: menu ini bisa menimpa/menghapus absen pegawai
+               tanpa verifikasi kamera/lokasi, jadi SENGAJA tidak ditampilkan
+               untuk role admin maupun akun yang hanya ditandai
+               IsAdminAbsensi. Tombol "Hapus Pulang" cuma muncul kalau baris
+               itu memang sudah ada absen pulangnya. -->
+          <Column v-if="auth.isAdministrator" header="Aksi" style="width: 120px">
             <template #body="{ data }">
               <Button
                 icon="pi pi-pencil"
@@ -2145,6 +2198,25 @@ const defaultTab = computed(() => {
                 rounded
                 title="Edit absen manual"
                 @click="bukaManualAbsenEdit(data)"
+              />
+              <Button
+                v-if="data.jam_pulang"
+                icon="pi pi-sign-out"
+                size="small"
+                text
+                rounded
+                severity="warn"
+                title="Hapus absen pulang saja"
+                @click="confirmHapusAbsenPulang(data)"
+              />
+              <Button
+                icon="pi pi-trash"
+                size="small"
+                text
+                rounded
+                severity="danger"
+                title="Hapus seluruh absen tanggal ini"
+                @click="confirmHapusAbsenSemua(data)"
               />
             </template>
           </Column>

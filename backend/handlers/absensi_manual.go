@@ -155,6 +155,62 @@ func absensiManualInputHandler(w http.ResponseWriter, r *http.Request, db *gorm.
 	utils.Created(w, "absen manual berhasil disimpan", existing)
 }
 
+// absensiManualDeleteHandler menghapus data absen -- KHUSUS administrator
+// (lihat administratorOnly di RegisterAbsensiRoutes, absensi.go), dipakai
+// tombol hapus pada kolom Aksi di dialog Detail Absen (RekapAbsensiView.vue).
+// Query param "bagian" menentukan cakupannya:
+//   - "pulang": HANYA menghapus absen pulang (jam, foto, koordinat, kedipan,
+//     dinas dalam pulang) pada baris itu -- absen masuknya tetap ada, baris
+//     tidak dihapus. Dipakai kalau admin cuma salah input/mau mengosongkan
+//     absen pulang pegawai tapi absen masuknya tetap benar.
+//   - "semua": menghapus SELURUH baris absen hari itu (masuk & pulang
+//     sekaligus) -- tanggal itu otomatis kembali tampil di daftar "Tidak
+//     Melakukan Absensi" pada rekap bulan tersebut.
+//
+// Berlaku untuk SEMUA baris absensi, bukan cuma yang IsManual=true -- baris
+// absen mandiri pegawai lewat kamera pun bisa dihapus lewat sini, sama
+// seperti tombol edit (Aksi) pada baris yang sama juga berlaku untuk semua
+// baris, bukan cuma yang input manual.
+func absensiManualDeleteHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	var item models.Absensi
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data absen tidak ditemukan")
+		return
+	}
+
+	bagian := strings.TrimSpace(r.URL.Query().Get("bagian"))
+	switch bagian {
+	case "pulang":
+		if item.JamPulang == nil {
+			utils.Error(w, http.StatusBadRequest, "baris ini belum ada absen pulang")
+			return
+		}
+		updates := map[string]interface{}{
+			"jam_pulang":         nil,
+			"foto_pulang":        nil,
+			"lat_pulang":         nil,
+			"lng_pulang":         nil,
+			"kedipan_pulang_ok":  true,
+			"dinas_dalam_pulang": false,
+		}
+		if err := db.Model(&item).Updates(updates).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menghapus absen pulang: "+err.Error())
+			return
+		}
+		utils.Success(w, "absen pulang berhasil dihapus", nil)
+	case "semua":
+		if err := db.Delete(&item).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menghapus absen: "+err.Error())
+			return
+		}
+		utils.Success(w, "absen tanggal ini berhasil dihapus", nil)
+	default:
+		utils.Error(w, http.StatusBadRequest, "parameter bagian harus 'pulang' atau 'semua'")
+		return
+	}
+}
+
 // absensiManualDecodeFoto membaca file multipart pada field key (kalau ada),
 // memvalidasi ekstensi & isinya benar-benar gambar, lalu mengubah ukurannya
 // (resizeImageBox, lebar maksimal 1000px, sama seperti foto absen mandiri

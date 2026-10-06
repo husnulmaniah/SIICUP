@@ -463,7 +463,19 @@ func absensiAllowedKecamatanIDs(item models.PengaturanAbsensi) []uint {
 // lengkap tetap bisa gagal lolos filter ini kalau teks Tempat Tugas
 // mentahnya tidak persis sama dengan yang dicentang administrator (lihat
 // opsiTempatTugasAbsensi di atas).
-func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai) bool {
+//
+// roleName adalah role LOGIN akun yang bersangkutan (claims.RoleName, BUKAN
+// jabatan pegawai) -- akun berrole "atasan" yang tempat tugasnya Dinas/
+// Kantor (bukan Sekolah, lihat isSekolahPegawai) SELALU dianggap eligible,
+// TIDAK tunduk pada filter tempat_tugas_allowed/jabatan_allowed_ids/
+// kecamatan_allowed_ids di atas. Ini supaya administrator yang mengatur
+// filter jabatan/kecamatan (misalnya cuma mengizinkan jabatan staf tertentu)
+// tidak diam-diam ikut menutup akses absen milik atasan Dinas, yang harus
+// tetap bisa absen sendiri terlepas dari filter manapun.
+func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai, roleName string) bool {
+	if roleName == "atasan" && !isSekolahPegawai(pegawai) {
+		return true
+	}
 	if allowed := absensiAllowedTempatTugas(setting); len(allowed) > 0 {
 		kategori := models.TempatKerjaDinas
 		if isSekolahPegawai(pegawai) {
@@ -693,6 +705,10 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// IsAdminAbsensi tidak bisa menimpa data absen pegawai lain tanpa
 	// verifikasi kamera/lokasi sama sekali.
 	mux.Handle("POST /api/absensi/manual", administratorOnly(func(w http.ResponseWriter, r *http.Request) { absensiManualInputHandler(w, r, db) }))
+	// Hapus absen pulang saja (?bagian=pulang) atau seluruh baris absen hari
+	// itu (?bagian=semua) -- administrator SAJA, sama seperti input/edit
+	// manual di atas (lihat komentar pada absensiManualDeleteHandler).
+	mux.Handle("DELETE /api/absensi/manual/{id}", administratorOnly(func(w http.ResponseWriter, r *http.Request) { absensiManualDeleteHandler(w, r, db) }))
 
 	// admin/administrator saja
 	mux.Handle("GET /api/absensi/rekap", manage(func(w http.ResponseWriter, r *http.Request) { rekapAbsensi(w, r, db) }))
@@ -713,7 +729,7 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 	if claims, ok := middleware.GetClaims(r); ok && claims.IDPegawai != nil {
 		var pegawai models.Pegawai
 		if err := db.Preload("UnitKerja").First(&pegawai, *claims.IDPegawai).Error; err == nil {
-			out.Eligible = absensiEligible(item, pegawai)
+			out.Eligible = absensiEligible(item, pegawai, claims.RoleName)
 			// Titik acuan geofence yang sudah "resolved" khusus untuk pegawai
 			// ini -- lihat komentar TitikLat pada pengaturanAbsensiOut di
 			// atas untuk alasannya (AbsensiView.vue butuh titik yang SAMA
@@ -835,7 +851,7 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
 		return
 	}
-	if !absensiEligible(setting, pegawaiSelf) {
+	if !absensiEligible(setting, pegawaiSelf, claims.RoleName) {
 		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
 		return
 	}
@@ -998,7 +1014,7 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
 		return
 	}
-	if !absensiEligible(setting, pegawaiSelf) {
+	if !absensiEligible(setting, pegawaiSelf, claims.RoleName) {
 		utils.Error(w, http.StatusForbidden, "menu absen bukan untuk anda")
 		return
 	}
