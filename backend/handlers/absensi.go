@@ -686,6 +686,14 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/absensi/pengaturan", administratorOnly(func(w http.ResponseWriter, r *http.Request) { updatePengaturanAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/opsi-tempat-tugas", administratorOnly(func(w http.ResponseWriter, r *http.Request) { opsiTempatTugasAbsensi(w, r, db) }))
 
+	// Input/edit absen manual (tanggal yang tidak ada absennya, foto
+	// opsional) -- SENGAJA administrator SAJA (lihat administratorOnly di
+	// atas serta komentar pada absensiManualInputHandler di
+	// absensi_manual.go), BUKAN manage() supaya role admin & akun
+	// IsAdminAbsensi tidak bisa menimpa data absen pegawai lain tanpa
+	// verifikasi kamera/lokasi sama sekali.
+	mux.Handle("POST /api/absensi/manual", administratorOnly(func(w http.ResponseWriter, r *http.Request) { absensiManualInputHandler(w, r, db) }))
+
 	// admin/administrator saja
 	mux.Handle("GET /api/absensi/rekap", manage(func(w http.ResponseWriter, r *http.Request) { rekapAbsensi(w, r, db) }))
 	mux.Handle("GET /api/absensi/rekap/export", manage(func(w http.ResponseWriter, r *http.Request) { exportRekapAbsensi(w, r, db) }))

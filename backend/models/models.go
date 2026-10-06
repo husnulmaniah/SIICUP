@@ -1095,6 +1095,14 @@ type Absensi struct {
 	// misalnya dinas dalam saat pulang walau absen masuk normal di kantor).
 	DinasDalamPulang bool `json:"dinas_dalam_pulang" gorm:"column:dinas_dalam_pulang;default:false"`
 
+	// IsManual: baris ini dibuat/diubah oleh administrator lewat endpoint
+	// input manual (POST /api/absensi/manual), bukan oleh pegawai sendiri
+	// lewat absen masuk/pulang biasa. DiinputOlehNama mencatat nama admin
+	// yang melakukan input/edit terakhir, untuk jejak audit pada riwayat
+	// absen -- mengikuti pola AbsensiDokumen.DiinputOleh/SuratRekomendasi.DibuatOlehNama.
+	IsManual        bool   `json:"is_manual" gorm:"column:is_manual;default:false"`
+	DiinputOlehNama string `json:"diinput_oleh_nama" gorm:"column:diinput_oleh_nama"`
+
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 

@@ -616,6 +616,135 @@ function openDetail(item) {
 }
 
 // ------------------------------------------------------------
+// Input/edit absen manual (POST /absensi/manual) -- KHUSUS role
+// "administrator" (auth.isAdministrator), BUKAN auth.canManageMaster/
+// auth.isAdminAbsensi, sesuai permintaan: menu ini bisa menimpa data absen
+// pegawai lain tanpa verifikasi kamera/lokasi sama sekali, jadi sengaja
+// dibatasi lebih sempit daripada fitur Rekap Absen lain di halaman ini.
+// Dialog yang sama dipakai untuk dua pintu masuk: tombol "Edit" pada baris
+// Riwayat Absen yang sudah ada (bukaManualAbsenEdit) & tombol "Isi Absen"
+// pada daftar "Tidak Melakukan Absensi" (bukaManualAbsenTambah) -- bedanya
+// cuma nilai awal formnya.
+// ------------------------------------------------------------
+
+const manualAbsenDialog = ref(false)
+const manualAbsenSubmitting = ref(false)
+const manualAbsenForm = reactive({
+  id_pegawai: null,
+  tanggal: '',
+  jam_masuk: '',
+  terlambat_menit: 0,
+  jam_pulang: '',
+})
+const manualAbsenFotoMasuk = ref(null)
+const manualAbsenFotoPulang = ref(null)
+const manualAbsenFotoMasukInput = ref(null)
+const manualAbsenFotoPulangInput = ref(null)
+// nama pegawai & keterangan "sudah ada foto tersimpan" untuk ditampilkan di
+// header dialog -- diisi dari detailItem/row yang sedang diedit.
+const manualAbsenNamaPegawai = ref('')
+const manualAbsenAdaFotoMasuk = ref(false)
+const manualAbsenAdaFotoPulang = ref(false)
+
+function resetManualAbsenFoto() {
+  manualAbsenFotoMasuk.value = null
+  manualAbsenFotoPulang.value = null
+}
+
+function bukaManualAbsenEdit(row) {
+  manualAbsenForm.id_pegawai = detailItem.value?.pegawai?.id
+  manualAbsenNamaPegawai.value = detailItem.value?.pegawai?.nama || ''
+  manualAbsenForm.tanggal = dateKey(row.tanggal)
+  manualAbsenForm.jam_masuk = row.jam_masuk ? formatJam(row.jam_masuk) : ''
+  manualAbsenForm.terlambat_menit = row.terlambat_menit || 0
+  manualAbsenForm.jam_pulang = row.jam_pulang ? formatJam(row.jam_pulang) : ''
+  manualAbsenAdaFotoMasuk.value = !!row.jam_masuk
+  manualAbsenAdaFotoPulang.value = !!row.jam_pulang
+  resetManualAbsenFoto()
+  manualAbsenDialog.value = true
+}
+
+function bukaManualAbsenTambah(tglKey) {
+  manualAbsenForm.id_pegawai = detailItem.value?.pegawai?.id
+  manualAbsenNamaPegawai.value = detailItem.value?.pegawai?.nama || ''
+  manualAbsenForm.tanggal = tglKey
+  manualAbsenForm.jam_masuk = ''
+  manualAbsenForm.terlambat_menit = 0
+  manualAbsenForm.jam_pulang = ''
+  manualAbsenAdaFotoMasuk.value = false
+  manualAbsenAdaFotoPulang.value = false
+  resetManualAbsenFoto()
+  manualAbsenDialog.value = true
+}
+
+function closeManualAbsenDialog() {
+  manualAbsenDialog.value = false
+}
+
+function pickManualFotoMasuk() {
+  manualAbsenFotoMasukInput.value?.click()
+}
+function pickManualFotoPulang() {
+  manualAbsenFotoPulangInput.value?.click()
+}
+function onManualFotoMasukChosen(e) {
+  manualAbsenFotoMasuk.value = e.target.files[0] || null
+}
+function onManualFotoPulangChosen(e) {
+  manualAbsenFotoPulang.value = e.target.files[0] || null
+}
+
+const JAM_HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/
+
+async function submitManualAbsen() {
+  if (!manualAbsenForm.id_pegawai || !manualAbsenForm.tanggal) return
+  if (!manualAbsenForm.jam_masuk && !manualAbsenForm.jam_pulang) {
+    toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Isi minimal salah satu: jam masuk atau jam pulang', life: 4000 })
+    return
+  }
+  if (manualAbsenForm.jam_masuk && !JAM_HHMM_REGEX.test(manualAbsenForm.jam_masuk)) {
+    toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Format jam masuk harus HH:MM, contoh 07:30', life: 4000 })
+    return
+  }
+  if (manualAbsenForm.jam_pulang && !JAM_HHMM_REGEX.test(manualAbsenForm.jam_pulang)) {
+    toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Format jam pulang harus HH:MM, contoh 16:00', life: 4000 })
+    return
+  }
+  manualAbsenSubmitting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('id_pegawai', manualAbsenForm.id_pegawai)
+    fd.append('tanggal', manualAbsenForm.tanggal)
+    if (manualAbsenForm.jam_masuk) {
+      fd.append('jam_masuk', manualAbsenForm.jam_masuk)
+      fd.append('terlambat_menit', manualAbsenForm.terlambat_menit || 0)
+    }
+    if (manualAbsenForm.jam_pulang) fd.append('jam_pulang', manualAbsenForm.jam_pulang)
+    if (manualAbsenFotoMasuk.value) fd.append('foto_masuk', manualAbsenFotoMasuk.value)
+    if (manualAbsenFotoPulang.value) fd.append('foto_pulang', manualAbsenFotoPulang.value)
+    const { data } = await http.post('/absensi/manual', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    manualAbsenDialog.value = false
+    await loadRekap()
+    // dialog Detail Absen masih terbuka -- perbarui isinya dari data rekap
+    // yang baru supaya hasil edit langsung terlihat tanpa harus menutup &
+    // membuka ulang dialognya.
+    const idPegawai = detailItem.value?.pegawai?.id
+    if (idPegawai) {
+      const refreshed = rekap.value.find((it) => it.pegawai?.id === idPegawai)
+      if (refreshed) {
+        detailItem.value = refreshed
+        loadThumbnails(refreshed.absensi)
+      }
+    }
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    manualAbsenSubmitting.value = false
+  }
+}
+
+// ------------------------------------------------------------
 // unduh rekap absen SATU pegawai sebagai PDF (lihat
 // exportRekapAbsensiPegawaiPDF di handlers/absensi_pdf.go)
 // ------------------------------------------------------------
@@ -2002,6 +2131,23 @@ const defaultTab = computed(() => {
               </div>
             </template>
           </Column>
+          <!-- Kolom Aksi (edit absen manual) KHUSUS role administrator --
+               lihat komentar pada bukaManualAbsenEdit di script: menu ini
+               bisa menimpa jam/foto absen pegawai tanpa verifikasi
+               kamera/lokasi, jadi SENGAJA tidak ditampilkan untuk role admin
+               maupun akun yang hanya ditandai IsAdminAbsensi. -->
+          <Column v-if="auth.isAdministrator" header="Aksi" style="width: 70px">
+            <template #body="{ data }">
+              <Button
+                icon="pi pi-pencil"
+                size="small"
+                text
+                rounded
+                title="Edit absen manual"
+                @click="bukaManualAbsenEdit(data)"
+              />
+            </template>
+          </Column>
           <template #empty>Belum ada absen pada bulan ini.</template>
         </DataTable>
 
@@ -2029,9 +2175,91 @@ const defaultTab = computed(() => {
         <template v-if="detailItem.tanggal_terlewat?.length">
           <h4 style="margin-top: 1.25rem">Tidak Melakukan Absensi</h4>
           <ul>
-            <li v-for="tgl in detailItem.tanggal_terlewat" :key="tgl">{{ formatTanggal(tgl) }}</li>
+            <li v-for="tgl in detailItem.tanggal_terlewat" :key="tgl">
+              {{ formatTanggal(tgl) }}
+              <Button
+                v-if="auth.isAdministrator"
+                label="Isi Absen"
+                icon="pi pi-plus"
+                size="small"
+                text
+                @click="bukaManualAbsenTambah(tgl)"
+              />
+            </li>
           </ul>
         </template>
+      </template>
+    </Dialog>
+
+    <!-- Dialog input/edit absen manual -- KHUSUS role administrator (lihat
+         komentar pada state manualAbsenDialog di script). Satu dialog
+         dipakai untuk dua pintu masuk: edit baris yang sudah ada (tombol
+         Aksi pada tabel Riwayat Absen) & isi baru untuk tanggal yang tidak
+         absen (tombol "Isi Absen" pada daftar Tidak Melakukan Absensi). -->
+    <Dialog
+      v-model:visible="manualAbsenDialog"
+      modal
+      header="Input/Edit Absen Manual"
+      :style="{ width: '480px' }"
+      :breakpoints="{ '640px': '94vw' }"
+    >
+      <div>
+        <p class="text-muted" style="margin-top: 0">
+          {{ manualAbsenNamaPegawai }} -- {{ formatTanggal(manualAbsenForm.tanggal) }}
+        </p>
+
+        <div class="jam-grid" style="margin-bottom: 1rem">
+          <div>
+            <label class="field-label">Jam Masuk (HH:MM)</label>
+            <InputText v-model="manualAbsenForm.jam_masuk" placeholder="07:30" style="width: 100%" />
+          </div>
+          <div>
+            <label class="field-label">Terlambat (menit)</label>
+            <InputNumber v-model="manualAbsenForm.terlambat_menit" :min="0" showButtons style="width: 100%" />
+          </div>
+          <div>
+            <label class="field-label">Jam Pulang (HH:MM)</label>
+            <InputText v-model="manualAbsenForm.jam_pulang" placeholder="16:00" style="width: 100%" />
+          </div>
+        </div>
+
+        <div class="jam-grid" style="margin-bottom: 1rem">
+          <div>
+            <label class="field-label">Foto Masuk (opsional)</label>
+            <input ref="manualAbsenFotoMasukInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onManualFotoMasukChosen" />
+            <Button
+              class="berkas-btn"
+              :label="manualAbsenFotoMasuk ? manualAbsenFotoMasuk.name : manualAbsenAdaFotoMasuk ? 'Ganti Foto' : 'Pilih Foto'"
+              icon="pi pi-camera"
+              size="small"
+              severity="secondary"
+              outlined
+              @click="pickManualFotoMasuk"
+            />
+          </div>
+          <div>
+            <label class="field-label">Foto Pulang (opsional)</label>
+            <input ref="manualAbsenFotoPulangInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onManualFotoPulangChosen" />
+            <Button
+              class="berkas-btn"
+              :label="manualAbsenFotoPulang ? manualAbsenFotoPulang.name : manualAbsenAdaFotoPulang ? 'Ganti Foto' : 'Pilih Foto'"
+              icon="pi pi-camera"
+              size="small"
+              severity="secondary"
+              outlined
+              @click="pickManualFotoPulang"
+            />
+          </div>
+        </div>
+
+        <Message severity="info" :closable="false">
+          Isi minimal salah satu jam (masuk/pulang). Foto bersifat opsional -- kalau tidak dipilih, foto yang sudah tersimpan (kalau ada) tidak akan diubah.
+        </Message>
+      </div>
+
+      <template #footer>
+        <Button label="Batal" severity="secondary" outlined @click="closeManualAbsenDialog" />
+        <Button label="Simpan" icon="pi pi-save" :loading="manualAbsenSubmitting" @click="submitManualAbsen" />
       </template>
     </Dialog>
 
