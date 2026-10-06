@@ -172,6 +172,7 @@ const navSections = computed(() => {
         { label: 'Pengajuan Pensiun', icon: 'pi pi-briefcase', to: '/pengajuan-pensiun' },
         { label: 'Penerima TPP', icon: 'pi pi-money-bill', to: '/penerima-tpp' },
         { label: 'Surat Rekomendasi', icon: 'pi pi-send', to: '/surat-rekomendasi' },
+        { label: 'Berita Acara', icon: 'pi pi-file-edit', to: '/berita-acara' },
         { label: 'Jatah Cuti Tahunan', icon: 'pi pi-wallet', to: '/master/jatah-cuti' },
       ],
     })

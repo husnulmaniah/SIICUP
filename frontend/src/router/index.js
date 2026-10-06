@@ -20,6 +20,7 @@ import Kp4View from '../views/Kp4View.vue'
 import Kp4AdminView from '../views/Kp4AdminView.vue'
 import PengaturanKp4View from '../views/PengaturanKp4View.vue'
 import SuratRekomendasiView from '../views/SuratRekomendasiView.vue'
+import BeritaAcaraView from '../views/BeritaAcaraView.vue'
 import ArsipSuratView from '../views/ArsipSuratView.vue'
 import KopSuratSekolahView from '../views/KopSuratSekolahView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
@@ -72,6 +73,7 @@ const routes = [
       // (terima, khusus pegawai/atasan) -- dua sisi dari fitur yang sama,
       // lihat backend/handlers/surat_rekomendasi.go.
       { path: 'surat-rekomendasi', name: 'surat-rekomendasi', component: SuratRekomendasiView, meta: { roles: ['administrator', 'admin'] } },
+      { path: 'berita-acara', name: 'berita-acara', component: BeritaAcaraView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'arsip-surat', name: 'arsip-surat', component: ArsipSuratView, meta: { roles: ['pegawai', 'atasan'] } },
       // Kop Surat Sekolah: KHUSUS atasan yang bertugas di Sekolah/Puskesmas
       // (lihat auth.isSekolah, flag is_sekolah dari backend saat login) --

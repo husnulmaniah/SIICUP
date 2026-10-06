@@ -1192,6 +1192,13 @@ type AbsensiDokumen struct {
 	NamaFile   string    `json:"nama_file" gorm:"column:nama_file;size:255"`
 	File       []byte    `json:"-" gorm:"column:file;type:bytea"`
 	Keterangan string    `json:"keterangan" gorm:"column:keterangan;size:255"`
+	// Nomor: nomor surat opsional, SEJAUH INI hanya diisi oleh menu Berita
+	// Acara (lihat handlers/berita_acara.go) -- dicetak di PDF yang
+	// dihasilkan otomatis & ditampilkan di daftar menu itu supaya admin bisa
+	// mengenali suratnya tanpa harus membuka berkasnya dulu. Baris lama dari
+	// alur upload manual (inputAbsensiDokumenKolektif) tetap nil/"" --
+	// ditampilkan "-" di frontend, bukan error.
+	Nomor *string `json:"nomor,omitempty" gorm:"column:nomor;size:150"`
 	// IDDiinputOleh/DiinputOleh: akun (user) yang menekan "Input Surat" lewat
 	// inputAbsensiDokumenKolektif (menu Rekap Absen -> tab "Surat Kolektif").
 	// Baris lama (sebelum kolom ini ada) akan bernilai nil -- ditampilkan
