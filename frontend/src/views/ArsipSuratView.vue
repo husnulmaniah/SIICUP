@@ -10,6 +10,9 @@ import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import Textarea from 'primevue/textarea'
 
 // ArsipSuratView -- menu "Arsip Surat" (pegawai/atasan): daftar surat
 // rekomendasi perpanjangan kontrak, bisa dilihat/diunduh sebagai PDF kapan
@@ -160,6 +163,139 @@ async function doApprove(item) {
     approving.value = null
   }
 }
+
+// ------------------------------------------------------------
+// Pengajuan Berita Acara MANDIRI bawahan (KHUSUS akun atasan, lihat
+// handlers/pengajuan_berita_acara.go) -- tahap PERTAMA dari dua tahap
+// persetujuan: atasan menyetujui/mengembalikan di sini, BARU diteruskan ke
+// administrator/admin tahap akhir (lihat tab "Verifikasi Berita Acara
+// Sekolah" di RekapAbsensiView.vue). Status "semua" dimuat sekaligus (bukan
+// cuma "menunggu_atasan") supaya atasan juga bisa melihat riwayat pengajuan
+// bawahannya yang sudah diproses.
+// ------------------------------------------------------------
+
+const baList = ref([])
+const loadingBa = ref(false)
+
+async function loadBaList() {
+  if (!authStore.isAtasan) return
+  loadingBa.value = true
+  try {
+    const { data } = await http.get('/pengajuan-berita-acara/bawahan', { params: { status: 'semua' } })
+    baList.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    loadingBa.value = false
+  }
+}
+
+function formatTanggalBa(v) {
+  if (!v) return '-'
+  const [y, m, d] = v.split('-')
+  return `${d}-${m}-${y}`
+}
+function statusBaSeverity(status) {
+  if (status === 'disetujui') return 'success'
+  if (status === 'dikembalikan_atasan' || status === 'dikembalikan_admin') return 'danger'
+  return 'warn'
+}
+function statusBaLabel(status) {
+  if (status === 'menunggu_atasan') return 'Menunggu Persetujuan Anda'
+  if (status === 'menunggu_admin') return 'Menunggu Persetujuan Admin'
+  if (status === 'disetujui') return 'Disetujui'
+  if (status === 'dikembalikan_atasan') return 'Dikembalikan (oleh Anda)'
+  if (status === 'dikembalikan_admin') return 'Dikembalikan Admin'
+  return status
+}
+
+async function lihatBa(item) {
+  previewTitle.value = `Berita Acara -- ${item.pegawai?.nama || ''}`
+  try {
+    const res = await http.get(`/pengajuan-berita-acara/${item.id}/file`, { params: { inline: 1 }, responseType: 'blob' })
+    previewObjectUrl = URL.createObjectURL(res.data)
+    previewPdfUrl.value = previewObjectUrl
+    previewDialog.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal membuka berkas', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+async function unduhBa(item) {
+  try {
+    const res = await http.get(`/pengajuan-berita-acara/${item.id}/file`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = item.nama_file || 'berita_acara.pdf'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+const approvingBa = ref(null)
+function confirmApproveBa(item) {
+  confirm.require({
+    message: `Setujui pengajuan Berita Acara tanggal ${formatTanggalBa(item.tanggal_kejadian)} dari ${item.pegawai?.nama || 'pegawai ini'}? Akan diteruskan ke administrator/admin untuk persetujuan tahap akhir.`,
+    header: 'Konfirmasi Persetujuan',
+    icon: 'pi pi-question-circle',
+    acceptLabel: 'Ya, Setujui',
+    rejectLabel: 'Batal',
+    acceptProps: { severity: 'success' },
+    accept: () => doApproveBa(item),
+  })
+}
+async function doApproveBa(item) {
+  approvingBa.value = item.id
+  try {
+    const { data } = await http.put(`/pengajuan-berita-acara/${item.id}/setujui-atasan`)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+    await loadBaList()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyetujui', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    approvingBa.value = null
+  }
+}
+
+const kembalikanBaDialog = ref(false)
+const kembalikanBaItem = ref(null)
+const kembalikanBaCatatan = ref('')
+const submittingKembalikanBa = ref(false)
+function bukaKembalikanBa(item) {
+  kembalikanBaItem.value = item
+  kembalikanBaCatatan.value = ''
+  kembalikanBaDialog.value = true
+}
+function closeKembalikanBa() {
+  kembalikanBaDialog.value = false
+  kembalikanBaItem.value = null
+}
+async function submitKembalikanBa() {
+  if (!kembalikanBaCatatan.value.trim()) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Catatan wajib diisi', life: 4000 })
+    return
+  }
+  submittingKembalikanBa.value = true
+  try {
+    const fd = new FormData()
+    fd.append('catatan', kembalikanBaCatatan.value.trim())
+    const { data } = await http.put(`/pengajuan-berita-acara/${kembalikanBaItem.value.id}/kembalikan-atasan`, fd)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    closeKembalikanBa()
+    await loadBaList()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    submittingKembalikanBa.value = false
+  }
+}
+
+onMounted(loadBaList)
 </script>
 
 <template>
@@ -221,8 +357,75 @@ async function doApprove(item) {
       </div>
     </div>
 
+    <!-- ================= Pengajuan Berita Acara mandiri bawahan (khusus atasan) ================= -->
+    <template v-if="authStore.isAtasan">
+      <h3 style="margin-top: 2rem">Pengajuan Berita Acara Bawahan</h3>
+      <p class="page-subtitle">
+        Pengajuan Berita Acara mandiri bawahan Anda yang bertugas di sekolah. Setujui untuk meneruskan ke
+        administrator/admin (persetujuan tahap akhir), atau kembalikan untuk direvisi (wajib isi catatan).
+      </p>
+      <div v-if="loadingBa" style="display: flex; justify-content: center; padding: 2rem">
+        <ProgressSpinner style="width: 36px; height: 36px" />
+      </div>
+      <Message v-else-if="!baList.length" severity="info" :closable="false">Belum ada pengajuan Berita Acara dari bawahan Anda.</Message>
+      <DataTable v-else :value="baList" size="small" stripedRows responsiveLayout="scroll">
+        <Column header="Pegawai">
+          <template #body="{ data }">{{ data.pegawai?.nama }}</template>
+        </Column>
+        <Column header="Tanggal Kejadian">
+          <template #body="{ data }">{{ formatTanggalBa(data.tanggal_kejadian) }}</template>
+        </Column>
+        <Column field="alasan" header="Alasan" />
+        <Column header="Status">
+          <template #body="{ data }">
+            <Tag :severity="statusBaSeverity(data.status)" :value="statusBaLabel(data.status)" />
+          </template>
+        </Column>
+        <Column header="Aksi">
+          <template #body="{ data }">
+            <Button icon="pi pi-eye" size="small" text rounded title="Lihat PDF" @click="lihatBa(data)" />
+            <Button icon="pi pi-download" size="small" text rounded title="Unduh PDF" @click="unduhBa(data)" />
+            <template v-if="data.status === 'menunggu_atasan'">
+              <Button
+                icon="pi pi-check"
+                size="small"
+                text
+                rounded
+                severity="success"
+                title="Setujui"
+                :loading="approvingBa === data.id"
+                @click="confirmApproveBa(data)"
+              />
+              <Button icon="pi pi-undo" size="small" text rounded severity="danger" title="Kembalikan untuk direvisi" @click="bukaKembalikanBa(data)" />
+            </template>
+          </template>
+        </Column>
+      </DataTable>
+    </template>
+
     <Dialog v-model:visible="previewDialog" modal :header="previewTitle" style="width: 90vw; max-width: 900px" @hide="tutupPreview">
       <iframe :src="previewPdfUrl" class="preview-frame"></iframe>
+    </Dialog>
+
+    <!-- ================= dialog kembalikan pengajuan Berita Acara (tahap atasan) ================= -->
+    <Dialog
+      v-model:visible="kembalikanBaDialog"
+      modal
+      header="Kembalikan Berita Acara untuk Direvisi"
+      :style="{ width: '440px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeKembalikanBa"
+    >
+      <p class="text-muted">
+        Pengajuan dari <b>{{ kembalikanBaItem?.pegawai?.nama }}</b> akan dikembalikan untuk direvisi &amp; diajukan
+        ulang. Jelaskan apa yang perlu diperbaiki.
+      </p>
+      <label style="font-weight: 600; display: block; margin-bottom: 0.35rem">Catatan (wajib)</label>
+      <Textarea v-model="kembalikanBaCatatan" rows="3" style="width: 100%" autofocus />
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="closeKembalikanBa" />
+        <Button label="Kembalikan" icon="pi pi-undo" severity="danger" :loading="submittingKembalikanBa" @click="submitKembalikanBa" />
+      </template>
     </Dialog>
   </div>
 </template>

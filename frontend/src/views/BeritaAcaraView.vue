@@ -134,7 +134,12 @@ async function loadAlasanOptions() {
 const PEGAWAI_PAGE_SIZE = 100
 
 function toPegawaiOption(p) {
-  return { label: `${p.nama} (${p.nip})`, value: p.id }
+  // isSekolah: ikut dibawa dari field is_sekolah hasil GET /api/pegawai (lihat
+  // handlers/pegawai.go -- listPegawai) -- dipakai isDinasOnly di bawah untuk
+  // mendeteksi otomatis apakah SELURUH pegawai terpilih bertempat tugas
+  // Dinas/Kantor (penandatangan auto-resolve, field Penandatangan disembunyikan)
+  // atau ada yang Sekolah (penandatangan tetap dipilih manual seperti biasa).
+  return { label: `${p.nama} (${p.nip})`, value: p.id, isSekolah: !!p.is_sekolah }
 }
 
 function makePegawaiPicker() {
@@ -246,12 +251,29 @@ const idPegawaiTerpilih = computed(() =>
     : form.value.id_pegawai_kolektif
 )
 
+// isDinasOnly: true kalau SELURUH pegawai yang sudah terpilih sama-sama
+// bertempat tugas Dinas/Kantor (tidak satupun Sekolah) -- pegawaiPicker.terpilihCache
+// menyimpan objek opsi (termasuk isSekolah) dari setiap id yang pernah
+// terpilih (lihat ingatTerpilih di makePegawaiPicker), jadi tetap akurat
+// walau daftar options sudah berubah karena pencarian baru. Hanya penanda di
+// SISI FRONTEND untuk menyembunyikan field Penandatangan -- backend (lihat
+// buatBeritaAcara di handlers/berita_acara.go) mengecek ULANG hal yang sama
+// sebagai sumber kebenaran sebenarnya, jadi tidak masalah kalau deteksi di
+// sini meleset sedikit (field tetap bisa diisi manual kalau ternyata backend
+// menilai beda).
+const isDinasOnly = computed(() => {
+  const ids = idPegawaiTerpilih.value
+  if (ids.length === 0) return false
+  const dikenal = new Map(pegawaiPicker.terpilihCache.value.map((o) => [o.value, o]))
+  return ids.every((id) => dikenal.get(id) && !dikenal.get(id).isSekolah)
+})
+
 async function submitBuat() {
   if (idPegawaiTerpilih.value.length === 0) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih minimal satu pegawai', life: 4000 })
     return
   }
-  if (!form.value.id_penandatangan) {
+  if (!isDinasOnly.value && !form.value.id_penandatangan) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Penandatangan (yang mengetahui) wajib dipilih', life: 4000 })
     return
   }
@@ -462,7 +484,14 @@ onMounted(() => {
         <small class="text-muted">Boleh mencampur pegawai dari unit kerja yang berbeda dalam satu Berita Acara.</small>
       </div>
 
-      <div class="form-field">
+      <div class="form-field" v-if="isDinasOnly">
+        <label>Penandatangan (Yang Mengetahui)</label>
+        <Message severity="info" :closable="false">
+          Otomatis -- Kepala Dinas/Plt Kepala Dinas sesuai menu Pengaturan Surat, karena seluruh pegawai yang dipilih
+          bertempat tugas Dinas/Kantor. QR tanda tangan akan langsung disertakan pada PDF, tidak perlu dipilih manual.
+        </Message>
+      </div>
+      <div class="form-field" v-else>
         <label>Penandatangan (Yang Mengetahui)</label>
         <Select
           v-model="form.id_penandatangan"

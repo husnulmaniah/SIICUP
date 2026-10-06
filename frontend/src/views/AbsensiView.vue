@@ -409,6 +409,155 @@ function statusPengajuanLabel(status) {
 }
 
 // ============================================================
+// Ajukan Berita Acara mandiri (khusus pegawai bertugas di sekolah -- lihat
+// isSekolahSaya di atas) untuk SATU tanggal absen yang kosong, lewat
+// handlers/pengajuan_berita_acara.go -- BEDA dari "Ajukan Surat Kolektif" di
+// atas: SATU tanggal saja (bukan banyak sekaligus), alasan dipilih dari
+// daftar 4 pilihan tetap (SAMA dengan menu Berita Acara admin, lihat
+// AlasanBeritaAcaraOptions), dan PDF-nya dibuat OTOMATIS oleh server --
+// pegawai TIDAK upload berkas sendiri. Alur DUA TAHAP: atasan langsung
+// menyetujui dulu (lihat ArsipSuratView.vue), BARU administrator/admin/admin
+// absen/admin verifikasi menyetujui tahap akhir -- baru di situ absen
+// tanggal ini otomatis tercatat DD (Dinas Dalam) - Berita Acara.
+// ============================================================
+
+const alasanBaOptions = ref(['Jaringan tidak bagus', 'Server Error', 'Motor Rusak', 'Banjir'])
+async function loadAlasanBaOptions() {
+  try {
+    const { data } = await http.get('/berita-acara/alasan-options')
+    if (Array.isArray(data.data) && data.data.length) alasanBaOptions.value = data.data
+  } catch {
+    // tetap pakai daftar bawaan di atas
+  }
+}
+
+const pengajuanBaSayaList = ref([])
+async function loadPengajuanBaSaya() {
+  try {
+    const { data } = await http.get('/pengajuan-berita-acara/saya')
+    pengajuanBaSayaList.value = data.data || []
+  } catch {
+    // tidak kritikal -- daftar cukup dibiarkan kosong kalau gagal
+  }
+}
+
+// opsi tanggal SATUAN (bukan MultiSelect seperti Surat Kolektif) -- memakai
+// SUMBER tanggal yang sama (tanggal_bisa_diajukan), ditambah tanggal milik
+// pengajuan yang sedang diedit (kalau ada) supaya tetap terlihat walau sudah
+// lewat dari bulan yang sedang dilihat.
+function opsiTanggalBaUntuk(extraDate) {
+  const set = new Set(riwayat.value.tanggal_bisa_diajukan || [])
+  if (extraDate) set.add(extraDate)
+  return Array.from(set)
+    .sort()
+    .map((t) => ({ label: formatTanggal(t), value: t }))
+}
+const opsiTanggalBa = computed(() => opsiTanggalBaUntuk(editBaItem.value ? editBaItem.value.tanggal_kejadian : null))
+
+const pengajuanBaForm = ref({ tanggal_kejadian: null, alasan: null })
+const submittingPengajuanBa = ref(false)
+
+async function submitPengajuanBa() {
+  if (!pengajuanBaForm.value.tanggal_kejadian) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih tanggal kejadian', life: 4000 })
+    return
+  }
+  if (!pengajuanBaForm.value.alasan) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih alasan', life: 4000 })
+    return
+  }
+  submittingPengajuanBa.value = true
+  try {
+    const { data } = await http.post('/pengajuan-berita-acara', {
+      tanggal_kejadian: pengajuanBaForm.value.tanggal_kejadian,
+      alasan: pengajuanBaForm.value.alasan,
+    })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+    pengajuanBaForm.value = { tanggal_kejadian: null, alasan: null }
+    await Promise.all([loadPengajuanBaSaya(), loadRiwayat()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 7000 })
+  } finally {
+    submittingPengajuanBa.value = false
+  }
+}
+
+// dialog edit & ajukan ulang -- hanya untuk status "dikembalikan_atasan"/
+// "dikembalikan_admin" (lihat statusBaBisaEdit di bawah).
+const editBaDialog = ref(false)
+const editBaItem = ref(null)
+const editBaForm = ref({ tanggal_kejadian: null, alasan: null })
+const submittingEditBa = ref(false)
+
+function bukaEditBa(item) {
+  editBaItem.value = item
+  editBaForm.value = { tanggal_kejadian: item.tanggal_kejadian, alasan: item.alasan }
+  editBaDialog.value = true
+}
+function closeEditBa() {
+  editBaDialog.value = false
+  editBaItem.value = null
+}
+async function submitEditBa() {
+  if (!editBaForm.value.tanggal_kejadian || !editBaForm.value.alasan) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih tanggal & alasan', life: 4000 })
+    return
+  }
+  submittingEditBa.value = true
+  try {
+    const { data } = await http.put(`/pengajuan-berita-acara/${editBaItem.value.id}`, {
+      tanggal_kejadian: editBaForm.value.tanggal_kejadian,
+      alasan: editBaForm.value.alasan,
+    })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+    closeEditBa()
+    await Promise.all([loadPengajuanBaSaya(), loadRiwayat()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 7000 })
+  } finally {
+    submittingEditBa.value = false
+  }
+}
+
+async function downloadPengajuanBaFile(item) {
+  try {
+    const res = await http.get(`/pengajuan-berita-acara/${item.id}/file`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = item.nama_file || 'berita_acara.pdf'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
+function statusBaBisaEdit(status) {
+  return status === 'dikembalikan_atasan' || status === 'dikembalikan_admin'
+}
+function statusBaSeverity(status) {
+  if (status === 'disetujui') return 'success'
+  if (statusBaBisaEdit(status)) return 'danger'
+  return 'warn'
+}
+function statusBaLabel(status) {
+  if (status === 'menunggu_atasan') return 'Menunggu Persetujuan Atasan'
+  if (status === 'menunggu_admin') return 'Menunggu Persetujuan Admin'
+  if (status === 'disetujui') return 'Disetujui'
+  if (status === 'dikembalikan_atasan') return 'Dikembalikan Atasan (perlu revisi)'
+  if (status === 'dikembalikan_admin') return 'Dikembalikan Admin (perlu revisi)'
+  return status
+}
+function catatanBaTerkini(item) {
+  if (item.status === 'dikembalikan_atasan') return item.catatan_atasan || '-'
+  if (item.status === 'dikembalikan_admin') return item.catatan_admin || '-'
+  return '-'
+}
+
+// ============================================================
 // thumbnail foto absen (ditampilkan langsung di tabel riwayat)
 // ============================================================
 
@@ -463,7 +612,15 @@ watch(periodDate, () => loadRiwayat())
 
 onMounted(async () => {
   await loadPengaturan()
-  await Promise.all([loadRiwayat(), loadDokumen(), loadStatusHariIni(), loadJenisSuratOptions(), loadPengajuanSaya()])
+  await Promise.all([
+    loadRiwayat(),
+    loadDokumen(),
+    loadStatusHariIni(),
+    loadJenisSuratOptions(),
+    loadPengajuanSaya(),
+    loadAlasanBaOptions(),
+    loadPengajuanBaSaya(),
+  ])
 })
 
 function formatTanggal(key) {
@@ -1260,6 +1417,74 @@ async function downloadDokumen(item) {
         </div>
       </div>
 
+      <div v-if="isSekolahSaya" class="section">
+        <h3>Ajukan Berita Acara</h3>
+        <Message severity="info" :closable="false">
+          Khusus pegawai bertugas di sekolah: ajukan Berita Acara untuk SATU tanggal absen yang kosong (tidak dapat
+          absen online). "Yang Mengetahui" otomatis diisi atasan langsung Anda -- PDF dibuat otomatis oleh sistem,
+          tidak perlu upload berkas. Pengajuan menunggu persetujuan atasan Anda dulu, BARU persetujuan tahap akhir
+          administrator/admin -- absen tanggal ini baru tercatat DD (Dinas Dalam) - Berita Acara setelah KEDUA
+          persetujuan selesai.
+        </Message>
+        <div class="kolektif-self-form">
+          <div class="field">
+            <label>Tanggal Kejadian</label>
+            <Select
+              v-model="pengajuanBaForm.tanggal_kejadian"
+              :options="opsiTanggalBa"
+              optionLabel="label"
+              optionValue="value"
+              placeholder="Pilih tanggal"
+              filter
+              style="width: 100%"
+            />
+            <small v-if="!opsiTanggalBa.length" class="text-muted">Tidak ada tanggal yang bisa diajukan pada bulan yang sedang dilihat.</small>
+          </div>
+          <div class="field">
+            <label>Alasan</label>
+            <Select
+              v-model="pengajuanBaForm.alasan"
+              :options="alasanBaOptions"
+              placeholder="Pilih alasan"
+              style="width: 100%"
+            />
+          </div>
+          <Button label="Ajukan" icon="pi pi-send" :loading="submittingPengajuanBa" @click="submitPengajuanBa" />
+        </div>
+
+        <div v-if="pengajuanBaSayaList.length" class="pengajuan-saya-list">
+          <h4>Pengajuan Berita Acara Saya</h4>
+          <DataTable :value="pengajuanBaSayaList" size="small" stripedRows responsiveLayout="scroll">
+            <Column header="Tanggal Kejadian">
+              <template #body="{ data }">{{ formatTanggal(data.tanggal_kejadian) }}</template>
+            </Column>
+            <Column field="alasan" header="Alasan" />
+            <Column header="Status">
+              <template #body="{ data }">
+                <Tag :severity="statusBaSeverity(data.status)" :value="statusBaLabel(data.status)" />
+              </template>
+            </Column>
+            <Column header="Catatan">
+              <template #body="{ data }">{{ catatanBaTerkini(data) }}</template>
+            </Column>
+            <Column header="Aksi">
+              <template #body="{ data }">
+                <Button icon="pi pi-download" size="small" text rounded title="Unduh PDF" @click="downloadPengajuanBaFile(data)" />
+                <Button
+                  v-if="statusBaBisaEdit(data.status)"
+                  icon="pi pi-pencil"
+                  size="small"
+                  text
+                  rounded
+                  title="Edit & ajukan ulang"
+                  @click="bukaEditBa(data)"
+                />
+              </template>
+            </Column>
+          </DataTable>
+        </div>
+      </div>
+
       <div v-if="dokumenList.length" class="section">
         <h3>Surat Pendukung (Diinput Administrator)</h3>
         <p class="text-muted">Surat berikut diinput oleh administrator/admin untuk melengkapi tanggal absen Anda.</p>
@@ -1441,6 +1666,45 @@ async function downloadDokumen(item) {
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeEditPengajuan" />
         <Button label="Ajukan Ulang" icon="pi pi-send" :loading="submittingEditPengajuan" @click="submitEditPengajuan" />
+      </template>
+    </Dialog>
+
+    <!-- ================= dialog edit & ajukan ulang pengajuan Berita Acara ================= -->
+    <Dialog
+      v-model:visible="editBaDialog"
+      modal
+      header="Edit &amp; Ajukan Ulang Berita Acara"
+      :style="{ width: '440px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeEditBa"
+    >
+      <Message v-if="editBaItem && catatanBaTerkini(editBaItem) !== '-'" severity="warn" :closable="false" style="margin-bottom: 1rem">
+        Catatan: {{ catatanBaTerkini(editBaItem) }}
+      </Message>
+      <div class="field">
+        <label>Tanggal Kejadian</label>
+        <Select
+          v-model="editBaForm.tanggal_kejadian"
+          :options="opsiTanggalBa"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Pilih tanggal"
+          filter
+          style="width: 100%"
+        />
+      </div>
+      <div class="field">
+        <label>Alasan</label>
+        <Select
+          v-model="editBaForm.alasan"
+          :options="alasanBaOptions"
+          placeholder="Pilih alasan"
+          style="width: 100%"
+        />
+      </div>
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="closeEditBa" />
+        <Button label="Ajukan Ulang" icon="pi pi-send" :loading="submittingEditBa" @click="submitEditBa" />
       </template>
     </Dialog>
   </div>

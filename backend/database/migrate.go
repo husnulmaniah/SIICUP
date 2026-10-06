@@ -49,26 +49,42 @@ func Migrate(db *gorm.DB) {
 		&models.Kp4Anak{},
 		&models.PengaturanKp4{},
 		&models.SuratRekomendasi{},
+		&models.PengajuanBeritaAcara{},
 	)
 	if err != nil {
 		log.Fatalf("gagal migrasi database: %v", err)
 	}
 
-	// Seed 4 jenis surat kolektif bawaan (sekali saja, kalau tabel masih
-	// kosong) -- slug-nya disamakan dengan konstanta AbsensiDokumen* di
-	// models.go supaya data lama yang sudah tersimpan di kolom
-	// absensi_dokumen.jenis tetap valid & tetap cocok dengan baris ini.
-	var jenisSuratCount int64
-	db.Model(&models.JenisSurat{}).Count(&jenisSuratCount)
-	if jenisSuratCount == 0 {
-		defaultJenisSurat := []models.JenisSurat{
-			{Slug: models.AbsensiDokumenSuratTugas, Nama: "Surat Tugas", Kode: "DD"},
-			{Slug: models.AbsensiDokumenBeritaAcara, Nama: "Berita Acara", Kode: "DD"},
-			{Slug: models.AbsensiDokumenSuratIzin, Nama: "Surat Izin", Kode: "I"},
-			{Slug: models.AbsensiDokumenSKS, Nama: "SKS -- Surat Keterangan Sakit", Kode: "S"},
-		}
-		if err := db.Create(&defaultJenisSurat).Error; err != nil {
-			log.Printf("peringatan: gagal seed jenis_surat bawaan: %v", err)
+	// Seed jenis surat kolektif bawaan -- slug-nya disamakan dengan konstanta
+	// AbsensiDokumen* di models.go supaya data lama yang sudah tersimpan di
+	// kolom absensi_dokumen.jenis tetap valid & tetap cocok dengan baris ini.
+	//
+	// PENTING: dicek SATU PER SATU per slug (bukan "kalau tabel masih kosong"
+	// seperti sebelumnya) -- bug yang pernah terjadi di produksi: baris
+	// "Berita Acara" ditambahkan ke daftar ini belakangan, setelah database
+	// produksi SUDAH terisi 3 baris bawaan lainnya (Surat Tugas/Surat Izin/
+	// SKS), sehingga pengecekan lama (jenisSuratCount == 0) selalu false dan
+	// baris "Berita Acara" TIDAK PERNAH ikut ter-seed -- membuat menu Berita
+	// Acara gagal total dengan error 500 ("master Jenis Surat \"Berita
+	// Acara\" tidak ditemukan"). Dengan pengecekan per-slug ini, baris baru
+	// yang ditambahkan ke daftar di masa depan akan otomatis ikut dibuat di
+	// database manapun (baru maupun yang sudah lama berjalan), bukan hanya
+	// database yang benar-benar kosong.
+	defaultJenisSurat := []models.JenisSurat{
+		{Slug: models.AbsensiDokumenSuratTugas, Nama: "Surat Tugas", Kode: "DD"},
+		{Slug: models.AbsensiDokumenBeritaAcara, Nama: "Berita Acara", Kode: "DD"},
+		{Slug: models.AbsensiDokumenSuratIzin, Nama: "Surat Izin", Kode: "I"},
+		{Slug: models.AbsensiDokumenSKS, Nama: "SKS -- Surat Keterangan Sakit", Kode: "S"},
+	}
+	for _, js := range defaultJenisSurat {
+		var existing models.JenisSurat
+		err := db.Where("slug = ?", js.Slug).First(&existing).Error
+		if err == gorm.ErrRecordNotFound {
+			if err := db.Create(&js).Error; err != nil {
+				log.Printf("peringatan: gagal seed jenis_surat slug=%s: %v", js.Slug, err)
+			}
+		} else if err != nil {
+			log.Printf("peringatan: gagal cek jenis_surat slug=%s: %v", js.Slug, err)
 		}
 	}
 

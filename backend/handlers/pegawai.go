@@ -847,6 +847,14 @@ func listPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pegawai")
 		return
 	}
+	// isi field virtual IsSekolah (lihat komentar di models.Pegawai) -- dipakai
+	// menu Berita Acara (frontend) untuk mendeteksi otomatis Dinas vs Sekolah
+	// per pegawai hasil pencarian ini, SEBELUM pegawai itu dipilih/dikirim ke
+	// POST /api/berita-acara (yang mengecek ULANG di server, sumber kebenaran
+	// sebenarnya ada di sana -- field ini murni kenyamanan tampilan frontend).
+	for i := range items {
+		items[i].IsSekolah = isSekolahPegawai(items[i])
+	}
 	utils.SuccessMeta(w, "ok", items, map[string]interface{}{"page": page, "pageSize": pageSize, "total": total})
 }
 

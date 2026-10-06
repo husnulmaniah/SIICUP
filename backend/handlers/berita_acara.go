@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"cuti-app/models"
 	"cuti-app/utils"
 
+	"github.com/skip2/go-qrcode"
 	"gorm.io/gorm"
 )
 
@@ -88,8 +90,16 @@ func RegisterBeritaAcaraRoutes(mux *http.ServeMux, db *gorm.DB) {
 	}
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 
+	// alasan-options: dibuka untuk SEMUA role yang sudah login (bukan cuma
+	// manage()/administrator-admin) -- pegawai bertugas di sekolah juga perlu
+	// daftar 4 alasan tetap yang sama ini untuk form "Ajukan Berita Acara"
+	// mandiri di menu Absen (lihat handlers/pengajuan_berita_acara.go &
+	// AbsensiView.vue), bukan cuma dialog admin-langsung di menu ini.
+	anyRole := func(h http.HandlerFunc) http.Handler {
+		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db))
+	}
 	mux.Handle("GET /api/berita-acara", manage(func(w http.ResponseWriter, r *http.Request) { listBeritaAcara(w, r, db) }))
-	mux.Handle("GET /api/berita-acara/alasan-options", manage(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/berita-acara/alasan-options", anyRole(func(w http.ResponseWriter, r *http.Request) {
 		utils.Success(w, "ok", AlasanBeritaAcaraOptions)
 	}))
 	mux.Handle("POST /api/berita-acara", manage(func(w http.ResponseWriter, r *http.Request) { buatBeritaAcara(w, r, db) }))
@@ -257,10 +267,6 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "Berita Acara individu hanya untuk satu pegawai -- pilih \"Kolektif\" untuk lebih dari satu pegawai")
 		return
 	}
-	if payload.IDPenandatangan == 0 {
-		utils.Error(w, http.StatusBadRequest, "penandatangan (yang mengetahui) wajib dipilih")
-		return
-	}
 
 	alasan := strings.TrimSpace(payload.Alasan)
 	if !isAlasanBeritaAcaraValid(alasan) {
@@ -308,14 +314,58 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		}
 	}
 
-	var penandatangan models.Pegawai
-	queryTtd := db
-	for _, pl := range pegawaiPreloads {
-		queryTtd = queryTtd.Preload(pl)
+	// Penandatangan ("Yang Mengetahui"): KALAU seluruh pegawai yang dipilih
+	// (pegawaiTerpilih, SEBELUM penyaringan yang sudah hadir di bawah) sama-sama
+	// bertempat tugas Dinas/Kantor (isSekolahPegawai mengembalikan false untuk
+	// SEMUANYA), penandatangan di-auto-resolve mengikuti pola persis Surat
+	// Rekomendasi Lampiran 2 (resolveSignerFullRekomendasi, baca
+	// models.PengaturanSurat -- Kepala Dinas/Plt Kepala Dinas) -- field
+	// id_penandatangan dari frontend DIABAIKAN sama sekali untuk kasus ini
+	// (tidak bisa diubah manual, sesuai permintaan pengguna), dan QR tanda
+	// tangan langsung disertakan di PDF (tidak ada proses approval terpisah
+	// untuk Berita Acara Dinas, sama seperti Lampiran 2). KALAU ada SATU pun
+	// pegawai terpilih yang bertempat tugas Sekolah (termasuk campuran
+	// Dinas+Sekolah), penandatangan TETAP dipilih manual seperti sebelumnya
+	// (field id_penandatangan wajib diisi, TANPA QR -- menu ini tetap jalur
+	// cepat admin-langsung, berbeda dari alur pengajuan BA sekolah yang baru
+	// -- lihat pengajuan_berita_acara.go).
+	isDinasOnly := true
+	for _, pg := range pegawaiTerpilih {
+		if isSekolahPegawai(pg) {
+			isDinasOnly = false
+			break
+		}
 	}
-	if err := queryTtd.First(&penandatangan, payload.IDPenandatangan).Error; err != nil {
-		utils.Error(w, http.StatusBadRequest, "data penandatangan tidak ditemukan")
-		return
+
+	var signer beritaAcaraSigner
+	if isDinasOnly {
+		var pengaturan models.PengaturanSurat
+		db.First(&pengaturan, 1)
+		nama, nip, jabatan, pangkatGol, unitKerja := resolveSignerFullRekomendasi(db, pengaturan)
+		signer = beritaAcaraSigner{
+			Nama: nama, NIP: nip, Jabatan: jabatan, PangkatGol: pangkatGol, UnitKerja: unitKerja,
+			UnitKerjaKop: nil, TampilkanQR: true,
+		}
+	} else {
+		if payload.IDPenandatangan == 0 {
+			utils.Error(w, http.StatusBadRequest, "penandatangan (yang mengetahui) wajib dipilih")
+			return
+		}
+		var penandatangan models.Pegawai
+		queryTtd := db
+		for _, pl := range pegawaiPreloads {
+			queryTtd = queryTtd.Preload(pl)
+		}
+		if err := queryTtd.First(&penandatangan, payload.IDPenandatangan).Error; err != nil {
+			utils.Error(w, http.StatusBadRequest, "data penandatangan tidak ditemukan")
+			return
+		}
+		signer = beritaAcaraSigner{
+			Nama: penandatangan.Nama, NIP: penandatangan.NIP,
+			Jabatan: pegawaiJabatanText(penandatangan), PangkatGol: pegawaiPangkatGolText(penandatangan),
+			UnitKerja: pegawaiUnitKerjaText(penandatangan), UnitKerjaKop: penandatangan.UnitKerja,
+			TampilkanQR: false,
+		}
 	}
 
 	// Jenis Surat "berita_acara" HARUS sudah ada di master (seed bawaan,
@@ -355,7 +405,7 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
-	pdfBytes, err := buildBeritaAcaraPDF(jenis, pegawaiDiinput, penandatangan, tglKejadian, tglSurat, nomorSurat, alasan)
+	pdfBytes, err := buildBeritaAcaraPDF(jenis, pegawaiDiinput, signer, tglKejadian, tglSurat, nomorSurat, alasan)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
@@ -689,6 +739,48 @@ func pegawaiUnitKerjaText(pg models.Pegawai) string {
 	return namaOrDash(pg.UnitKerja.Unit)
 }
 
+// beritaAcaraSigner: data penandatangan ("Yang Mengetahui") Berita Acara --
+// SUDAH berupa teks jadi (bukan models.Pegawai mentah) supaya buildBeritaAcaraPDF
+// bisa dipakai SAMA untuk dua sumber data yang berbeda bentuknya: (1) pegawai
+// sungguhan yang dipilih manual admin (Sekolah/campuran -- field-nya diambil
+// dari models.Pegawai lewat pegawaiJabatanText/dst seperti sebelumnya), atau
+// (2) hasil resolveSignerFullRekomendasi yang MURNI string, dibaca dari
+// models.PengaturanSurat (Dinas-only, auto-resolve, lihat buatBeritaAcara).
+type beritaAcaraSigner struct {
+	Nama       string
+	NIP        string
+	Jabatan    string
+	PangkatGol string
+	UnitKerja  string
+	// UnitKerjaKop: diisi (non-nil) HANYA kalau penandatangan dipilih manual
+	// dari pegawai sungguhan -- dipakai drawLetterheadUnitKerjaKustom supaya
+	// kop sekolah kustom (menu "Kop Surat Sekolah") tetap terpakai. Untuk
+	// penandatangan Dinas auto-resolve, SENGAJA dibiarkan nil -- jatuh ke kop
+	// teks polos bawaan (nama pemerintah + nama unit kerja, lihat
+	// drawLetterheadUnitKerjaKustom), karena kustomisasi kop surat memang
+	// hanya berlaku untuk sekolah, bukan Dinas.
+	UnitKerjaKop *models.UnitKerja
+	// TampilkanQR: true HANYA untuk penandatangan Dinas auto-resolve -- SAMA
+	// seperti Lampiran 2 Surat Rekomendasi, tidak ada proses approval
+	// terpisah untuk kasus ini jadi QR langsung tampil begitu PDF dibuat.
+	TampilkanQR bool
+}
+
+// buildSignatureQRBeritaAcara meniru gaya buildSignatureQRRekomendasi (query
+// Google Search berlabel jelas, lihat surat_rekomendasi.go) untuk konteks
+// Berita Acara -- HANYA dipakai pada penandatangan Dinas auto-resolve
+// (signer.TampilkanQR == true), karena hanya kasus itu yang tidak memiliki
+// proses approval terpisah.
+func buildSignatureQRBeritaAcara(signerNama, signerJabatan, nomorSurat, alasan string, tglSurat time.Time, pegawaiNamaList []string) ([]byte, error) {
+	subjek := strings.Join(pegawaiNamaList, ", ")
+	query := fmt.Sprintf(
+		"Nama Pejabat: %s Jabatan: %s Menerangkan Berita Acara Nomor %s atas nama %s dengan alasan %s pada tanggal %s di Kolonodale",
+		namaOrDash(signerNama), namaOrDash(signerJabatan), namaOrDash(nomorSurat), namaOrDash(subjek), namaOrDash(alasan), formatDateID(tglSurat),
+	)
+	googleURL := "https://www.google.com/search?q=" + neturl.QueryEscape(query)
+	return qrcode.Encode(googleURL, qrcode.Medium, 180)
+}
+
 // buildBeritaAcaraPDF menggambar PDF Berita Acara -- SATU halaman untuk
 // jenis "individu" (identitas yang ditampilkan di badan surat adalah
 // PEGAWAI yang bersangkutan, mengikuti BA_PERORANG.docx), DUA halaman untuk
@@ -702,7 +794,7 @@ func pegawaiUnitKerjaText(pg models.Pegawai) string {
 // beberapa unit kerja (sesuai keputusan pengguna) tetap punya SATU kop yang
 // konsisten, yaitu kop kantor/sekolah tempat penandatangan bertugas &
 // menandatangani surat ini.
-func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, penandatangan models.Pegawai, tglKejadian, tglSurat time.Time, nomorSurat, alasan string) ([]byte, error) {
+func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beritaAcaraSigner, tglKejadian, tglSurat time.Time, nomorSurat, alasan string) ([]byte, error) {
 	doc := utils.NewPDFDoc()
 
 	marginX := 48.0
@@ -712,12 +804,8 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, penandatang
 	const lineH = 15.0
 	const labelW = 110.0
 
-	unitKerjaTtdNama := "-"
-	var unitKerjaTtdForKop *models.UnitKerja
-	if penandatangan.UnitKerja != nil {
-		unitKerjaTtdNama = penandatangan.UnitKerja.Unit
-		unitKerjaTtdForKop = penandatangan.UnitKerja
-	}
+	unitKerjaTtdNama := namaOrDash(signer.UnitKerja)
+	unitKerjaTtdForKop := signer.UnitKerjaKop
 
 	// kalimat pernyataan (sama untuk individu & kolektif, hanya subjeknya yang
 	// berbeda -- lihat statementPrefix per jenis di bawah), alasan terpilih
@@ -759,21 +847,49 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, penandatang
 		y += lineH * 1.4
 		p.Text(marginX, y, "Mengetahui,")
 		y += lineH
-		jabatanLines, jabatanSize := wrapJabatan(namaOrDash(pegawaiJabatanText(penandatangan)), rightX-marginX, 2, []float64{12, 11, 10.5, 10, 9.5, 9})
+		jabatanLines, jabatanSize := wrapJabatan(namaOrDash(signer.Jabatan), rightX-marginX, 2, []float64{12, 11, 10.5, 10, 9.5, 9})
 		for _, jl := range jabatanLines {
 			p.SetFont(false, jabatanSize)
 			p.Text(marginX, y, jl)
 			y += jabatanSize + 2
 		}
-		y += lineH * 2.4
-		namaDisp := strings.ToUpper(namaOrDash(penandatangan.Nama))
+		namaDisp := strings.ToUpper(namaOrDash(signer.Nama))
+		if signer.TampilkanQR {
+			// QR tanda tangan otomatis -- HANYA penandatangan Dinas auto-resolve
+			// (lihat beritaAcaraSigner.TampilkanQR), langsung tampil tanpa
+			// menunggu approval siapa pun (sama seperti Lampiran 2 Surat
+			// Rekomendasi). Isinya menyebut SELURUH pegawai dalam batch ini
+			// (pegawaiList, individu 1 nama / kolektif bisa banyak nama).
+			y += lineH * 0.3
+			const qrSide = 90.0
+			nameWPreview := utils.TextWidth(namaDisp, 12)
+			qrCenterX := marginX + nameWPreview/2
+			if qrCenterX-qrSide/2 < marginX {
+				qrCenterX = marginX + qrSide/2
+			}
+			if qrCenterX+qrSide/2 > rightX {
+				qrCenterX = rightX - qrSide/2
+			}
+			namaPegawaiList := make([]string, 0, len(pegawaiList))
+			for _, pg := range pegawaiList {
+				namaPegawaiList = append(namaPegawaiList, pg.Nama)
+			}
+			if qrPng, err := buildSignatureQRBeritaAcara(signer.Nama, signer.Jabatan, nomorSurat, alasan, tglSurat, namaPegawaiList); err == nil {
+				if err := doc.RegisterImage("ttd_qr_berita_acara", qrPng); err == nil {
+					p.Image("ttd_qr_berita_acara", qrCenterX-qrSide/2, y, qrSide, qrSide)
+				}
+			}
+			y += qrSide + 10
+		} else {
+			y += lineH * 2.4
+		}
 		p.SetFont(true, 12)
 		p.Text(marginX, y, namaDisp)
 		nameW := utils.TextWidth(namaDisp, 12)
 		p.Line(marginX, y+3, marginX+nameW, y+3)
 		y += 16
 		p.SetFont(false, 12)
-		p.Text(marginX, y, "NIP. "+namaOrDash(penandatangan.NIP))
+		p.Text(marginX, y, "NIP. "+namaOrDash(signer.NIP))
 		y += lineH
 		return y
 	}
@@ -789,8 +905,8 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, penandatang
 
 		p.SetFont(false, 12)
 		ttdJabatan := "Kepala Sekolah"
-		if j := pegawaiJabatanText(penandatangan); j != "-" {
-			ttdJabatan = j
+		if signer.Jabatan != "" && signer.Jabatan != "-" {
+			ttdJabatan = signer.Jabatan
 		}
 		intro := fmt.Sprintf("Yang bertanda tangan di bawah ini %s %s, dengan ini menyatakan bahwa Pegawai atas nama :", ttdJabatan, namaOrDash(unitKerjaTtdNama))
 		y = p.MultilineText(marginX, y, rightX-marginX, lineH, intro) + lineH*0.5
@@ -832,10 +948,10 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, penandatang
 		p1.Text(marginX+labelW, y, ": "+namaOrDash(val))
 		y += lineH
 	}
-	drawField1("Nama", strings.ToUpper(namaOrDash(penandatangan.Nama)))
-	drawField1("NIP", penandatangan.NIP)
-	drawField1("Pangkat/Gol.", pegawaiPangkatGolText(penandatangan))
-	drawField1("Jabatan", pegawaiJabatanText(penandatangan))
+	drawField1("Nama", strings.ToUpper(namaOrDash(signer.Nama)))
+	drawField1("NIP", signer.NIP)
+	drawField1("Pangkat/Gol.", namaOrDash(signer.PangkatGol))
+	drawField1("Jabatan", namaOrDash(signer.Jabatan))
 	drawField1("Unit Kerja", unitKerjaTtdNama)
 	y += lineH * 0.6
 

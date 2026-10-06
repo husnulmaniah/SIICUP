@@ -527,9 +527,13 @@ onMounted(async () => {
   // kartu Pengaturan.
   const tugasAdminOnly = auth.isAdministrator ? [loadTempatTugasOptions(), loadJabatanOptions(), loadKecamatanOptions()] : []
   const verifikasiOnly = auth.isAdministrator || auth.isAdminVerifikasi ? [loadVerifikasiList(), loadJumlahMenungguVerifikasi()] : []
-  await Promise.all([loadPegawaiOptions(), loadKolektifPegawaiOptions(), loadPengaturan(), loadJenisSuratOptions(), ...tugasAdminOnly, ...verifikasiOnly])
+  const baOnly = canFinalBa.value ? [loadPengajuanBaAdmin(), loadJumlahMenungguBa()] : []
+  await Promise.all([loadPegawaiOptions(), loadKolektifPegawaiOptions(), loadPengaturan(), loadJenisSuratOptions(), ...tugasAdminOnly, ...verifikasiOnly, ...baOnly])
   if (auth.isAdministrator || auth.isAdminVerifikasi) {
     verifikasiCountInterval = setInterval(loadJumlahMenungguVerifikasi, 30000)
+  }
+  if (canFinalBa.value) {
+    baCountInterval = setInterval(loadJumlahMenungguBa, 30000)
   }
   // loadRekap/loadDokumenAdmin dipakai tab "Rekap Absen" & "Surat Kolektif",
   // yang endpoint-nya (GET /absensi/rekap, /absensi/dokumen/rekap) memang
@@ -1022,6 +1026,7 @@ function thumbUrl(row, jenis) {
 onBeforeUnmount(() => {
   revokeThumbnails()
   if (verifikasiCountInterval) clearInterval(verifikasiCountInterval)
+  if (baCountInterval) clearInterval(baCountInterval)
 })
 
 const fotoDialog = ref(false)
@@ -1486,6 +1491,150 @@ async function submitKembalikan() {
   }
 }
 
+// ============================================================
+// Verifikasi Pengajuan Berita Acara Sekolah (TAHAP AKHIR, pengajuan MANDIRI
+// pegawai sekolah lewat handlers/pengajuan_berita_acara.go, SUDAH disetujui
+// atasan langsungnya lebih dulu -- lihat ArsipSuratView.vue untuk tahap
+// atasan) -- tab ini untuk administrator/admin/akun ber-flag IsAdminAbsensi
+// ATAU IsAdminVerifikasi (lihat canFinalBa, SENGAJA lebih luas dari tab
+// "Verifikasi Surat Kolektif Sekolah" di atas yang HANYA administrator/
+// IsAdminVerifikasi -- sesuai permintaan pengguna untuk Berita Acara).
+// Menyetujui di sini membuat absen pegawai otomatis tercatat DD (Dinas
+// Dalam) - Berita Acara DAN menyertakan QR tanda tangan ke PDF-nya.
+// ============================================================
+
+const canFinalBa = computed(() => auth.isAdministrator || auth.isAdmin || auth.isAdminAbsensi || auth.isAdminVerifikasi)
+
+const pengajuanBaAdminList = ref([])
+const loadingPengajuanBaAdmin = ref(false)
+const baStatusFilter = ref('menunggu_admin')
+const baStatusOptions = [
+  { label: 'Menunggu Persetujuan Admin', value: 'menunggu_admin' },
+  { label: 'Disetujui', value: 'disetujui' },
+  { label: 'Semua', value: 'semua' },
+]
+const baSearch = ref('')
+
+async function loadPengajuanBaAdmin() {
+  loadingPengajuanBaAdmin.value = true
+  try {
+    const { data } = await http.get('/pengajuan-berita-acara', { params: { status: baStatusFilter.value } })
+    pengajuanBaAdminList.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    loadingPengajuanBaAdmin.value = false
+  }
+}
+watch(baStatusFilter, () => loadPengajuanBaAdmin())
+
+const pengajuanBaAdminFiltered = computed(() => {
+  const q = baSearch.value.trim().toLowerCase()
+  if (!q) return pengajuanBaAdminList.value
+  return pengajuanBaAdminList.value.filter((item) => {
+    const nama = (item.pegawai?.nama || '').toLowerCase()
+    const nip = (item.pegawai?.nip || '').toLowerCase()
+    const unitKerja = (item.pegawai?.unit_kerja?.unit || '').toLowerCase()
+    return nama.includes(q) || nip.includes(q) || unitKerja.includes(q)
+  })
+})
+
+// badge jumlah "menunggu_admin" pada label tab itu sendiri -- SENGAJA query
+// terpisah dari pengajuanBaAdminList/baStatusFilter (sama seperti
+// jumlahMenungguVerifikasi di atas), supaya tetap akurat walau admin sedang
+// melihat filter lain.
+const jumlahMenungguBa = ref(0)
+let baCountInterval = null
+async function loadJumlahMenungguBa() {
+  try {
+    const { data } = await http.get('/pengajuan-berita-acara', { params: { status: 'menunggu_admin' } })
+    jumlahMenungguBa.value = (data.data || []).length
+  } catch {
+    // non-kritikal
+  }
+}
+
+function formatTanggalBa(v) {
+  if (!v) return '-'
+  const [y, m, d] = v.split('-')
+  return `${d}-${m}-${y}`
+}
+function statusBaSeverity(status) {
+  if (status === 'disetujui') return 'success'
+  if (status === 'dikembalikan_atasan' || status === 'dikembalikan_admin') return 'danger'
+  return 'warn'
+}
+function statusBaLabel(status) {
+  if (status === 'menunggu_atasan') return 'Menunggu Atasan'
+  if (status === 'menunggu_admin') return 'Menunggu Admin'
+  if (status === 'disetujui') return 'Disetujui'
+  if (status === 'dikembalikan_atasan') return 'Dikembalikan Atasan'
+  if (status === 'dikembalikan_admin') return 'Dikembalikan Admin'
+  return status
+}
+
+const setujuiBaDialog = ref(false)
+const setujuiBaItem = ref(null)
+const setujuiBaNomor = ref('')
+const submittingSetujuiBa = ref(false)
+function bukaSetujuiBaDialog(item) {
+  setujuiBaItem.value = item
+  setujuiBaNomor.value = ''
+  setujuiBaDialog.value = true
+}
+function closeSetujuiBaDialog() {
+  setujuiBaDialog.value = false
+  setujuiBaItem.value = null
+}
+async function submitSetujuiBa() {
+  submittingSetujuiBa.value = true
+  try {
+    const fd = new FormData()
+    if (setujuiBaNomor.value.trim()) fd.append('nomor_surat', setujuiBaNomor.value.trim())
+    const { data } = await http.put(`/pengajuan-berita-acara/${setujuiBaItem.value.id}/setujui-admin`, fd)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 7000 })
+    closeSetujuiBaDialog()
+    await Promise.all([loadPengajuanBaAdmin(), loadJumlahMenungguBa()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 6000 })
+  } finally {
+    submittingSetujuiBa.value = false
+  }
+}
+
+const kembalikanBaDialog = ref(false)
+const kembalikanBaItem = ref(null)
+const kembalikanBaCatatan = ref('')
+const submittingKembalikanBa = ref(false)
+function bukaKembalikanBaDialog(item) {
+  kembalikanBaItem.value = item
+  kembalikanBaCatatan.value = ''
+  kembalikanBaDialog.value = true
+}
+function closeKembalikanBaDialog() {
+  kembalikanBaDialog.value = false
+  kembalikanBaItem.value = null
+}
+async function submitKembalikanBa() {
+  if (!kembalikanBaCatatan.value.trim()) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Catatan wajib diisi', life: 4000 })
+    return
+  }
+  submittingKembalikanBa.value = true
+  try {
+    const fd = new FormData()
+    fd.append('catatan', kembalikanBaCatatan.value.trim())
+    const { data } = await http.put(`/pengajuan-berita-acara/${kembalikanBaItem.value.id}/kembalikan-admin`, fd)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    closeKembalikanBaDialog()
+    await Promise.all([loadPengajuanBaAdmin(), loadJumlahMenungguBa()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    submittingKembalikanBa.value = false
+  }
+}
+
 // defaultTab: tab pertama yang benar-benar terlihat untuk akun yang login --
 // akun yang HANYA IsAdminVerifikasi (tanpa administrator/admin/
 // IsAdminAbsensi) tidak punya tab "Rekap Absen" sama sekali, jadi tab
@@ -1530,6 +1679,16 @@ const defaultTab = computed(() => {
             severity="danger"
             style="margin-left: 0.4rem"
             :title="`${jumlahMenungguVerifikasi} pengajuan menunggu verifikasi`"
+          />
+        </Tab>
+        <Tab v-if="canFinalBa" value="verifikasi-ba-sekolah">
+          <i class="pi pi-file-check" style="margin-right: 0.4rem"></i> Verifikasi Berita Acara Sekolah
+          <Badge
+            v-if="jumlahMenungguBa > 0"
+            :value="jumlahMenungguBa"
+            severity="danger"
+            style="margin-left: 0.4rem"
+            :title="`${jumlahMenungguBa} pengajuan menunggu persetujuan akhir`"
           />
         </Tab>
       </TabList>
@@ -2120,6 +2279,57 @@ const defaultTab = computed(() => {
       </DataTable>
     </div>
     </TabPanel>
+
+    <TabPanel v-if="canFinalBa" value="verifikasi-ba-sekolah">
+    <div class="card">
+      <h3 style="margin-top: 0">Verifikasi Berita Acara Sekolah (Tahap Akhir)</h3>
+      <p class="text-muted">
+        Pengajuan Berita Acara MANDIRI pegawai sekolah yang SUDAH disetujui atasan langsungnya (lihat menu Arsip
+        Surat pada akun atasan) -- menyetujui di sini membuat absen pegawai otomatis tercatat DD (Dinas Dalam) -
+        Berita Acara DAN menyertakan QR tanda tangan ke PDF-nya. Nomor surat boleh diisi (opsional) saat menyetujui.
+      </p>
+      <div class="rekap-toolbar">
+        <IconField class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
+          <InputText v-model="baSearch" placeholder="Cari nama, NIP, atau unit kerja..." style="width: 100%" />
+          <InputIcon class="pi pi-search" />
+        </IconField>
+      </div>
+      <div class="entries-picker">
+        <span class="entries-picker-label">Status</span>
+        <Select v-model="baStatusFilter" :options="baStatusOptions" optionLabel="label" optionValue="value" />
+      </div>
+      <DataTable :value="pengajuanBaAdminFiltered" :loading="loadingPengajuanBaAdmin" size="small" stripedRows responsiveLayout="scroll">
+        <Column header="Pegawai">
+          <template #body="{ data }">{{ data.pegawai?.nama }}</template>
+        </Column>
+        <Column header="Unit Kerja">
+          <template #body="{ data }">{{ data.pegawai?.unit_kerja?.unit || '-' }}</template>
+        </Column>
+        <Column header="Tanggal Kejadian">
+          <template #body="{ data }">{{ formatTanggalBa(data.tanggal_kejadian) }}</template>
+        </Column>
+        <Column field="alasan" header="Alasan" />
+        <Column header="Disetujui Atasan">
+          <template #body="{ data }">{{ data.atasan_approve_nama || '-' }}</template>
+        </Column>
+        <Column header="Status">
+          <template #body="{ data }">
+            <Tag :severity="statusBaSeverity(data.status)" :value="statusBaLabel(data.status)" />
+          </template>
+        </Column>
+        <Column header="Aksi">
+          <template #body="{ data }">
+            <Button icon="pi pi-eye" size="small" text rounded title="Lihat PDF" @click="previewVerifikasiFile(`/pengajuan-berita-acara/${data.id}/file`, data.nama_file)" />
+            <template v-if="data.status === 'menunggu_admin'">
+              <Button icon="pi pi-check" size="small" text rounded severity="success" title="Setujui" @click="bukaSetujuiBaDialog(data)" />
+              <Button icon="pi pi-undo" size="small" text rounded severity="danger" title="Kembalikan untuk direvisi" @click="bukaKembalikanBaDialog(data)" />
+            </template>
+          </template>
+        </Column>
+        <template #empty>{{ baSearch.trim() ? 'Tidak ada pengajuan yang cocok dengan pencarian.' : 'Tidak ada pengajuan pada status ini.' }}</template>
+      </DataTable>
+    </div>
+    </TabPanel>
       </TabPanels>
     </Tabs>
 
@@ -2436,6 +2646,48 @@ const defaultTab = computed(() => {
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeKembalikanDialog" />
         <Button label="Kembalikan" icon="pi pi-undo" severity="danger" :loading="submittingKembalikan" @click="submitKembalikan" />
+      </template>
+    </Dialog>
+
+    <!-- ================= dialog setujui pengajuan Berita Acara sekolah (tahap akhir) ================= -->
+    <Dialog
+      v-model:visible="setujuiBaDialog"
+      modal
+      header="Setujui Berita Acara"
+      :style="{ width: '420px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeSetujuiBaDialog"
+    >
+      <p class="text-muted">
+        Menyetujui Berita Acara <b>{{ setujuiBaItem?.pegawai?.nama }}</b> tanggal {{ formatTanggalBa(setujuiBaItem?.tanggal_kejadian) }} --
+        absen pegawai akan otomatis tercatat DD (Dinas Dalam) - Berita Acara, dan QR tanda tangan akan disertakan ke PDF-nya.
+      </p>
+      <div class="field-label">Nomor Surat (opsional)</div>
+      <InputText v-model="setujuiBaNomor" placeholder="Boleh dikosongkan" style="width: 100%" />
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="closeSetujuiBaDialog" />
+        <Button label="Setujui" icon="pi pi-check" severity="success" :loading="submittingSetujuiBa" @click="submitSetujuiBa" />
+      </template>
+    </Dialog>
+
+    <!-- ================= dialog kembalikan pengajuan Berita Acara sekolah (tahap akhir) ================= -->
+    <Dialog
+      v-model:visible="kembalikanBaDialog"
+      modal
+      header="Kembalikan Berita Acara untuk Direvisi"
+      :style="{ width: '440px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeKembalikanBaDialog"
+    >
+      <p class="text-muted">
+        Pengajuan dari <b>{{ kembalikanBaItem?.pegawai?.nama }}</b> akan dikembalikan ke pegawai untuk direvisi &amp;
+        diajukan ulang (akan ditinjau ulang oleh atasannya lagi). Jelaskan apa yang perlu diperbaiki.
+      </p>
+      <div class="field-label">Catatan (wajib)</div>
+      <Textarea v-model="kembalikanBaCatatan" rows="3" style="width: 100%" autofocus />
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="closeKembalikanBaDialog" />
+        <Button label="Kembalikan" icon="pi pi-undo" severity="danger" :loading="submittingKembalikanBa" @click="submitKembalikanBa" />
       </template>
     </Dialog>
 

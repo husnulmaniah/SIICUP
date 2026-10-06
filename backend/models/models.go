@@ -473,6 +473,19 @@ type Pegawai struct {
 	// tangani basah di atas kertas cetak).
 	TtdPegawaiNama string `json:"ttd_pegawai_nama" gorm:"column:ttd_pegawai_nama;size:255"`
 	TtdPegawaiFile []byte `json:"-" gorm:"column:ttd_pegawai_file;type:bytea"`
+
+	// IsSekolah: field VIRTUAL (gorm:"-", tidak pernah disimpan ke database) --
+	// diisi secara manual oleh handler tertentu (lihat isSekolahPegawai di
+	// handlers/pengajuan_cuti.go & pemakaiannya di listPegawai,
+	// handlers/pegawai.go) supaya frontend bisa tahu pegawai ini bertempat
+	// tugas Sekolah/Puskesmas atau Dinas/Kantor TANPA perlu meniru ulang logika
+	// penentuannya sendiri (yang punya prioritas UnitKerja.TempatKerja lalu
+	// fallback teks bebas Pegawai.TempatTgs) -- dipakai menu Berita Acara untuk
+	// mendeteksi otomatis apakah seluruh pegawai terpilih bertempat tugas Dinas
+	// (penandatangan di-auto-resolve, lihat berita_acara.go). Default false
+	// kalau handler yang memanggil tidak mengisinya (aman, tidak memengaruhi
+	// endpoint lain yang sudah ada).
+	IsSekolah bool `json:"is_sekolah" gorm:"-"`
 }
 
 func (Pegawai) TableName() string { return "pegawai" }
@@ -1295,6 +1308,86 @@ func (p *PengajuanSuratKolektif) SetTanggalList(tanggal []string) {
 	b, _ := json.Marshal(tanggal)
 	p.TanggalListRaw = string(b)
 }
+
+// PengajuanBeritaAcaraStatus: alur status pengajuan Berita Acara MANDIRI oleh
+// pegawai bertugas di SEKOLAH (lihat handlers/pengajuan_berita_acara.go) --
+// DUA tahap persetujuan (beda dari PengajuanSuratKolektif di atas yang cuma
+// satu tahap), sesuai permintaan pengguna: pegawai mengajukan -> ATASAN
+// langsungnya (Pegawai.IDAtasan, Kepala Sekolah/dst sesuai unit kerja)
+// menyetujui/mengembalikan lebih dulu -> BARU administrator/admin/akun
+// ber-flag IsAdminAbsensi ATAU IsAdminVerifikasi menyetujui/mengembalikan
+// tahap akhir -- baru pada tahap akhir inilah baris AbsensiDokumen (DD --
+// Dinas Dalam) otomatis dibuat & QR tanda tangan disertakan di PDF.
+//
+//   - Menunggu diajukan -> MenungguAtasan.
+//   - Atasan menyetujui -> MenungguAdmin (PDF di-generate ulang, TAPI masih
+//     TANPA QR -- QR baru muncul setelah tahap akhir selesai, lihat
+//     DisetujuiAdmin di bawah).
+//   - Atasan mengembalikan -> DikembalikanAtasan (pegawai bisa edit &
+//     mengajukan ulang, balik ke MenungguAtasan -- lihat
+//     updatePengajuanBeritaAcara).
+//   - Admin tahap akhir menyetujui -> Disetujui (PDF di-generate ulang DENGAN
+//     QR, baris AbsensiDokumen jenis "berita_acara" otomatis dibuat/
+//     diperbarui untuk tanggal kejadian ini).
+//   - Admin tahap akhir mengembalikan -> DikembalikanAdmin (pegawai bisa edit
+//     & mengajukan ulang -- SENGAJA balik ke MenungguAtasan lagi, BUKAN
+//     langsung ke MenungguAdmin, supaya atasan ikut meninjau ulang kalau ada
+//     perubahan data setelah dikembalikan admin).
+const (
+	PengajuanBeritaAcaraMenungguAtasan     = "menunggu_atasan"
+	PengajuanBeritaAcaraMenungguAdmin      = "menunggu_admin"
+	PengajuanBeritaAcaraDisetujui          = "disetujui"
+	PengajuanBeritaAcaraDikembalikanAtasan = "dikembalikan_atasan"
+	PengajuanBeritaAcaraDikembalikanAdmin  = "dikembalikan_admin"
+)
+
+// PengajuanBeritaAcara menyimpan pengajuan Berita Acara MANDIRI oleh pegawai
+// bertugas di SEKOLAH (pegawai Dinas/Kantor TIDAK mengajukan lewat sini --
+// Berita Acara mereka selalu dibuat admin langsung di menu Berita Acara
+// dengan penandatangan Kepala Dinas/Plt otomatis, lihat
+// handlers/berita_acara.go) untuk SATU tanggal kejadian absensi yang kosong,
+// dengan alasan dipilih dari daftar tetap yang SAMA dengan menu Berita Acara
+// admin (lihat AlasanBeritaAcaraOptions) -- BEDA dari PengajuanSuratKolektif
+// yang menerima banyak tanggal & berkas upload bebas, Berita Acara di sini
+// SELALU satu tanggal & PDF-nya dibuat OTOMATIS oleh sistem (reuse
+// buildBeritaAcaraPDF, sama seperti menu Berita Acara admin), bukan diupload
+// pegawai.
+//
+//   - NamaFile/File: PDF Berita Acara individu, di-generate ULANG setiap kali
+//     status berubah (diajukan/disetujui atasan/disetujui admin) supaya tanda
+//     tangan & status QR selalu konsisten dengan tahap approval terkini.
+//   - IDAtasanApprove/TglAtasanApprove/CatatanAtasan: siapa & kapan atasan
+//     menyetujui/mengembalikan (CatatanAtasan wajib diisi kalau mengembalikan).
+//   - IDAdminApprove/TglAdminApprove/CatatanAdmin: siapa & kapan admin tahap
+//     akhir menyetujui/mengembalikan (User, BUKAN Pegawai -- sama seperti
+//     IDVerifikator pada PengajuanSuratKolektif, karena yang bertindak akun
+//     administrator/admin, bukan pegawai per se).
+//   - NomorSurat: opsional, boleh diisi admin tahap akhir saat menyetujui
+//     (kalau tidak diisi, dicetak "-" sama seperti Berita Acara admin yang
+//     nomornya dikosongkan).
+type PengajuanBeritaAcara struct {
+	ID               uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai        uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
+	Pegawai          *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	TanggalKejadian  time.Time  `json:"tanggal_kejadian" gorm:"column:tanggal_kejadian;type:date;not null"`
+	Alasan           string     `json:"alasan" gorm:"column:alasan;size:100;not null"`
+	NomorSurat       *string    `json:"nomor_surat" gorm:"column:nomor_surat;size:100"`
+	Status           string     `json:"status" gorm:"column:status;size:30;not null;default:'menunggu_atasan';index"`
+	NamaFile         string     `json:"nama_file" gorm:"column:nama_file;size:255"`
+	File             []byte     `json:"-" gorm:"column:file;type:bytea"`
+	IDAtasanApprove  *uint      `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
+	AtasanApprove    *Pegawai   `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
+	TglAtasanApprove *time.Time `json:"tgl_atasan_approve" gorm:"column:tgl_atasan_approve"`
+	CatatanAtasan    string     `json:"catatan_atasan" gorm:"column:catatan_atasan;size:255"`
+	IDAdminApprove   *uint      `json:"id_admin_approve" gorm:"column:id_admin_approve"`
+	AdminApprove     *User      `json:"admin_approve,omitempty" gorm:"foreignKey:IDAdminApprove;references:ID"`
+	TglAdminApprove  *time.Time `json:"tgl_admin_approve" gorm:"column:tgl_admin_approve"`
+	CatatanAdmin     string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
+	CreatedAt        time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt        time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (PengajuanBeritaAcara) TableName() string { return "pengajuan_berita_acara" }
 
 // TemplateSurat menyimpan template surat (PDF/Word) yang disediakan
 // administrator untuk semua akun sekolah lewat menu baru "Template Surat"
