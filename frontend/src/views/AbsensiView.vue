@@ -457,6 +457,32 @@ const opsiTanggalBa = computed(() => opsiTanggalBaUntuk(editBaItem.value ? editB
 const pengajuanBaForm = ref({ tanggal_kejadian: null, alasan: null })
 const submittingPengajuanBa = ref(false)
 
+// Bukti dukung (foto/scan pendukung alasan terpilih, mis. screenshot error
+// jaringan/foto motor rusak/dst) -- WAJIB diupload saat mengajukan (backend
+// menolak tanpa ini, lihat buatPengajuanBeritaAcara di
+// handlers/pengajuan_berita_acara.go). Pola file picker & batas ukuran SAMA
+// dengan kolektifSelfFile/kolektifSelfFileInput di atas.
+const pengajuanBaFile = ref(null)
+const pengajuanBaFileInput = ref(null)
+function pickPengajuanBaFile() {
+  pengajuanBaFileInput.value?.click()
+}
+function onPengajuanBaFileChosen(e) {
+  const file = e.target.files?.[0] || null
+  if (file && file.size > KOLEKTIF_SELF_MAX_FILE_BYTES) {
+    toast.add({
+      severity: 'error',
+      summary: 'Berkas terlalu besar',
+      detail: `Ukuran berkas ${(file.size / (1024 * 1024)).toFixed(1)}MB melebihi batas maksimal 15MB. Kompres berkas terlebih dahulu.`,
+      life: 8000,
+    })
+    e.target.value = ''
+    pengajuanBaFile.value = null
+    return
+  }
+  pengajuanBaFile.value = file
+}
+
 async function submitPengajuanBa() {
   if (!pengajuanBaForm.value.tanggal_kejadian) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih tanggal kejadian', life: 4000 })
@@ -466,17 +492,26 @@ async function submitPengajuanBa() {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih alasan', life: 4000 })
     return
   }
+  if (!pengajuanBaFile.value) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Upload bukti dukung (foto/scan pendukung alasan terpilih) wajib dilampirkan', life: 5000 })
+    return
+  }
   submittingPengajuanBa.value = true
   try {
-    const { data } = await http.post('/pengajuan-berita-acara', {
-      tanggal_kejadian: pengajuanBaForm.value.tanggal_kejadian,
-      alasan: pengajuanBaForm.value.alasan,
-    })
+    const fd = new FormData()
+    fd.append('tanggal_kejadian', pengajuanBaForm.value.tanggal_kejadian)
+    fd.append('alasan', pengajuanBaForm.value.alasan)
+    fd.append('file', pengajuanBaFile.value)
+    const { data } = await http.post('/pengajuan-berita-acara', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
     pengajuanBaForm.value = { tanggal_kejadian: null, alasan: null }
+    pengajuanBaFile.value = null
     await Promise.all([loadPengajuanBaSaya(), loadRiwayat()])
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 7000 })
+    const pesan = e.response?.data?.message || (e.message === 'Network Error'
+      ? 'Koneksi terputus saat mengirim data (biasanya karena sinyal/koneksi internet tidak stabil saat mengupload berkas). Periksa koneksi internet Anda lalu coba ajukan ulang.'
+      : e.message)
+    toast.add({ severity: 'error', summary: 'Gagal', detail: pesan, life: 8000 })
   } finally {
     submittingPengajuanBa.value = false
   }
@@ -488,10 +523,34 @@ const editBaDialog = ref(false)
 const editBaItem = ref(null)
 const editBaForm = ref({ tanggal_kejadian: null, alasan: null })
 const submittingEditBa = ref(false)
+// Bukti dukung boleh TIDAK diupload ulang saat edit -- berkas lama
+// dipertahankan backend kalau field "file" tidak dikirim (lihat
+// updatePengajuanBeritaAcara) -- null berarti "pakai yang lama".
+const editBaFile = ref(null)
+const editBaFileInput = ref(null)
+function pickEditBaFile() {
+  editBaFileInput.value?.click()
+}
+function onEditBaFileChosen(e) {
+  const file = e.target.files?.[0] || null
+  if (file && file.size > KOLEKTIF_SELF_MAX_FILE_BYTES) {
+    toast.add({
+      severity: 'error',
+      summary: 'Berkas terlalu besar',
+      detail: `Ukuran berkas ${(file.size / (1024 * 1024)).toFixed(1)}MB melebihi batas maksimal 15MB. Kompres berkas terlebih dahulu.`,
+      life: 8000,
+    })
+    e.target.value = ''
+    editBaFile.value = null
+    return
+  }
+  editBaFile.value = file
+}
 
 function bukaEditBa(item) {
   editBaItem.value = item
   editBaForm.value = { tanggal_kejadian: item.tanggal_kejadian, alasan: item.alasan }
+  editBaFile.value = null
   editBaDialog.value = true
 }
 function closeEditBa() {
@@ -505,15 +564,19 @@ async function submitEditBa() {
   }
   submittingEditBa.value = true
   try {
-    const { data } = await http.put(`/pengajuan-berita-acara/${editBaItem.value.id}`, {
-      tanggal_kejadian: editBaForm.value.tanggal_kejadian,
-      alasan: editBaForm.value.alasan,
-    })
+    const fd = new FormData()
+    fd.append('tanggal_kejadian', editBaForm.value.tanggal_kejadian)
+    fd.append('alasan', editBaForm.value.alasan)
+    if (editBaFile.value) fd.append('file', editBaFile.value)
+    const { data } = await http.put(`/pengajuan-berita-acara/${editBaItem.value.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
     closeEditBa()
     await Promise.all([loadPengajuanBaSaya(), loadRiwayat()])
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 7000 })
+    const pesan = e.response?.data?.message || (e.message === 'Network Error'
+      ? 'Koneksi terputus saat mengirim data (biasanya karena sinyal/koneksi internet tidak stabil saat mengupload berkas). Periksa koneksi internet Anda lalu coba ajukan ulang.'
+      : e.message)
+    toast.add({ severity: 'error', summary: 'Gagal', detail: pesan, life: 8000 })
   } finally {
     submittingEditBa.value = false
   }
@@ -526,6 +589,22 @@ async function downloadPengajuanBaFile(item) {
     const link = document.createElement('a')
     link.href = url
     link.download = item.nama_file || 'berita_acara.pdf'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
+async function downloadPengajuanBaBuktiDukung(item) {
+  try {
+    const res = await http.get(`/pengajuan-berita-acara/${item.id}/bukti-dukung`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'bukti_dukung_' + (item.nama_file || 'berita_acara')
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -1421,10 +1500,11 @@ async function downloadDokumen(item) {
         <h3>Ajukan Berita Acara</h3>
         <Message severity="info" :closable="false">
           Khusus pegawai bertugas di sekolah: ajukan Berita Acara untuk SATU tanggal absen yang kosong (tidak dapat
-          absen online). "Yang Mengetahui" otomatis diisi atasan langsung Anda -- PDF dibuat otomatis oleh sistem,
-          tidak perlu upload berkas. Pengajuan menunggu persetujuan atasan Anda dulu, BARU persetujuan tahap akhir
-          administrator/admin -- absen tanggal ini baru tercatat DD (Dinas Dalam) - Berita Acara setelah KEDUA
-          persetujuan selesai.
+          absen online). "Yang Mengetahui" otomatis diisi atasan langsung Anda -- PDF Berita Acara resminya dibuat
+          otomatis oleh sistem, TAPI bukti dukung (foto/scan pendukung alasan terpilih, mis. screenshot error
+          jaringan/foto motor rusak/dst) WAJIB dilampirkan. Pengajuan menunggu persetujuan atasan Anda dulu, BARU
+          persetujuan tahap akhir administrator/admin -- absen tanggal ini baru tercatat DD (Dinas Dalam) - Berita
+          Acara setelah KEDUA persetujuan selesai.
         </Message>
         <div class="kolektif-self-form">
           <div class="field">
@@ -1449,6 +1529,17 @@ async function downloadDokumen(item) {
               style="width: 100%"
             />
           </div>
+          <div class="field">
+            <label>Bukti Dukung (PDF/JPG/PNG)</label>
+            <input ref="pengajuanBaFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onPengajuanBaFileChosen" />
+            <Button
+              :label="pengajuanBaFile ? pengajuanBaFile.name : 'Pilih Berkas'"
+              icon="pi pi-file"
+              severity="secondary"
+              outlined
+              @click="pickPengajuanBaFile"
+            />
+          </div>
           <Button label="Ajukan" icon="pi pi-send" :loading="submittingPengajuanBa" @click="submitPengajuanBa" />
         </div>
 
@@ -1470,6 +1561,15 @@ async function downloadDokumen(item) {
             <Column header="Aksi">
               <template #body="{ data }">
                 <Button icon="pi pi-download" size="small" text rounded title="Unduh PDF" @click="downloadPengajuanBaFile(data)" />
+                <Button
+                  v-if="data.ada_bukti_dukung"
+                  icon="pi pi-paperclip"
+                  size="small"
+                  text
+                  rounded
+                  title="Unduh Bukti Dukung"
+                  @click="downloadPengajuanBaBuktiDukung(data)"
+                />
                 <Button
                   v-if="statusBaBisaEdit(data.status)"
                   icon="pi pi-pencil"
@@ -1701,6 +1801,18 @@ async function downloadDokumen(item) {
           placeholder="Pilih alasan"
           style="width: 100%"
         />
+      </div>
+      <div class="field">
+        <label>Bukti Dukung (PDF/JPG/PNG)</label>
+        <input ref="editBaFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onEditBaFileChosen" />
+        <Button
+          :label="editBaFile ? editBaFile.name : 'Pilih Berkas Baru'"
+          icon="pi pi-file"
+          severity="secondary"
+          outlined
+          @click="pickEditBaFile"
+        />
+        <small class="text-muted">Boleh tidak dipilih kalau bukti dukung yang lama masih berlaku.</small>
       </div>
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeEditBa" />

@@ -1221,9 +1221,21 @@ type AbsensiDokumen struct {
 	// IsAdminAbsensi lain yang sama-sama boleh menginput surat lewat menu ini
 	// TIDAK ikut melihat riwayat ini, supaya bukan sesama admin yang saling
 	// mengawasi, hanya administrator yang bisa audit.
-	IDDiinputOleh *uint     `json:"id_diinput_oleh,omitempty" gorm:"column:id_diinput_oleh"`
-	DiinputOleh   *User     `json:"diinput_oleh,omitempty" gorm:"foreignKey:IDDiinputOleh;references:ID"`
-	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
+	IDDiinputOleh *uint `json:"id_diinput_oleh,omitempty" gorm:"column:id_diinput_oleh"`
+	DiinputOleh   *User `json:"diinput_oleh,omitempty" gorm:"foreignKey:IDDiinputOleh;references:ID"`
+	// BuktiDukungNamaFile/BuktiDukungFile/BuktiDukungContentType: lampiran
+	// bukti dukung (foto/scan pendukung alasan terpilih, mis. screenshot
+	// error jaringan/foto motor rusak/dst) yang WAJIB diupload admin saat
+	// membuat Berita Acara "individu" lewat menu Berita Acara (lihat
+	// handlers/berita_acara.go, buatBeritaAcara) -- TERPISAH dari File di
+	// atas (yang menyimpan PDF Berita Acara hasil generate OTOMATIS oleh
+	// sistem, bukan berkas yang diupload). Baris lama (sebelum fitur ini ada)
+	// maupun baris jenis lain/Berita Acara "kolektif" tetap kosong --
+	// ditampilkan "-"/tombol unduh disembunyikan di frontend, bukan error.
+	BuktiDukungNamaFile    string    `json:"bukti_dukung_nama_file,omitempty" gorm:"column:bukti_dukung_nama_file;size:255"`
+	BuktiDukungFile        []byte    `json:"-" gorm:"column:bukti_dukung_file;type:bytea"`
+	BuktiDukungContentType string    `json:"-" gorm:"column:bukti_dukung_content_type;size:100"`
+	CreatedAt              time.Time `json:"created_at" gorm:"autoCreateTime"`
 	// UpdatedAt -- dipakai listAbsensiDokumenAdmin untuk mengurutkan tabel
 	// "Surat yang Sudah Diinput Bulan Ini" berdasarkan PENGINPUTAN paling
 	// baru (bukan tanggal absennya) -- GORM otomatis mengisi ini baik saat
@@ -1366,25 +1378,37 @@ const (
 //     (kalau tidak diisi, dicetak "-" sama seperti Berita Acara admin yang
 //     nomornya dikosongkan).
 type PengajuanBeritaAcara struct {
-	ID               uint       `json:"id" gorm:"primaryKey"`
-	IDPegawai        uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
-	Pegawai          *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
-	TanggalKejadian  time.Time  `json:"tanggal_kejadian" gorm:"column:tanggal_kejadian;type:date;not null"`
-	Alasan           string     `json:"alasan" gorm:"column:alasan;size:100;not null"`
-	NomorSurat       *string    `json:"nomor_surat" gorm:"column:nomor_surat;size:100"`
-	Status           string     `json:"status" gorm:"column:status;size:30;not null;default:'menunggu_atasan';index"`
-	NamaFile         string     `json:"nama_file" gorm:"column:nama_file;size:255"`
-	File             []byte     `json:"-" gorm:"column:file;type:bytea"`
-	IDAtasanApprove  *uint      `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
-	AtasanApprove    *Pegawai   `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
-	TglAtasanApprove *time.Time `json:"tgl_atasan_approve" gorm:"column:tgl_atasan_approve"`
-	CatatanAtasan    string     `json:"catatan_atasan" gorm:"column:catatan_atasan;size:255"`
-	IDAdminApprove   *uint      `json:"id_admin_approve" gorm:"column:id_admin_approve"`
-	AdminApprove     *User      `json:"admin_approve,omitempty" gorm:"foreignKey:IDAdminApprove;references:ID"`
-	TglAdminApprove  *time.Time `json:"tgl_admin_approve" gorm:"column:tgl_admin_approve"`
-	CatatanAdmin     string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
-	CreatedAt        time.Time  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt        time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+	ID              uint      `json:"id" gorm:"primaryKey"`
+	IDPegawai       uint      `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
+	Pegawai         *Pegawai  `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	TanggalKejadian time.Time `json:"tanggal_kejadian" gorm:"column:tanggal_kejadian;type:date;not null"`
+	Alasan          string    `json:"alasan" gorm:"column:alasan;size:100;not null"`
+	NomorSurat      *string   `json:"nomor_surat" gorm:"column:nomor_surat;size:100"`
+	Status          string    `json:"status" gorm:"column:status;size:30;not null;default:'menunggu_atasan';index"`
+	NamaFile        string    `json:"nama_file" gorm:"column:nama_file;size:255"`
+	File            []byte    `json:"-" gorm:"column:file;type:bytea"`
+	// BuktiDukungNamaFile/BuktiDukungFile/BuktiDukungContentType: lampiran
+	// bukti dukung (foto/scan pendukung alasan terpilih) yang WAJIB diupload
+	// pegawai saat mengajukan (buatPengajuanBeritaAcara) ATAU mengedit &
+	// mengajukan ulang (updatePengajuanBeritaAcara) -- TERPISAH dari File di
+	// atas (PDF Berita Acara hasil generate OTOMATIS oleh sistem). Sesuai
+	// permintaan pengguna: "berita acara sekolah" (alur mandiri ini) WAJIB
+	// melampirkan bukti dukung, SAMA seperti Berita Acara "individu" yang
+	// dibuat admin langsung (lihat models.AbsensiDokumen.BuktiDukung* &
+	// handlers/berita_acara.go).
+	BuktiDukungNamaFile    string     `json:"bukti_dukung_nama_file,omitempty" gorm:"column:bukti_dukung_nama_file;size:255"`
+	BuktiDukungFile        []byte     `json:"-" gorm:"column:bukti_dukung_file;type:bytea"`
+	BuktiDukungContentType string     `json:"-" gorm:"column:bukti_dukung_content_type;size:100"`
+	IDAtasanApprove        *uint      `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
+	AtasanApprove          *Pegawai   `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
+	TglAtasanApprove       *time.Time `json:"tgl_atasan_approve" gorm:"column:tgl_atasan_approve"`
+	CatatanAtasan          string     `json:"catatan_atasan" gorm:"column:catatan_atasan;size:255"`
+	IDAdminApprove         *uint      `json:"id_admin_approve" gorm:"column:id_admin_approve"`
+	AdminApprove           *User      `json:"admin_approve,omitempty" gorm:"foreignKey:IDAdminApprove;references:ID"`
+	TglAdminApprove        *time.Time `json:"tgl_admin_approve" gorm:"column:tgl_admin_approve"`
+	CatatanAdmin           string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
+	CreatedAt              time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt              time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (PengajuanBeritaAcara) TableName() string { return "pengajuan_berita_acara" }

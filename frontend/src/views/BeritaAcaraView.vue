@@ -204,6 +204,31 @@ const form = ref({
   tanggal_surat: null,
   nomor_surat: '',
 })
+
+// buktiDukungFile: WAJIB diupload untuk jenis "individu" (BUKAN "kolektif",
+// yang mencakup banyak pegawai sekaligus jadi tidak relevan satu bukti untuk
+// semuanya) -- lihat validasi di buatBeritaAcara (handlers/berita_acara.go).
+const buktiDukungFile = ref(null)
+const buktiDukungFileInput = ref(null)
+const BUKTI_DUKUNG_MAX_FILE_BYTES = 15 * 1024 * 1024
+function pickBuktiDukungFile() {
+  buktiDukungFileInput.value?.click()
+}
+function onBuktiDukungFileChosen(e) {
+  const file = e.target.files?.[0] || null
+  if (file && file.size > BUKTI_DUKUNG_MAX_FILE_BYTES) {
+    toast.add({
+      severity: 'error',
+      summary: 'Berkas terlalu besar',
+      detail: `Ukuran berkas ${(file.size / (1024 * 1024)).toFixed(1)}MB melebihi batas maksimal 15MB. Kompres berkas terlebih dahulu.`,
+      life: 8000,
+    })
+    e.target.value = ''
+    buktiDukungFile.value = null
+    return
+  }
+  buktiDukungFile.value = file
+}
 // tandaTanggalSuratManual: begitu admin mengubah Tanggal Surat sendiri,
 // Tanggal Kejadian berikutnya TIDAK lagi menimpanya secara otomatis.
 let tanggalSuratManual = false
@@ -229,6 +254,7 @@ function bukaBuatDialog() {
     tanggal_surat: null,
     nomor_surat: '',
   }
+  buktiDukungFile.value = null
   tanggalSuratManual = false
   pegawaiPicker.terpilihCache.value = []
   penandatanganPicker.terpilihCache.value = []
@@ -285,23 +311,30 @@ async function submitBuat() {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Tanggal kejadian wajib diisi', life: 4000 })
     return
   }
+  if (form.value.jenis === 'individu' && !buktiDukungFile.value) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Bukti dukung (foto/scan pendukung alasan terpilih) wajib dilampirkan untuk Berita Acara individu', life: 5000 })
+    return
+  }
   submitting.value = true
   try {
-    const payload = {
-      jenis: form.value.jenis,
-      id_pegawai: idPegawaiTerpilih.value,
-      id_penandatangan: form.value.id_penandatangan,
-      tanggal_kejadian: toDateStr(form.value.tanggal_kejadian),
-      tanggal_surat: toDateStr(form.value.tanggal_surat),
-      nomor_surat: form.value.nomor_surat.trim(),
-      alasan: form.value.alasan,
-    }
-    const { data } = await http.post('/berita-acara', payload)
+    const fd = new FormData()
+    fd.append('jenis', form.value.jenis)
+    for (const id of idPegawaiTerpilih.value) fd.append('id_pegawai', id)
+    if (form.value.id_penandatangan) fd.append('id_penandatangan', form.value.id_penandatangan)
+    fd.append('tanggal_kejadian', toDateStr(form.value.tanggal_kejadian))
+    fd.append('tanggal_surat', toDateStr(form.value.tanggal_surat))
+    fd.append('nomor_surat', form.value.nomor_surat.trim())
+    fd.append('alasan', form.value.alasan)
+    if (form.value.jenis === 'individu' && buktiDukungFile.value) fd.append('file', buktiDukungFile.value)
+    const { data } = await http.post('/berita-acara', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 7000 })
     buatDialog.value = false
     await loadItems()
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal membuat', detail: e.response?.data?.message || e.message, life: 7000 })
+    const pesan = e.response?.data?.message || (e.message === 'Network Error'
+      ? 'Koneksi terputus saat mengirim data (biasanya karena sinyal/koneksi internet tidak stabil saat mengupload berkas). Periksa koneksi internet Anda lalu coba ajukan ulang.'
+      : e.message)
+    toast.add({ severity: 'error', summary: 'Gagal membuat', detail: pesan, life: 8000 })
   } finally {
     submitting.value = false
   }
@@ -346,6 +379,28 @@ async function unduhBatch(item) {
     const link = document.createElement('a')
     link.href = url
     link.download = `berita_acara_${toDateStr(item.tanggal)}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+// unduhBuktiDukung: HANYA relevan untuk batch "individu" (ada_bukti_dukung
+// pada baris pegawai pertama, lihat beritaAcaraPegawaiOut di
+// handlers/berita_acara.go) -- Berita Acara "kolektif" tidak mewajibkan
+// bukti dukung sama sekali.
+async function unduhBuktiDukung(item) {
+  const firstId = item.pegawai[0]?.id
+  if (!firstId) return
+  try {
+    const res = await http.get(`/absensi/dokumen/${firstId}/bukti-dukung`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `bukti_dukung_berita_acara_${toDateStr(item.tanggal)}`
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -427,6 +482,15 @@ onMounted(() => {
         <div class="ba-card-actions">
           <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatBatch(item)" />
           <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhBatch(item)" title="Unduh" />
+          <Button
+            v-if="item.pegawai[0]?.ada_bukti_dukung"
+            icon="pi pi-paperclip"
+            size="small"
+            severity="secondary"
+            outlined
+            @click="unduhBuktiDukung(item)"
+            title="Unduh Bukti Dukung"
+          />
           <Button icon="pi pi-trash" size="small" severity="danger" outlined @click="konfirmasiHapusBatch(item)" title="Hapus" />
         </div>
       </div>
@@ -531,6 +595,19 @@ onMounted(() => {
             "800/{{ form.nomor_surat || '...' }}/Disdikbud/{bulan romawi berjalan}/{tahun berjalan}".
           </small>
         </div>
+      </div>
+
+      <div class="form-field" v-if="form.jenis === 'individu'">
+        <label>Bukti Dukung (PDF/JPG/PNG) -- wajib</label>
+        <input ref="buktiDukungFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onBuktiDukungFileChosen" />
+        <Button
+          :label="buktiDukungFile ? buktiDukungFile.name : 'Pilih Berkas'"
+          icon="pi pi-file"
+          severity="secondary"
+          outlined
+          @click="pickBuktiDukungFile"
+        />
+        <small class="text-muted">Foto/scan pendukung alasan terpilih (mis. screenshot error jaringan, foto motor rusak, dsb).</small>
       </div>
 
       <div class="form-grid-2">

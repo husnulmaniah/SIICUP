@@ -692,6 +692,7 @@ func RegisterAbsensiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/absensi/dokumen/rekap", manage(func(w http.ResponseWriter, r *http.Request) { listAbsensiDokumenAdmin(w, r, db) }))
 	mux.Handle("POST /api/absensi/dokumen/kolektif", manage(func(w http.ResponseWriter, r *http.Request) { inputAbsensiDokumenKolektif(w, r, db) }))
 	mux.Handle("GET /api/absensi/dokumen/{id}/file", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadAbsensiDokumen(w, r, db) }))
+	mux.Handle("GET /api/absensi/dokumen/{id}/bukti-dukung", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadAbsensiDokumenBuktiDukung(w, r, db) }))
 	mux.Handle("DELETE /api/absensi/dokumen/{id}", manage(func(w http.ResponseWriter, r *http.Request) { deleteAbsensiDokumen(w, r, db) }))
 
 	// Pengaturan Absen: administrator SAJA (lihat administratorOnly di atas)

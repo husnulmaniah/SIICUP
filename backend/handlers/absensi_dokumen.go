@@ -493,6 +493,41 @@ func downloadAbsensiDokumen(w http.ResponseWriter, r *http.Request, db *gorm.DB)
 	w.Write(item.File)
 }
 
+// downloadAbsensiDokumenBuktiDukung menangani GET
+// /api/absensi/dokumen/{id}/bukti-dukung -- unduh/preview lampiran bukti
+// dukung yang diupload admin saat membuat Berita Acara "individu" (lihat
+// buatBeritaAcara di handlers/berita_acara.go), kontrol akses SAMA PERSIS
+// dengan downloadAbsensiDokumen.
+func downloadAbsensiDokumenBuktiDukung(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.AbsensiDokumen
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessAbsensiDokumen(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
+		return
+	}
+	if len(item.BuktiDukungFile) == 0 {
+		utils.Error(w, http.StatusNotFound, "bukti dukung tidak ditemukan")
+		return
+	}
+	contentType := item.BuktiDukungContentType
+	if contentType == "" {
+		contentType = dokumenContentType(item.BuktiDukungNamaFile)
+	}
+	if r.URL.Query().Get("inline") == "1" {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", item.BuktiDukungNamaFile))
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", item.BuktiDukungNamaFile))
+	}
+	w.Write(item.BuktiDukungFile)
+}
+
 func deleteAbsensiDokumen(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")

@@ -1,10 +1,12 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	neturl "net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,6 +98,45 @@ func nomorSuratBeritaAcaraLengkap(urutan string, tglSurat time.Time) string {
 	return fmt.Sprintf("800/%s/Disdikbud/%s/%d", urutan, romanMonth(tglSurat.Month()), tglSurat.Year())
 }
 
+// parseBuktiDukungUpload membaca & memvalidasi berkas upload "bukti dukung"
+// (foto/scan pendukung alasan terpilih, mis. screenshot error jaringan/foto
+// motor rusak/dst) dari form-field "file" -- format PDF/JPG/PNG saja, tidak
+// boleh 0 byte, SAMA pola validasi dengan buatPengajuanSuratKolektif (lihat
+// formFileHeader/dokumenContentType di handlers/pengajuan_cuti.go &
+// pengajuan_surat_kolektif.go). Dipakai WAJIB oleh DUA alur (sesuai
+// permintaan pengguna): Berita Acara "individu" lewat menu admin
+// (buatBeritaAcara di bawah) & pengajuan Berita Acara mandiri sekolah
+// (buatPengajuanBeritaAcara/updatePengajuanBeritaAcara di
+// pengajuan_berita_acara.go). errMsg kosong berarti berkas valid & siap
+// disimpan; request HARUS sudah lewat r.ParseMultipartForm sebelum memanggil
+// ini.
+func parseBuktiDukungUpload(r *http.Request) (namaFile, contentType string, data []byte, errMsg string) {
+	fh := formFileHeader(r, "file")
+	if fh == nil {
+		return "", "", nil, "bukti dukung wajib diupload"
+	}
+	ext := strings.ToLower(filepath.Ext(fh.Filename))
+	if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		return "", "", nil, "bukti dukung harus berformat PDF, JPG, atau PNG"
+	}
+	f, err := fh.Open()
+	if err != nil {
+		return "", "", nil, "gagal membaca bukti dukung"
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return "", "", nil, "gagal membaca bukti dukung"
+	}
+	// Berkas 0 byte lolos dari io.ReadAll tanpa error -- sering terjadi kalau
+	// foto dari WhatsApp/Google Photos di HP belum selesai diunduh ke
+	// perangkat saat dipilih lewat file picker.
+	if len(raw) == 0 {
+		return "", "", nil, "bukti dukung yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang"
+	}
+	return fh.Filename, dokumenContentType(fh.Filename), raw, ""
+}
+
 // RegisterBeritaAcaraRoutes mendaftarkan seluruh endpoint di bawah
 // /api/berita-acara*. Khusus administrator/admin (SAMA dengan hak akses
 // inputAbsensiDokumenKolektif) -- bukan akun ber-flag IsAdminAbsensi saja,
@@ -135,6 +176,13 @@ type beritaAcaraPegawaiOut struct {
 	NIP       string `json:"nip"`
 	Jabatan   string `json:"jabatan"`
 	UnitKerja string `json:"unit_kerja"`
+	// AdaBuktiDukung: true kalau baris ini (SELALU jenis "individu", lihat
+	// validasi wajib upload di buatBeritaAcara) punya lampiran bukti dukung
+	// -- dipakai frontend menampilkan tombol "Lihat/Unduh Bukti Dukung"
+	// (GET /api/absensi/dokumen/{id}/bukti-dukung) hanya kalau memang ada.
+	// Baris lama (dibuat sebelum fitur ini ada) & seluruh baris "kolektif"
+	// akan bernilai false, bukan error.
+	AdaBuktiDukung bool `json:"ada_bukti_dukung"`
 }
 
 type beritaAcaraBatchOut struct {
@@ -159,7 +207,7 @@ func listBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 
 	var rows []models.AbsensiDokumen
-	err := db.Omit("file").
+	err := db.Omit("file", "bukti_dukung_file").
 		Where("jenis = ?", models.AbsensiDokumenBeritaAcara).
 		Preload("Pegawai.UnitKerja").Preload("Pegawai.Jabatan").
 		Order("created_at desc").
@@ -199,7 +247,10 @@ func listBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 				unitKerja = namaOrDash(row.Pegawai.UnitKerja.Unit)
 			}
 		}
-		b.Pegawai = append(b.Pegawai, beritaAcaraPegawaiOut{ID: row.ID, Nama: nama, NIP: nip, Jabatan: jabatan, UnitKerja: unitKerja})
+		b.Pegawai = append(b.Pegawai, beritaAcaraPegawaiOut{
+			ID: row.ID, Nama: nama, NIP: nip, Jabatan: jabatan, UnitKerja: unitKerja,
+			AdaBuktiDukung: strings.TrimSpace(row.BuktiDukungNamaFile) != "",
+		})
 	}
 
 	out := make([]beritaAcaraBatchOut, 0, len(order))
@@ -232,16 +283,6 @@ func listBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 // buat (create)
 // ============================================================
 
-type buatBeritaAcaraPayload struct {
-	Jenis           string `json:"jenis"` // "individu" | "kolektif"
-	IDPegawai       []uint `json:"id_pegawai"`
-	IDPenandatangan uint   `json:"id_penandatangan"`
-	TanggalKejadian string `json:"tanggal_kejadian"`
-	TanggalSurat    string `json:"tanggal_surat"`
-	NomorSurat      string `json:"nomor_surat"`
-	Alasan          string `json:"alasan"`
-}
-
 // uniqueOrderedUint membuang id 0/duplikat dari idList sambil
 // mempertahankan urutan kemunculan pertama -- dipakai supaya urutan baris
 // pada tabel lampiran kolektif mengikuti urutan pemilihan admin di frontend,
@@ -263,19 +304,31 @@ func uniqueOrderedUint(ids []uint) []uint {
 func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 
-	var payload buatBeritaAcaraPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+	// Endpoint ini SEKARANG menerima multipart/form-data (sebelumnya JSON) --
+	// supaya bisa menyertakan upload berkas bukti dukung (lihat validasi
+	// "individu" di bawah), SAMA pola dengan buatPengajuanSuratKolektif
+	// (utils.LimitBody + r.ParseMultipartForm, lihat
+	// handlers/pengajuan_surat_kolektif.go).
+	utils.LimitBody(w, r, 15<<20)
+	if err := r.ParseMultipartForm(15 << 20); err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return
 	}
 
-	jenis := strings.ToLower(strings.TrimSpace(payload.Jenis))
+	jenis := strings.ToLower(strings.TrimSpace(r.FormValue("jenis")))
 	if jenis != "individu" && jenis != "kolektif" {
 		utils.Error(w, http.StatusBadRequest, "jenis berita acara tidak valid -- harus \"individu\" atau \"kolektif\"")
 		return
 	}
 
-	idList := uniqueOrderedUint(payload.IDPegawai)
+	var rawIDs []uint
+	for _, s := range r.Form["id_pegawai"] {
+		v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+		if err == nil {
+			rawIDs = append(rawIDs, uint(v))
+		}
+	}
+	idList := uniqueOrderedUint(rawIDs)
 	if len(idList) == 0 {
 		utils.Error(w, http.StatusBadRequest, "pilih minimal satu pegawai")
 		return
@@ -285,19 +338,19 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
-	alasan := strings.TrimSpace(payload.Alasan)
+	alasan := strings.TrimSpace(r.FormValue("alasan"))
 	if !isAlasanBeritaAcaraValid(alasan) {
 		utils.Error(w, http.StatusBadRequest, "alasan tidak valid -- pilih salah satu dari daftar yang tersedia")
 		return
 	}
 
-	tglKejadian, err := utils.ParseDateCell(strings.TrimSpace(payload.TanggalKejadian))
+	tglKejadian, err := utils.ParseDateCell(strings.TrimSpace(r.FormValue("tanggal_kejadian")))
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, "tanggal kejadian tidak valid")
 		return
 	}
 	tglSurat := tglKejadian
-	if ts := strings.TrimSpace(payload.TanggalSurat); ts != "" {
+	if ts := strings.TrimSpace(r.FormValue("tanggal_surat")); ts != "" {
 		tglSurat, err = utils.ParseDateCell(ts)
 		if err != nil {
 			utils.Error(w, http.StatusBadRequest, "tanggal surat tidak valid")
@@ -309,9 +362,29 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// (nomorSuratBeritaAcaraLengkap, lihat definisinya di bawah) -- bulan
 	// romawi & tahun mengikuti TANGGAL SURAT (tglSurat), SAMA seperti pola
 	// nomorSuratRekomendasiLengkap pada Surat Rekomendasi.
-	nomorSurat := strings.TrimSpace(payload.NomorSurat)
+	nomorSurat := strings.TrimSpace(r.FormValue("nomor_surat"))
 	if nomorSurat != "" {
 		nomorSurat = nomorSuratBeritaAcaraLengkap(nomorSurat, tglSurat)
+	}
+
+	// Bukti dukung (foto/scan pendukung alasan terpilih, mis. screenshot
+	// error jaringan/foto motor rusak/dst): WAJIB diupload untuk Berita Acara
+	// "individu" (BUKAN "kolektif", yang mencakup banyak pegawai sekaligus
+	// jadi tidak relevan satu bukti untuk semuanya) -- sesuai permintaan
+	// pengguna. Validasi format & cara baca berkas SAMA dengan
+	// buatPengajuanSuratKolektif (formFileHeader/dokumenContentType, lihat
+	// handlers/pengajuan_surat_kolektif.go), disimpan TERPISAH dari PDF
+	// Berita Acara yang di-generate otomatis (lihat
+	// models.AbsensiDokumen.BuktiDukung*).
+	var buktiNamaFile, buktiContentType string
+	var buktiFileData []byte
+	if jenis == "individu" {
+		var errMsg string
+		buktiNamaFile, buktiContentType, buktiFileData, errMsg = parseBuktiDukungUpload(r)
+		if errMsg != "" {
+			utils.Error(w, http.StatusBadRequest, errMsg)
+			return
+		}
 	}
 
 	// Muat pegawai terpilih LENGKAP (Jabatan/UnitKerja/PangkatGol/Atasan,
@@ -372,7 +445,8 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			UnitKerjaKop: nil, TampilkanQR: true, KopTetapDinas: true,
 		}
 	} else {
-		if payload.IDPenandatangan == 0 {
+		idPenandatangan, _ := strconv.ParseUint(strings.TrimSpace(r.FormValue("id_penandatangan")), 10, 64)
+		if idPenandatangan == 0 {
 			utils.Error(w, http.StatusBadRequest, "penandatangan (yang mengetahui) wajib dipilih")
 			return
 		}
@@ -381,7 +455,7 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		for _, pl := range pegawaiPreloads {
 			queryTtd = queryTtd.Preload(pl)
 		}
-		if err := queryTtd.First(&penandatangan, payload.IDPenandatangan).Error; err != nil {
+		if err := queryTtd.First(&penandatangan, idPenandatangan).Error; err != nil {
 			utils.Error(w, http.StatusBadRequest, "data penandatangan tidak ditemukan")
 			return
 		}
@@ -459,6 +533,11 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		existing.Keterangan = alasan
 		existing.Nomor = nomorPtr
 		existing.IDDiinputOleh = userIDPtr
+		if jenis == "individu" {
+			existing.BuktiDukungNamaFile = buktiNamaFile
+			existing.BuktiDukungFile = buktiFileData
+			existing.BuktiDukungContentType = buktiContentType
+		}
 		if found {
 			db.Save(&existing)
 		} else {

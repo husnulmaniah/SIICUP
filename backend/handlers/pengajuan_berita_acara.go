@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -43,22 +42,27 @@ import (
 
 // pengajuanBeritaAcaraOut: DTO respons API.
 type pengajuanBeritaAcaraOut struct {
-	ID                uint            `json:"id"`
-	IDPegawai         uint            `json:"id_pegawai"`
-	Pegawai           *models.Pegawai `json:"pegawai,omitempty"`
-	TanggalKejadian   string          `json:"tanggal_kejadian"`
-	Alasan            string          `json:"alasan"`
-	NomorSurat        string          `json:"nomor_surat"`
-	Status            string          `json:"status"`
-	NamaFile          string          `json:"nama_file"`
-	AtasanApproveNama string          `json:"atasan_approve_nama,omitempty"`
-	TglAtasanApprove  string          `json:"tgl_atasan_approve,omitempty"`
-	CatatanAtasan     string          `json:"catatan_atasan"`
-	AdminApproveNama  string          `json:"admin_approve_nama,omitempty"`
-	TglAdminApprove   string          `json:"tgl_admin_approve,omitempty"`
-	CatatanAdmin      string          `json:"catatan_admin"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
+	ID              uint            `json:"id"`
+	IDPegawai       uint            `json:"id_pegawai"`
+	Pegawai         *models.Pegawai `json:"pegawai,omitempty"`
+	TanggalKejadian string          `json:"tanggal_kejadian"`
+	Alasan          string          `json:"alasan"`
+	NomorSurat      string          `json:"nomor_surat"`
+	Status          string          `json:"status"`
+	NamaFile        string          `json:"nama_file"`
+	// AdaBuktiDukung: true kalau pengajuan ini punya lampiran bukti dukung --
+	// SELALU true untuk pengajuan baru (wajib diupload, lihat
+	// buatPengajuanBeritaAcara), hanya pengajuan lama (sebelum fitur ini ada)
+	// yang bisa bernilai false.
+	AdaBuktiDukung    bool      `json:"ada_bukti_dukung"`
+	AtasanApproveNama string    `json:"atasan_approve_nama,omitempty"`
+	TglAtasanApprove  string    `json:"tgl_atasan_approve,omitempty"`
+	CatatanAtasan     string    `json:"catatan_atasan"`
+	AdminApproveNama  string    `json:"admin_approve_nama,omitempty"`
+	TglAdminApprove   string    `json:"tgl_admin_approve,omitempty"`
+	CatatanAdmin      string    `json:"catatan_admin"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 func toPengajuanBeritaAcaraOut(item models.PengajuanBeritaAcara) pengajuanBeritaAcaraOut {
@@ -70,6 +74,7 @@ func toPengajuanBeritaAcaraOut(item models.PengajuanBeritaAcara) pengajuanBerita
 		Alasan:          item.Alasan,
 		Status:          item.Status,
 		NamaFile:        item.NamaFile,
+		AdaBuktiDukung:  strings.TrimSpace(item.BuktiDukungNamaFile) != "",
 		CatatanAtasan:   item.CatatanAtasan,
 		CatatanAdmin:    item.CatatanAdmin,
 		CreatedAt:       item.CreatedAt,
@@ -94,7 +99,7 @@ func toPengajuanBeritaAcaraOut(item models.PengajuanBeritaAcara) pengajuanBerita
 }
 
 func pengajuanBeritaAcaraPreload(db *gorm.DB) *gorm.DB {
-	return db.Omit("file").
+	return db.Omit("file", "bukti_dukung_file").
 		Preload("Pegawai.Jabatan").Preload("Pegawai.UnitKerja").Preload("Pegawai.PangkatGol.Pangkat").Preload("Pegawai.PangkatGol.Gol").
 		Preload("Pegawai.Atasan").Preload("Pegawai.Atasan.Jabatan").Preload("Pegawai.Atasan.UnitKerja").
 		Preload("Pegawai.Atasan.PangkatGol.Pangkat").Preload("Pegawai.Atasan.PangkatGol.Gol").
@@ -164,7 +169,10 @@ func tanggalPengajuanBeritaAcaraValid(db *gorm.DB, pegawai models.Pegawai, tangg
 
 // buatPengajuanBeritaAcara menangani POST /api/pengajuan-berita-acara --
 // pegawai bertugas di SEKOLAH mengajukan Berita Acara mandiri untuk SATU
-// tanggal kejadian. Menerima JSON {tanggal_kejadian, alasan}.
+// tanggal kejadian. Menerima multipart/form-data {tanggal_kejadian, alasan,
+// file} -- field "file" (bukti dukung foto/scan pendukung alasan terpilih)
+// WAJIB diupload, sesuai permintaan pengguna (lihat parseBuktiDukungUpload
+// di berita_acara.go).
 func buatPengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	if claims.IDPegawai == nil {
@@ -185,26 +193,30 @@ func buatPengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.D
 		return
 	}
 
-	var payload struct {
-		TanggalKejadian string `json:"tanggal_kejadian"`
-		Alasan          string `json:"alasan"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+	utils.LimitBody(w, r, 15<<20)
+	if err := r.ParseMultipartForm(15 << 20); err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return
 	}
-	alasan := strings.TrimSpace(payload.Alasan)
+
+	alasan := strings.TrimSpace(r.FormValue("alasan"))
 	if !isAlasanBeritaAcaraValid(alasan) {
 		utils.Error(w, http.StatusBadRequest, "alasan tidak valid -- pilih salah satu dari daftar yang tersedia")
 		return
 	}
-	tglKejadian, err := utils.ParseDateCell(strings.TrimSpace(payload.TanggalKejadian))
+	tglKejadian, err := utils.ParseDateCell(strings.TrimSpace(r.FormValue("tanggal_kejadian")))
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, "tanggal kejadian tidak valid")
 		return
 	}
 	if ok, reason := tanggalPengajuanBeritaAcaraValid(db, pegawai, tglKejadian, 0); !ok {
 		utils.Error(w, http.StatusBadRequest, "tanggal kejadian tidak bisa diajukan: "+reason)
+		return
+	}
+
+	buktiNamaFile, buktiContentType, buktiFileData, errMsg := parseBuktiDukungUpload(r)
+	if errMsg != "" {
+		utils.Error(w, http.StatusBadRequest, errMsg)
 		return
 	}
 
@@ -215,12 +227,15 @@ func buatPengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.D
 	}
 
 	item := models.PengajuanBeritaAcara{
-		IDPegawai:       pegawai.ID,
-		TanggalKejadian: tglKejadian,
-		Alasan:          alasan,
-		Status:          models.PengajuanBeritaAcaraMenungguAtasan,
-		NamaFile:        generateBeritaAcaraNamaFile(tglKejadian),
-		File:            pdfBytes,
+		IDPegawai:              pegawai.ID,
+		TanggalKejadian:        tglKejadian,
+		Alasan:                 alasan,
+		Status:                 models.PengajuanBeritaAcaraMenungguAtasan,
+		NamaFile:               generateBeritaAcaraNamaFile(tglKejadian),
+		File:                   pdfBytes,
+		BuktiDukungNamaFile:    buktiNamaFile,
+		BuktiDukungFile:        buktiFileData,
+		BuktiDukungContentType: buktiContentType,
 	}
 	if err := db.Create(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan pengajuan: "+err.Error())
@@ -262,20 +277,18 @@ func updatePengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm
 		return
 	}
 
-	var payload struct {
-		TanggalKejadian string `json:"tanggal_kejadian"`
-		Alasan          string `json:"alasan"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+	utils.LimitBody(w, r, 15<<20)
+	if err := r.ParseMultipartForm(15 << 20); err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
 		return
 	}
-	alasan := strings.TrimSpace(payload.Alasan)
+
+	alasan := strings.TrimSpace(r.FormValue("alasan"))
 	if !isAlasanBeritaAcaraValid(alasan) {
 		utils.Error(w, http.StatusBadRequest, "alasan tidak valid -- pilih salah satu dari daftar yang tersedia")
 		return
 	}
-	tglKejadian, err := utils.ParseDateCell(strings.TrimSpace(payload.TanggalKejadian))
+	tglKejadian, err := utils.ParseDateCell(strings.TrimSpace(r.FormValue("tanggal_kejadian")))
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, "tanggal kejadian tidak valid")
 		return
@@ -283,6 +296,22 @@ func updatePengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm
 	if ok, reason := tanggalPengajuanBeritaAcaraValid(db, pegawai, tglKejadian, item.ID); !ok {
 		utils.Error(w, http.StatusBadRequest, "tanggal kejadian tidak bisa diajukan: "+reason)
 		return
+	}
+
+	// Bukti dukung boleh TIDAK dikirim ulang saat edit -- berkas lama
+	// dipertahankan (SAMA pola dengan updatePengajuanSuratKolektif), berkas
+	// baru menggantikan yang lama kalau memang diupload ulang. Pengajuan
+	// pertama kali (buatPengajuanBeritaAcara) TETAP mewajibkan upload --
+	// hanya di alur edit & ajukan ulang ini yang boleh dikosongkan.
+	if formFileHeader(r, "file") != nil {
+		buktiNamaFile, buktiContentType, buktiFileData, errMsg := parseBuktiDukungUpload(r)
+		if errMsg != "" {
+			utils.Error(w, http.StatusBadRequest, errMsg)
+			return
+		}
+		item.BuktiDukungNamaFile = buktiNamaFile
+		item.BuktiDukungFile = buktiFileData
+		item.BuktiDukungContentType = buktiContentType
 	}
 
 	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, "", false)
@@ -642,6 +671,41 @@ func downloadPengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *go
 	w.Write(item.File)
 }
 
+// downloadPengajuanBeritaAcaraBuktiDukung menangani GET
+// /api/pengajuan-berita-acara/{id}/bukti-dukung -- unduh/preview lampiran
+// bukti dukung yang diupload pegawai (lihat buatPengajuanBeritaAcara),
+// kontrol akses SAMA PERSIS dengan downloadPengajuanBeritaAcara (pegawai
+// pemilik, atasan langsungnya, atau admin tahap akhir).
+func downloadPengajuanBeritaAcaraBuktiDukung(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.PengajuanBeritaAcara
+	if err := db.Preload("Pegawai").First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+	if !canAccessPengajuanBeritaAcara(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
+		return
+	}
+	if len(item.BuktiDukungFile) == 0 {
+		utils.Error(w, http.StatusNotFound, "bukti dukung tidak ditemukan")
+		return
+	}
+	contentType := item.BuktiDukungContentType
+	if contentType == "" {
+		contentType = dokumenContentType(item.BuktiDukungNamaFile)
+	}
+	if r.URL.Query().Get("inline") == "1" {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", "inline; filename=\""+item.BuktiDukungNamaFile+"\"")
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+item.BuktiDukungNamaFile+"\"")
+	}
+	w.Write(item.BuktiDukungFile)
+}
+
 // RegisterPengajuanBeritaAcaraRoutes mendaftarkan seluruh endpoint di bawah
 // /api/pengajuan-berita-acara*.
 func RegisterPengajuanBeritaAcaraRoutes(mux *http.ServeMux, db *gorm.DB) {
@@ -678,4 +742,5 @@ func RegisterPengajuanBeritaAcaraRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/pengajuan-berita-acara/{id}/setujui-admin", final(func(w http.ResponseWriter, r *http.Request) { setujuiPengajuanBeritaAcaraAdmin(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-berita-acara/{id}/kembalikan-admin", final(func(w http.ResponseWriter, r *http.Request) { kembalikanPengajuanBeritaAcaraAdmin(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-berita-acara/{id}/file", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadPengajuanBeritaAcara(w, r, db) }))
+	mux.Handle("GET /api/pengajuan-berita-acara/{id}/bukti-dukung", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadPengajuanBeritaAcaraBuktiDukung(w, r, db) }))
 }
