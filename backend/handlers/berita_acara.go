@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"cuti-app/assets"
 	"cuti-app/middleware"
 	"cuti-app/models"
 	"cuti-app/utils"
@@ -344,7 +345,7 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		nama, nip, jabatan, pangkatGol, unitKerja := resolveSignerFullRekomendasi(db, pengaturan)
 		signer = beritaAcaraSigner{
 			Nama: nama, NIP: nip, Jabatan: jabatan, PangkatGol: pangkatGol, UnitKerja: unitKerja,
-			UnitKerjaKop: nil, TampilkanQR: true,
+			UnitKerjaKop: nil, TampilkanQR: true, KopTetapDinas: true,
 		}
 	} else {
 		if payload.IDPenandatangan == 0 {
@@ -764,6 +765,17 @@ type beritaAcaraSigner struct {
 	// seperti Lampiran 2 Surat Rekomendasi, tidak ada proses approval
 	// terpisah untuk kasus ini jadi QR langsung tampil begitu PDF dibuat.
 	TampilkanQR bool
+	// KopTetapDinas: true HANYA untuk penandatangan Dinas auto-resolve --
+	// memakai kop surat TETAP/fixed PERSIS Lampiran 2 Surat Rekomendasi
+	// (drawLetterhead di formulir.go: "PEMERINTAH KABUPATEN MOROWALI UTARA" /
+	// "DINAS PENDIDIKAN DAN KEBUDAYAAN DAERAH" / alamat / "KOLONODALE"),
+	// BUKAN kop berbasis Unit Kerja (drawLetterheadUnitKerjaKustom) --
+	// permintaan pengguna supaya Berita Acara akun Dinas memakai kop instansi
+	// yang benar, bukan sekadar nama Unit Kerja penandatangan (yang bisa
+	// berbeda-beda, mis. "Sekretariat") seperti sebelumnya. Untuk
+	// penandatangan Sekolah/manual, TETAP memakai kop berbasis Unit Kerja
+	// seperti sebelumnya (field ini dibiarkan false/zero value).
+	KopTetapDinas bool
 }
 
 // buildSignatureQRBeritaAcara meniru gaya buildSignatureQRRekomendasi (query
@@ -822,6 +834,29 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 	sanksi := "Apabila hal ini di atas tidak benar, maka saya siap menerima sanksi sesuai peraturan yang berlaku."
 	penutup := "Demikian Berita Acara ini dibuat dengan sebenarnya untuk dapat dipergunakan sebagaimana mestinya."
 
+	// drawKop: kop surat TETAP Lampiran 2 (drawLetterhead) untuk penandatangan
+	// Dinas auto-resolve (signer.KopTetapDinas), atau kop berbasis Unit Kerja
+	// seperti sebelumnya (drawLetterheadUnitKerjaKustom) untuk kasus lain
+	// (Sekolah/manual) -- lihat catatan KopTetapDinas di atas.
+	drawKop := func(p *utils.PDFPage) float64 {
+		if signer.KopTetapDinas {
+			if err := doc.RegisterImage("logo", assets.LogoPNG); err == nil {
+				return drawLetterhead(p, marginX, rightX)
+			}
+			// fallback diam-diam ke kop Unit Kerja kalau logo gagal diregister
+			// (seharusnya tidak pernah terjadi -- assets.LogoPNG selalu ada).
+		}
+		return drawLetterheadUnitKerjaKustom(doc, p, marginX, rightX, unitKerjaTtdNama, unitKerjaTtdForKop)
+	}
+
+	// sigX/sigColW: kolom tanda tangan ("Kolonodale, tanggal..." sampai
+	// QR/nama/NIP) di SEBELAH KANAN halaman -- SAMA seperti pola Lampiran 2
+	// Surat Rekomendasi (lihat buildSuratRekomendasiPppk di
+	// surat_rekomendasi.go), menggantikan posisi rata kiri sebelumnya, sesuai
+	// permintaan pengguna & konvensi surat resmi (blok tanda tangan di kanan).
+	sigX := pageW - 270
+	sigColW := rightX - sigX
+
 	drawJudulDanNomor := func(p *utils.PDFPage, yStart float64) float64 {
 		y := yStart
 		p.SetFont(true, 13)
@@ -843,17 +878,22 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 	drawTtdBlock := func(p *utils.PDFPage, yStart float64) float64 {
 		y := yStart
 		p.SetFont(false, 12)
-		p.Text(marginX, y, "Kolonodale, "+formatDateID(tglSurat)+".")
+		p.Text(sigX, y, "Kolonodale, "+formatDateID(tglSurat)+".")
 		y += lineH * 1.4
-		p.Text(marginX, y, "Mengetahui,")
+		p.Text(sigX, y, "Mengetahui,")
 		y += lineH
-		jabatanLines, jabatanSize := wrapJabatan(namaOrDash(signer.Jabatan), rightX-marginX, 2, []float64{12, 11, 10.5, 10, 9.5, 9})
+		jabatanLines, jabatanSize := wrapJabatan(namaOrDash(signer.Jabatan), sigColW, 2, []float64{12, 11, 10.5, 10, 9.5, 9, 8.5, 8})
 		for _, jl := range jabatanLines {
 			p.SetFont(false, jabatanSize)
-			p.Text(marginX, y, jl)
+			p.Text(sigX, y, jl)
 			y += jabatanSize + 2
 		}
-		namaDisp := strings.ToUpper(namaOrDash(signer.Nama))
+		// namaDisp dipotong ("...") kalau kepanjangan untuk lebar kolom kanan
+		// yang lebih sempit (sigColW) -- SAMA seperti signerNamaDisp pada
+		// Lampiran 2 Surat Rekomendasi (truncateToWidth, lihat catatan riwayat
+		// nama panjang "BERNOULLI TANARI, S.Pd.,M.Pd" yang pernah terpotong di
+		// surat_rekomendasi.go).
+		namaDisp := truncateToWidth(strings.ToUpper(namaOrDash(signer.Nama)), sigColW*boldWidthSafety, 12)
 		if signer.TampilkanQR {
 			// QR tanda tangan otomatis -- HANYA penandatangan Dinas auto-resolve
 			// (lihat beritaAcaraSigner.TampilkanQR), langsung tampil tanpa
@@ -863,9 +903,9 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 			y += lineH * 0.3
 			const qrSide = 90.0
 			nameWPreview := utils.TextWidth(namaDisp, 12)
-			qrCenterX := marginX + nameWPreview/2
-			if qrCenterX-qrSide/2 < marginX {
-				qrCenterX = marginX + qrSide/2
+			qrCenterX := sigX + nameWPreview/2
+			if qrCenterX-qrSide/2 < sigX {
+				qrCenterX = sigX + qrSide/2
 			}
 			if qrCenterX+qrSide/2 > rightX {
 				qrCenterX = rightX - qrSide/2
@@ -884,12 +924,12 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 			y += lineH * 2.4
 		}
 		p.SetFont(true, 12)
-		p.Text(marginX, y, namaDisp)
+		p.Text(sigX, y, namaDisp)
 		nameW := utils.TextWidth(namaDisp, 12)
-		p.Line(marginX, y+3, marginX+nameW, y+3)
+		p.Line(sigX, y+3, sigX+nameW, y+3)
 		y += 16
 		p.SetFont(false, 12)
-		p.Text(marginX, y, "NIP. "+namaOrDash(signer.NIP))
+		p.Text(sigX, y, "NIP. "+namaOrDash(signer.NIP))
 		y += lineH
 		return y
 	}
@@ -899,7 +939,7 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 		p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
 		doc.AddPage(p)
 
-		kopBawahY := drawLetterheadUnitKerjaKustom(doc, p, marginX, rightX, unitKerjaTtdNama, unitKerjaTtdForKop)
+		kopBawahY := drawKop(p)
 		y := kopBawahY + 16
 		y = drawJudulDanNomor(p, y)
 
@@ -936,7 +976,7 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 	// ---------------- kolektif: halaman 1 ----------------
 	p1 := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
 	doc.AddPage(p1)
-	kopBawahY := drawLetterheadUnitKerjaKustom(doc, p1, marginX, rightX, unitKerjaTtdNama, unitKerjaTtdForKop)
+	kopBawahY := drawKop(p1)
 	y := kopBawahY + 16
 	y = drawJudulDanNomor(p1, y)
 
