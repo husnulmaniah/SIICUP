@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useProfilePhoto } from '../composables/useProfilePhoto'
@@ -145,8 +145,11 @@ const navSections = computed(() => {
 
   // Template Surat: administrator/admin mengelola, pegawai/atasan bertugas
   // di SEKOLAH hanya melihat/preview (lihat auth.canViewTemplateSurat,
-  // dihitung dari flag is_sekolah yang dikirim backend saat login).
-  if (auth.canViewTemplateSurat) {
+  // dihitung dari flag is_sekolah yang dikirim backend saat login). KHUSUS
+  // untuk akun sekolah (BUKAN administrator/admin) -- untuk administrator/
+  // admin menu ini dipindah ke dalam dropdown "Surat Dinas" di bawah supaya
+  // tidak tampil dobel.
+  if (auth.canViewTemplateSurat && !auth.canManageMaster) {
     sections.push({ header: null, items: [{ label: 'Template Surat', icon: 'pi pi-file-word', to: '/template-surat' }] })
   }
 
@@ -167,17 +170,37 @@ const navSections = computed(() => {
       header: 'Data Kepegawaian',
       items: [
         { label: 'Data Pegawai', icon: 'pi pi-users', to: '/master/pegawai' },
-        { label: 'Perubahan Data Pegawai', icon: 'pi pi-user-edit', to: '/perubahan-data' },
         { label: 'KP4', icon: 'pi pi-id-card', to: '/kp4-admin' },
+        { label: 'Jatah Cuti Tahunan', icon: 'pi pi-wallet', to: '/master/jatah-cuti' },
+      ],
+    })
+    // Administrasi Kepegawaian: dropdown (bisa dibuka/tutup) berisi menu
+    // yang sebelumnya tersebar di "Data Kepegawaian" -- dikelompokkan ulang
+    // atas permintaan pengguna supaya sidebar tidak terlalu panjang.
+    sections.push({
+      header: 'Administrasi Kepegawaian',
+      dropdown: true,
+      items: [
+        { label: 'Perubahan Data Pegawai', icon: 'pi pi-user-edit', to: '/perubahan-data' },
         { label: 'Pengajuan Pensiun', icon: 'pi pi-briefcase', to: '/pengajuan-pensiun' },
         { label: 'Penerima TPP', icon: 'pi pi-money-bill', to: '/penerima-tpp' },
+      ],
+    })
+    // Surat Dinas: dropdown berisi Template Surat (dipindah dari menu
+    // tersendiri di atas, KHUSUS tampilan administrator/admin) + Surat
+    // Rekomendasi & Berita Acara (dipindah dari "Data Kepegawaian").
+    sections.push({
+      header: 'Surat Dinas',
+      dropdown: true,
+      items: [
+        { label: 'Template Surat', icon: 'pi pi-file-word', to: '/template-surat' },
         { label: 'Surat Rekomendasi', icon: 'pi pi-send', to: '/surat-rekomendasi' },
         { label: 'Berita Acara', icon: 'pi pi-file-edit', to: '/berita-acara' },
-        { label: 'Jatah Cuti Tahunan', icon: 'pi pi-wallet', to: '/master/jatah-cuti' },
       ],
     })
     sections.push({
       header: 'Master Data',
+      dropdown: true,
       // Tabel referensi inti (Jabatan, Unit Kerja, dst.) hanya boleh
       // dilihat/diubah oleh administrator -- role "admin" (Admin
       // Kepegawaian) hanya butuh mengelola "Tanggal Merah" (kalender hari
@@ -233,6 +256,40 @@ function keluar() {
   router.push({ name: 'login' })
 }
 
+// ============================================================
+// dropdown sidebar (bisa dibuka/tutup) -- "Administrasi Kepegawaian",
+// "Surat Dinas", & "Master Data" (lihat section.dropdown di navSections).
+// Disimpan per label header di dalam Set, bukan per index, supaya tetap
+// stabil kalau urutan section berubah.
+// ============================================================
+const openDropdowns = ref(new Set())
+
+function isDropdownOpen(section) {
+  return openDropdowns.value.has(section.header)
+}
+function toggleDropdown(section) {
+  const next = new Set(openDropdowns.value)
+  if (next.has(section.header)) next.delete(section.header)
+  else next.add(section.header)
+  openDropdowns.value = next
+}
+// Dropdown yang sedang berisi menu aktif otomatis terbuka -- supaya pegawai
+// tidak bingung menu yang sedang dibuka "hilang" di dalam dropdown tertutup
+// begitu pindah halaman atau saat pertama kali membuka aplikasi.
+watch(
+  () => route.path,
+  () => {
+    const next = new Set(openDropdowns.value)
+    for (const section of navSections.value) {
+      if (section.dropdown && section.items.some((item) => isActive(item.to))) {
+        next.add(section.header)
+      }
+    }
+    openDropdowns.value = next
+  },
+  { immediate: true },
+)
+
 function isActive(to) {
   return route.path === to
 }
@@ -282,17 +339,45 @@ const menuLainnyaAktif = computed(
       </div>
       <nav class="sidebar-nav">
         <template v-for="(section, si) in navSections" :key="si">
-          <div v-if="section.header" class="nav-section-header">{{ section.header }}</div>
-          <a
-            v-for="item in section.items"
-            :key="item.to"
-            class="nav-item"
-            :class="{ active: isActive(item.to) }"
-            @click="navigate(item.to)"
-          >
-            <i :class="item.icon"></i>
-            <span>{{ item.label }}</span>
-          </a>
+          <!-- section dropdown (bisa dibuka/tutup): "Administrasi Kepegawaian",
+               "Surat Dinas", "Master Data" -- lihat openDropdowns/toggleDropdown -->
+          <template v-if="section.dropdown">
+            <button
+              type="button"
+              class="nav-section-dropdown"
+              :class="{ open: isDropdownOpen(section) }"
+              @click="toggleDropdown(section)"
+            >
+              <span>{{ section.header }}</span>
+              <i class="pi pi-angle-down nav-dropdown-chevron"></i>
+            </button>
+            <template v-if="isDropdownOpen(section)">
+              <a
+                v-for="item in section.items"
+                :key="item.to"
+                class="nav-item nav-item-sub"
+                :class="{ active: isActive(item.to) }"
+                @click="navigate(item.to)"
+              >
+                <i :class="item.icon"></i>
+                <span>{{ item.label }}</span>
+              </a>
+            </template>
+          </template>
+          <!-- section biasa: header statis (kalau ada) + daftar menu selalu tampil -->
+          <template v-else>
+            <div v-if="section.header" class="nav-section-header">{{ section.header }}</div>
+            <a
+              v-for="item in section.items"
+              :key="item.to"
+              class="nav-item"
+              :class="{ active: isActive(item.to) }"
+              @click="navigate(item.to)"
+            >
+              <i :class="item.icon"></i>
+              <span>{{ item.label }}</span>
+            </a>
+          </template>
         </template>
       </nav>
     </aside>
@@ -474,6 +559,47 @@ const menuLainnyaAktif = computed(
   color: #6b7280;
   padding: 1rem 0.6rem 0.35rem;
   font-weight: 600;
+}
+
+/* header dropdown (bisa dibuka/tutup): "Administrasi Kepegawaian", "Surat
+   Dinas", "Master Data" -- tombol penuh lebar, gaya seragam dengan
+   .nav-section-header tapi bisa diklik & punya chevron yang berputar. */
+.nav-section-dropdown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9ca3af;
+  padding: 0.75rem 0.6rem 0.75rem 0.7rem;
+  font-weight: 600;
+  border-radius: 8px;
+  margin-top: 0.3rem;
+}
+
+.nav-section-dropdown:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.nav-dropdown-chevron {
+  font-size: 0.75rem;
+  transition: transform 0.15s ease;
+}
+
+.nav-section-dropdown.open .nav-dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+/* item di dalam dropdown -- sedikit menjorok ke kanan supaya kelihatan
+   sebagai "anak" dari header dropdown-nya. */
+.nav-item-sub {
+  padding-left: 1.3rem;
 }
 
 .nav-item {
