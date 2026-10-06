@@ -116,6 +116,17 @@ const navSections = computed(() => {
         { label: 'KP4', icon: 'pi pi-users', to: '/kp4' },
       ],
     })
+  } else if (auth.isAtasan && !auth.isSekolah) {
+    // Atasan yang tempat tugasnya Dinas/Kantor (BUKAN Sekolah) juga boleh
+    // absen sendiri lewat kamera, sama seperti pegawai -- backend
+    // (pegawaiOnly & absensiEligible di backend/handlers/absensi.go) sudah
+    // mengizinkan & bahkan SELALU meloloskan atasan Dinas terlepas dari
+    // filter Pengaturan Absen manapun. Atasan Sekolah (Kepala Sekolah/
+    // Puskesmas) TIDAK diberi menu ini -- cuma atasan Dinas, sesuai
+    // permintaan. Profil Saya & KP4 tetap tidak dimunculkan untuk atasan
+    // karena rutenya memang masih khusus role pegawai (meta.roles di
+    // router/index.js), belum diminta untuk atasan.
+    sections.push({ header: null, items: [{ label: 'Absen', icon: 'pi pi-camera', to: '/absen' }] })
   }
 
   // Arsip Surat: surat rekomendasi (perpanjangan kontrak PPPK/PPPK Paruh

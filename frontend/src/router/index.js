@@ -36,7 +36,15 @@ const routes = [
       { path: 'master/:tableKey', name: 'master', component: MasterDataView },
       { path: 'pengaturan-formulir', name: 'pengaturan-formulir', component: PengaturanFormulirView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'profil-saya', name: 'profil-saya', component: ProfilSayaView, meta: { roles: ['pegawai'] } },
-      { path: 'absen', name: 'absen', component: AbsensiView, meta: { roles: ['pegawai'] } },
+      // Absen: pegawai SELALU boleh, DAN atasan yang tempat tugasnya Dinas/
+      // Kantor (BUKAN Sekolah) -- lihat requireAbsenAccess di beforeEach
+      // (meta.roles saja tidak bisa membedakan atasan dinas vs. sekolah,
+      // sama seperti pola requireKopSuratAccess/requireTemplateSuratAccess
+      // di bawah). Backend (pegawaiOnly & absensiEligible di
+      // backend/handlers/absensi.go) sudah lebih dulu mengizinkan atasan
+      // Dinas absen sendiri -- ini cuma membuka menu & rute frontend-nya
+      // supaya atasan Dinas benar-benar bisa mengaksesnya.
+      { path: 'absen', name: 'absen', component: AbsensiView, meta: { roles: ['pegawai', 'atasan'], requireAbsenAccess: true } },
       // Rekap Absen: bisa diakses administrator/admin (lewat meta.roles di
       // bawah) ATAU akun mana pun yang dicentang "Admin Absensi" (flag
       // is_admin_absensi) ATAU "Admin Verifikasi" (flag is_admin_verifikasi,
@@ -106,6 +114,9 @@ router.beforeEach((to) => {
     }
   }
   if (to.meta.requireTemplateSuratAccess && !auth.canViewTemplateSurat) {
+    return { name: 'dashboard' }
+  }
+  if (to.meta.requireAbsenAccess && !(auth.isPegawai || (auth.isAtasan && !auth.isSekolah))) {
     return { name: 'dashboard' }
   }
   if (to.meta.requireKopSuratAccess && !(auth.isAtasan && auth.isSekolah)) {
