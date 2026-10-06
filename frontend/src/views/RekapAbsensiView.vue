@@ -2134,7 +2134,7 @@ const defaultTab = computed(() => {
         </div>
 
         <div class="kolektif-span">
-          <Button label="Input Surat" icon="pi pi-upload" :loading="submittingKolektif" @click="submitKolektif" />
+          <Button label="Simpan Data" icon="pi pi-upload" :loading="submittingKolektif" @click="submitKolektif" />
         </div>
       </div>
 
