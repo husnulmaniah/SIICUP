@@ -142,14 +142,15 @@ func parseBuktiDukungUpload(r *http.Request) (namaFile, contentType string, data
 
 // buktiDukungPNGUntukPDF mengonversi data bukti dukung menjadi PNG + dimensi
 // piksel aslinya (lebar, tinggi), siap diregister ke utils.PDFDoc lewat
-// RegisterImage supaya bisa digambar sebagai isi halaman PDF (lihat
-// addBuktiDukungPage di bawah). HANYA menangani gambar (JPG/PNG) --
+// RegisterImage supaya bisa digambar di badan PDF (lihat
+// drawBuktiDukungBesideTtd di bawah). HANYA menangani gambar (JPG/PNG) --
 // RegisterImage di utils/pdfwriter.go cuma bisa decode PNG, jadi JPG
 // di-decode dulu (image/jpeg, stdlib) lalu di-encode ulang jadi PNG
 // (image/png, stdlib) sebelum diregister. Berkas PDF dikembalikan sebagai
-// error supaya pemanggil jatuh ke catatan teks (lihat addBuktiDukungPage) --
-// utils/pdfwriter.go adalah penulis PDF internal tanpa dependensi eksternal
-// yang TIDAK punya kemampuan menggabungkan/embed halaman dari PDF lain.
+// error supaya pemanggil jatuh ke catatan teks (lihat
+// drawBuktiDukungBesideTtd) -- utils/pdfwriter.go adalah penulis PDF
+// internal tanpa dependensi eksternal yang TIDAK punya kemampuan
+// menggabungkan/embed halaman dari PDF lain.
 func buktiDukungPNGUntukPDF(data []byte, contentType string) (pngBytes []byte, w, h int, err error) {
 	switch contentType {
 	case "image/png":
@@ -174,58 +175,52 @@ func buktiDukungPNGUntukPDF(data []byte, contentType string) (pngBytes []byte, w
 	}
 }
 
-// addBuktiDukungPage menambahkan HALAMAN KEDUA pada PDF Berita Acara
-// "individu" berisi bukti dukung yang diupload pengguna (lihat
-// parseBuktiDukungUpload), sesuai permintaan pengguna supaya bukti dukung
-// "muat di halaman kedua pdf" -- bukan cuma tersimpan sebagai lampiran
-// terpisah yang harus diunduh sendiri lewat endpoint
-// /bukti-dukung. Gambar (JPG/PNG) digambar LANGSUNG mengisi halaman
-// (diskalakan proporsional biar pas, lihat buktiDukungPNGUntukPDF di atas);
-// berkas PDF TIDAK bisa digabung/ditempel sebagai halaman PDF lain karena
-// utils/pdfwriter.go tidak punya kemampuan itu tanpa dependensi eksternal
-// baru -- untuk kasus itu halaman kedua hanya berisi catatan bahwa bukti
-// dukungnya berupa dokumen PDF terpisah yang tetap tersimpan & bisa diunduh
-// lewat sistem. Tidak melakukan apa pun kalau data kosong (kolektif, atau
-// pengajuan lama sebelum fitur ini ada, tidak mewajibkan bukti dukung).
-func addBuktiDukungPage(doc *utils.PDFDoc, marginX, rightX float64, data []byte, contentType, namaFile string) {
+// drawBuktiDukungBesideTtd menggambar bukti dukung yang diupload pengguna
+// (lihat parseBuktiDukungUpload) di SEBELAH KIRI blok tanda tangan/QR
+// (sigX..rightX, lihat drawTtdBlock) pada halaman yang SAMA, sejajar dengan
+// baris "Kolonodale, tanggal..." -- sesuai permintaan pengguna supaya
+// gambar bukti dukung "tertempel di samping ttd qrcode Kepala Dinas/Kepala
+// Sekolah", MENGGANTIKAN pendekatan sebelumnya yang menaruhnya di halaman
+// kedua terpisah. Gambar (JPG/PNG) digambar LANGSUNG, diskalakan
+// proporsional biar pas di kolom kiri tanpa menabrak kolom tanda tangan
+// (lihat buktiDukungPNGUntukPDF); berkas PDF TIDAK bisa ditempel sebagai
+// gambar (utils/pdfwriter.go tidak punya kemampuan merender halaman PDF
+// lain tanpa dependensi eksternal baru) -- untuk kasus itu ditampilkan
+// catatan teks singkat sebagai gantinya, bukti dukungnya sendiri tetap
+// tersimpan & bisa diunduh lewat ikon lampiran seperti biasa. Tidak
+// melakukan apa pun kalau data kosong (kolektif, atau pengajuan lama
+// sebelum fitur bukti dukung wajib ada).
+func drawBuktiDukungBesideTtd(doc *utils.PDFDoc, p *utils.PDFPage, marginX, sigX, yStart float64, data []byte, contentType, namaFile string) {
 	if len(data) == 0 {
 		return
 	}
-	const lineH = 15.0
-	p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
-	doc.AddPage(p)
-	centerX := marginX + (rightX-marginX)/2
-	y := 48.0
-	p.SetFont(true, 13)
-	const judul = "LAMPIRAN -- BUKTI DUKUNG"
-	p.TextCentered(centerX, y, judul)
-	titleW := utils.TextWidth(judul, 13)
-	p.Line(centerX-titleW/2, y+3, centerX+titleW/2, y+3)
-	y += lineH * 1.8
+	const gap = 16.0
+	const maxBoxH = 190.0
+	boxW := sigX - marginX - gap
+	if boxW < 60 {
+		return
+	}
 
 	pngBytes, imgW, imgH, convErr := buktiDukungPNGUntukPDF(data, contentType)
 	if convErr != nil || imgW == 0 || imgH == 0 {
-		p.SetFont(false, 12)
-		p.MultilineText(marginX, y, rightX-marginX, lineH,
-			"Bukti dukung berupa berkas \""+namaOrDash(namaFile)+"\" tersimpan pada sistem dan dapat diunduh melalui menu Berita Acara/Pengajuan Berita Acara (ikon lampiran).")
+		p.SetFont(false, 9)
+		p.MultilineText(marginX, yStart, boxW, 12,
+			"Bukti dukung: \""+namaOrDash(namaFile)+"\" (lihat lampiran pada sistem).")
 		return
 	}
 	if regErr := doc.RegisterImage("bukti_dukung_img", pngBytes); regErr != nil {
-		p.SetFont(false, 12)
-		p.MultilineText(marginX, y, rightX-marginX, lineH,
-			"Bukti dukung berupa berkas \""+namaOrDash(namaFile)+"\" tersimpan pada sistem dan dapat diunduh melalui menu Berita Acara/Pengajuan Berita Acara (ikon lampiran).")
+		p.SetFont(false, 9)
+		p.MultilineText(marginX, yStart, boxW, 12,
+			"Bukti dukung: \""+namaOrDash(namaFile)+"\" (lihat lampiran pada sistem).")
 		return
 	}
-	maxW := rightX - marginX
-	maxH := utils.PageHeightA4 - y - 48.0
-	scale := maxW / float64(imgW)
-	if scaledH := float64(imgH) * scale; scaledH > maxH {
-		scale = maxH / float64(imgH)
+	scale := boxW / float64(imgW)
+	if scaledH := float64(imgH) * scale; scaledH > maxBoxH {
+		scale = maxBoxH / float64(imgH)
 	}
 	drawW := float64(imgW) * scale
 	drawH := float64(imgH) * scale
-	drawX := marginX + (maxW-drawW)/2
-	p.Image("bukti_dukung_img", drawX, y, drawW, drawH)
+	p.Image("bukti_dukung_img", marginX, yStart, drawW, drawH)
 }
 
 // RegisterBeritaAcaraRoutes mendaftarkan seluruh endpoint di bawah
@@ -1163,8 +1158,7 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 		y = p.JustifiedText(marginX, y, rightX-marginX, lineH, penutup) + lineH*1.8
 
 		drawTtdBlock(p, y)
-
-		addBuktiDukungPage(doc, marginX, rightX, buktiDukungData, buktiDukungContentType, buktiDukungNamaFile)
+		drawBuktiDukungBesideTtd(doc, p, marginX, sigX, y, buktiDukungData, buktiDukungContentType, buktiDukungNamaFile)
 
 		return doc.Output()
 	}
