@@ -2662,8 +2662,12 @@ const defaultTab = computed(() => {
         Menyetujui Berita Acara <b>{{ setujuiBaItem?.pegawai?.nama }}</b> tanggal {{ formatTanggalBa(setujuiBaItem?.tanggal_kejadian) }} --
         absen pegawai akan otomatis tercatat DD (Dinas Dalam) - Berita Acara, dan QR tanda tangan akan disertakan ke PDF-nya.
       </p>
-      <div class="field-label">Nomor Surat (opsional)</div>
-      <InputText v-model="setujuiBaNomor" placeholder="Boleh dikosongkan" style="width: 100%" />
+      <div class="field-label">Nomor Urut Surat (opsional)</div>
+      <InputText v-model="setujuiBaNomor" placeholder="Boleh dikosongkan, cth: 483.1" style="width: 100%" />
+      <small class="text-muted" style="display: block; margin-top: 0.35rem">
+        Cukup isi nomor urutnya saja -- sistem otomatis merangkai jadi
+        "800/{{ setujuiBaNomor || '...' }}/Disdikbud/{bulan romawi berjalan}/{tahun berjalan}".
+      </small>
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeSetujuiBaDialog" />
         <Button label="Setujui" icon="pi pi-check" severity="success" :loading="submittingSetujuiBa" @click="submitSetujuiBa" />

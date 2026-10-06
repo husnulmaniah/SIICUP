@@ -80,6 +80,22 @@ func isAlasanBeritaAcaraValid(alasan string) bool {
 	return false
 }
 
+// nomorSuratBeritaAcaraLengkap merangkai nomor surat Berita Acara LENGKAP
+// format "800/{urutan}/Disdikbud/{bulan romawi}/{tahun}" -- kode klasifikasi
+// "800" TETAP untuk semua Berita Acara (sesuai contoh pengguna:
+// 800/483.1/Disdikbud/VI/2026), SAMA pola dengan nomorSuratRekomendasiLengkap
+// di surat_rekomendasi.go (romanMonth, lihat formulir.go) tapi kode
+// klasifikasinya beda ("800" polos, bukan "800.1.11" khusus Surat
+// Rekomendasi). Admin (baik di dialog "Buat Berita Acara" maupun saat
+// menyetujui tahap akhir pengajuan BA sekolah -- lihat buatBeritaAcara &
+// setujuiPengajuanBeritaAcaraAdmin) HANYA mengetik bagian nomor urutnya saja
+// (mis. "483.1"), bulan romawi & tahun mengikuti TANGGAL SURAT yang
+// diberikan -- dipanggil HANYA kalau urutan tidak kosong (nomor surat tetap
+// boleh dikosongkan sepenuhnya, tampil "-" di PDF seperti sebelumnya).
+func nomorSuratBeritaAcaraLengkap(urutan string, tglSurat time.Time) string {
+	return fmt.Sprintf("800/%s/Disdikbud/%s/%d", urutan, romanMonth(tglSurat.Month()), tglSurat.Year())
+}
+
 // RegisterBeritaAcaraRoutes mendaftarkan seluruh endpoint di bawah
 // /api/berita-acara*. Khusus administrator/admin (SAMA dengan hak akses
 // inputAbsensiDokumenKolektif) -- bukan akun ber-flag IsAdminAbsensi saja,
@@ -288,7 +304,15 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			return
 		}
 	}
+	// nomorSurat: admin HANYA mengetik bagian nomor urutnya saja (mis.
+	// "483.1"), lalu dirangkai otomatis jadi format baku Berita Acara
+	// (nomorSuratBeritaAcaraLengkap, lihat definisinya di bawah) -- bulan
+	// romawi & tahun mengikuti TANGGAL SURAT (tglSurat), SAMA seperti pola
+	// nomorSuratRekomendasiLengkap pada Surat Rekomendasi.
 	nomorSurat := strings.TrimSpace(payload.NomorSurat)
+	if nomorSurat != "" {
+		nomorSurat = nomorSuratBeritaAcaraLengkap(nomorSurat, tglSurat)
+	}
 
 	// Muat pegawai terpilih LENGKAP (Jabatan/UnitKerja/PangkatGol/Atasan,
 	// lewat pegawaiPreloads yang sudah ada di pegawai.go) -- dibutuhkan

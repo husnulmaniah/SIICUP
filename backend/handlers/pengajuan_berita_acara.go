@@ -487,7 +487,15 @@ func setujuiPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db
 		return
 	}
 
+	// nomorSurat: SAMA pola dengan buatBeritaAcara (menu admin) -- admin HANYA
+	// mengetik bagian nomor urutnya saja, dirangkai otomatis jadi format baku
+	// "800/{urutan}/Disdikbud/{bulan romawi}/{tahun}" (nomorSuratBeritaAcaraLengkap
+	// di berita_acara.go), bulan romawi & tahun mengikuti tanggal kejadian
+	// (tidak ada field "tanggal surat" terpisah pada alur pengajuan mandiri ini).
 	nomorSurat := strings.TrimSpace(r.FormValue("nomor_surat"))
+	if nomorSurat != "" {
+		nomorSurat = nomorSuratBeritaAcaraLengkap(nomorSurat, item.TanggalKejadian)
+	}
 	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomorSurat, true)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())

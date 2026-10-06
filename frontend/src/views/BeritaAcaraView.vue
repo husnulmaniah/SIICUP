@@ -524,8 +524,12 @@ onMounted(() => {
           />
         </div>
         <div class="form-field">
-          <label>Nomor Surat (opsional)</label>
-          <InputText v-model="form.nomor_surat" placeholder="Boleh dikosongkan" style="width: 100%" />
+          <label>Nomor Urut Surat (opsional)</label>
+          <InputText v-model="form.nomor_surat" placeholder="Boleh dikosongkan, cth: 483.1" style="width: 100%" />
+          <small class="text-muted">
+            Cukup isi nomor urutnya saja -- sistem otomatis merangkai jadi
+            "800/{{ form.nomor_surat || '...' }}/Disdikbud/{bulan romawi berjalan}/{tahun berjalan}".
+          </small>
         </div>
       </div>
 
