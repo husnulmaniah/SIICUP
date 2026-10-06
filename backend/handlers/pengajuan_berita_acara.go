@@ -650,7 +650,10 @@ func downloadPengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *go
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
 	var item models.PengajuanBeritaAcara
-	if err := db.Preload("Pegawai").First(&item, "id = ?", id).Error; err != nil {
+	// Omit bukti_dukung_file -- endpoint ini cuma menyajikan item.File,
+	// supaya "Lihat"/unduh tidak lambat menunggu transfer blob yang tidak
+	// dipakai (lihat catatan serupa pada downloadAbsensiDokumen).
+	if err := db.Omit("bukti_dukung_file").Preload("Pegawai").First(&item, "id = ?", id).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}
@@ -680,7 +683,9 @@ func downloadPengajuanBeritaAcaraBuktiDukung(w http.ResponseWriter, r *http.Requ
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
 	var item models.PengajuanBeritaAcara
-	if err := db.Preload("Pegawai").First(&item, "id = ?", id).Error; err != nil {
+	// Omit file -- endpoint ini cuma menyajikan item.BuktiDukungFile, PDF
+	// Berita Acara-nya (item.File) tidak perlu ikut dimuat.
+	if err := db.Omit("file").Preload("Pegawai").First(&item, "id = ?", id).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}

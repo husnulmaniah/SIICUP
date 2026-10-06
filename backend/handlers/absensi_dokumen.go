@@ -471,7 +471,11 @@ func downloadAbsensiDokumen(w http.ResponseWriter, r *http.Request, db *gorm.DB)
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
 	var item models.AbsensiDokumen
-	if err := db.First(&item, "id = ?", id).Error; err != nil {
+	// Omit bukti_dukung_file -- endpoint ini cuma menyajikan item.File, jadi
+	// blob bukti dukung (bisa sampai belasan MB) tidak perlu ikut dimuat dari
+	// DB, supaya "Lihat"/unduh Berita Acara tidak lambat karena menunggu
+	// transfer data yang tidak dipakai.
+	if err := db.Omit("bukti_dukung_file").First(&item, "id = ?", id).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}
@@ -502,7 +506,9 @@ func downloadAbsensiDokumenBuktiDukung(w http.ResponseWriter, r *http.Request, d
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
 	var item models.AbsensiDokumen
-	if err := db.First(&item, "id = ?", id).Error; err != nil {
+	// Omit file -- endpoint ini cuma menyajikan item.BuktiDukungFile, jadi
+	// PDF Berita Acara-nya (item.File) tidak perlu ikut dimuat dari DB.
+	if err := db.Omit("file").First(&item, "id = ?", id).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}
@@ -532,7 +538,8 @@ func deleteAbsensiDokumen(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
 	var item models.AbsensiDokumen
-	if err := db.First(&item, "id = ?", id).Error; err != nil {
+	// Omit kedua kolom blob -- hapus baris tidak perlu memuat isi berkasnya.
+	if err := db.Omit("file", "bukti_dukung_file").First(&item, "id = ?", id).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}

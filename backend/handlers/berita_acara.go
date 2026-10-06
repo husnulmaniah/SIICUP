@@ -103,14 +103,15 @@ func nomorSuratBeritaAcaraLengkap(urutan string, tglSurat time.Time) string {
 
 // parseBuktiDukungUpload membaca & memvalidasi berkas upload "bukti dukung"
 // (foto/scan pendukung alasan terpilih, mis. screenshot error jaringan/foto
-// motor rusak/dst) dari form-field "file" -- format PDF/JPG/PNG saja, tidak
-// boleh 0 byte, SAMA pola validasi dengan buatPengajuanSuratKolektif (lihat
-// formFileHeader/dokumenContentType di handlers/pengajuan_cuti.go &
-// pengajuan_surat_kolektif.go). Dipakai WAJIB oleh DUA alur (sesuai
-// permintaan pengguna): Berita Acara "individu" lewat menu admin
-// (buatBeritaAcara di bawah) & pengajuan Berita Acara mandiri sekolah
-// (buatPengajuanBeritaAcara/updatePengajuanBeritaAcara di
-// pengajuan_berita_acara.go). errMsg kosong berarti berkas valid & siap
+// motor rusak/dst) dari form-field "file" -- HANYA format gambar JPG/JPEG/
+// PNG (PDF & format lain DITOLAK dengan pesan jelas, sesuai permintaan
+// pengguna, supaya setiap bukti dukung pasti bisa ditampilkan langsung di
+// PDF Berita Acara -- lihat drawBuktiDukungBesideTtd -- bukan sekadar
+// catatan nama berkas seperti yang terjadi untuk PDF), tidak boleh 0 byte.
+// Dipakai WAJIB oleh DUA alur (sesuai permintaan pengguna): Berita Acara
+// "individu" lewat menu admin (buatBeritaAcara di bawah) & pengajuan Berita
+// Acara mandiri sekolah (buatPengajuanBeritaAcara/updatePengajuanBeritaAcara
+// di pengajuan_berita_acara.go). errMsg kosong berarti berkas valid & siap
 // disimpan; request HARUS sudah lewat r.ParseMultipartForm sebelum memanggil
 // ini.
 func parseBuktiDukungUpload(r *http.Request) (namaFile, contentType string, data []byte, errMsg string) {
@@ -119,8 +120,8 @@ func parseBuktiDukungUpload(r *http.Request) (namaFile, contentType string, data
 		return "", "", nil, "bukti dukung wajib diupload"
 	}
 	ext := strings.ToLower(filepath.Ext(fh.Filename))
-	if ext != ".pdf" && ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-		return "", "", nil, "bukti dukung harus berformat PDF, JPG, atau PNG"
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		return "", "", nil, "bukti dukung harus berupa gambar berformat JPG/JPEG atau PNG -- berkas PDF atau format lain tidak diterima"
 	}
 	f, err := fh.Open()
 	if err != nil {
@@ -201,26 +202,44 @@ func drawBuktiDukungBesideTtd(doc *utils.PDFDoc, p *utils.PDFPage, marginX, sigX
 		return
 	}
 
-	pngBytes, imgW, imgH, convErr := buktiDukungPNGUntukPDF(data, contentType)
-	if convErr != nil || imgW == 0 || imgH == 0 {
+	const imgName = "bukti_dukung_img"
+	var imgW, imgH int
+	registered := false
+
+	// Foto (JPG) dicoba lewat jalur CEPAT dulu -- embed byte JPEG ASLINYA
+	// apa adanya (RegisterJPEGImage, utils/pdfwriter.go) TANPA decode+encode
+	// ulang ke PNG, supaya ukuran PDF yang dihasilkan tidak membengkak
+	// berkali-lipat dari ukuran foto aslinya (itulah penyebab "Lihat"/unduh
+	// Berita Acara terasa lambat kalau bukti dukungnya foto kamera HP).
+	// Kalau JPEG-nya mode warna yang tidak didukung jalur cepat ini (jarang,
+	// mis. CMYK), atau uploadnya PNG, jatuh ke jalur decode+PNG seperti
+	// sebelumnya.
+	if contentType == "image/jpeg" {
+		if w, h, ok, err := doc.RegisterJPEGImage(imgName, data); err == nil && ok {
+			imgW, imgH, registered = w, h, true
+		}
+	}
+	if !registered {
+		if pngBytes, w, h, convErr := buktiDukungPNGUntukPDF(data, contentType); convErr == nil && w > 0 && h > 0 {
+			if regErr := doc.RegisterImage(imgName, pngBytes); regErr == nil {
+				imgW, imgH, registered = w, h, true
+			}
+		}
+	}
+	if !registered {
 		p.SetFont(false, 9)
 		p.MultilineText(marginX, yStart, boxW, 12,
 			"Bukti dukung: \""+namaOrDash(namaFile)+"\" (lihat lampiran pada sistem).")
 		return
 	}
-	if regErr := doc.RegisterImage("bukti_dukung_img", pngBytes); regErr != nil {
-		p.SetFont(false, 9)
-		p.MultilineText(marginX, yStart, boxW, 12,
-			"Bukti dukung: \""+namaOrDash(namaFile)+"\" (lihat lampiran pada sistem).")
-		return
-	}
+
 	scale := boxW / float64(imgW)
 	if scaledH := float64(imgH) * scale; scaledH > maxBoxH {
 		scale = maxBoxH / float64(imgH)
 	}
 	drawW := float64(imgW) * scale
 	drawH := float64(imgH) * scale
-	p.Image("bukti_dukung_img", marginX, yStart, drawW, drawH)
+	p.Image(imgName, marginX, yStart, drawW, drawH)
 }
 
 // RegisterBeritaAcaraRoutes mendaftarkan seluruh endpoint di bawah

@@ -469,6 +469,23 @@ function pickPengajuanBaFile() {
 }
 function onPengajuanBaFileChosen(e) {
   const file = e.target.files?.[0] || null
+  // Bukti dukung Berita Acara HANYA menerima gambar (JPG/JPEG/PNG) -- PDF/
+  // format lain DITOLAK di sini juga, SAMA dengan validasi sisi server
+  // (lihat parseBuktiDukungUpload di handlers/berita_acara.go).
+  if (file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    if (!['jpg', 'jpeg', 'png'].includes(ext)) {
+      toast.add({
+        severity: 'error',
+        summary: 'Format tidak didukung',
+        detail: 'Bukti dukung harus berupa gambar JPG/JPEG atau PNG -- berkas PDF atau format lain tidak diterima.',
+        life: 7000,
+      })
+      e.target.value = ''
+      pengajuanBaFile.value = null
+      return
+    }
+  }
   if (file && file.size > KOLEKTIF_SELF_MAX_FILE_BYTES) {
     toast.add({
       severity: 'error',
@@ -533,6 +550,23 @@ function pickEditBaFile() {
 }
 function onEditBaFileChosen(e) {
   const file = e.target.files?.[0] || null
+  // Bukti dukung Berita Acara HANYA menerima gambar (JPG/JPEG/PNG) -- PDF/
+  // format lain DITOLAK di sini juga, SAMA dengan validasi sisi server
+  // (lihat parseBuktiDukungUpload di handlers/berita_acara.go).
+  if (file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    if (!['jpg', 'jpeg', 'png'].includes(ext)) {
+      toast.add({
+        severity: 'error',
+        summary: 'Format tidak didukung',
+        detail: 'Bukti dukung harus berupa gambar JPG/JPEG atau PNG -- berkas PDF atau format lain tidak diterima.',
+        life: 7000,
+      })
+      e.target.value = ''
+      editBaFile.value = null
+      return
+    }
+  }
   if (file && file.size > KOLEKTIF_SELF_MAX_FILE_BYTES) {
     toast.add({
       severity: 'error',
@@ -1530,8 +1564,8 @@ async function downloadDokumen(item) {
             />
           </div>
           <div class="field">
-            <label>Bukti Dukung (PDF/JPG/PNG)</label>
-            <input ref="pengajuanBaFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onPengajuanBaFileChosen" />
+            <label>Bukti Dukung (JPG/JPEG/PNG)</label>
+            <input ref="pengajuanBaFileInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onPengajuanBaFileChosen" />
             <Button
               :label="pengajuanBaFile ? pengajuanBaFile.name : 'Pilih Berkas'"
               icon="pi pi-file"
@@ -1803,8 +1837,8 @@ async function downloadDokumen(item) {
         />
       </div>
       <div class="field">
-        <label>Bukti Dukung (PDF/JPG/PNG)</label>
-        <input ref="editBaFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onEditBaFileChosen" />
+        <label>Bukti Dukung (JPG/JPEG/PNG)</label>
+        <input ref="editBaFileInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onEditBaFileChosen" />
         <Button
           :label="editBaFile ? editBaFile.name : 'Pilih Berkas Baru'"
           icon="pi pi-file"

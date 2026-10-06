@@ -13,7 +13,10 @@ import (
 	"bytes"
 	"compress/zlib"
 	"fmt"
+	"image/color"
+	"image/jpeg"
 	"image/png"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -253,7 +256,13 @@ func (p *PDFPage) Image(name string, x, yTop, w, h float64) {
 
 type pdfImage struct {
 	w, h int
-	data []byte // zlib/FlateDecode-compressed raw 8-bit RGB pixel data
+	// data: untuk format "png" (dipakai RegisterImage) -- raw 8-bit RGB
+	// pixel data hasil decode, di-Flate/zlib-compress. Untuk format "jpeg"
+	// (RegisterJPEGImage) -- byte JPEG ASLINYA, TIDAK diubah sama sekali,
+	// dipakai langsung lewat filter PDF bawaan /DCTDecode.
+	data   []byte
+	format string // "png" (default) atau "jpeg"
+	gray   bool   // hanya relevan utk format "jpeg": true -> /DeviceGray
 }
 
 type PDFDoc struct {
@@ -285,8 +294,43 @@ func (d *PDFDoc) RegisterImage(name string, pngBytes []byte) error {
 	if err := zw.Close(); err != nil {
 		return err
 	}
-	d.imgs[name] = &pdfImage{w: w, h: h, data: zbuf.Bytes()}
+	d.imgs[name] = &pdfImage{w: w, h: h, data: zbuf.Bytes(), format: "png"}
 	return nil
+}
+
+// RegisterJPEGImage registers name as a JPEG image to be embedded AS-IS --
+// its ORIGINAL bytes, completely unmodified -- using PDF's native
+// /DCTDecode image filter, instead of decoding it into raw pixels and
+// recompressing it the way RegisterImage (PNG-only) does. This matters a
+// lot for photographic uploads (mis. foto bukti dukung Berita Acara, lihat
+// handlers/berita_acara.go): Flate/zlib general-purpose compression
+// (dipakai RegisterImage) jauh kalah efisien dibanding kompresi DCT bawaan
+// JPEG untuk gambar berisik seperti foto kamera HP -- decode-lalu-encode-
+// ulang-ke-PNG bisa membuat gambar yang di-embed JADI BEBERAPA KALI LEBIH
+// BESAR dari berkas aslinya, yang langsung bikin lambat setiap kali PDF-nya
+// dibuka/diunduh. Mengembalikan ok=false (TANPA error) untuk mode warna
+// yang tidak didukung jalur cepat ini (selain grayscale & YCbCr/RGB biasa,
+// mis. JPEG CMYK dari scanner/software cetak tertentu -- jarang terjadi
+// untuk foto HP/screenshot) -- pemanggil sebaiknya jatuh ke
+// decode-lalu-RegisterImage untuk kasus itu.
+func (d *PDFDoc) RegisterJPEGImage(name string, jpegBytes []byte) (w, h int, ok bool, err error) {
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(jpegBytes))
+	if err != nil {
+		return 0, 0, false, err
+	}
+	// color.GrayModel/YCbCrModel adalah nilai color.Model (interface yang
+	// membungkus func ModelFunc) -- TIDAK BOLEH dibandingkan langsung dengan
+	// "==" (func value tidak comparable, panic saat runtime), jadi
+	// dibandingkan lewat pointer fungsinya via reflect.
+	modelPtr := reflect.ValueOf(cfg.ColorModel).Pointer()
+	grayPtr := reflect.ValueOf(color.GrayModel).Pointer()
+	yCbCrPtr := reflect.ValueOf(color.YCbCrModel).Pointer()
+	gray := modelPtr == grayPtr
+	if !gray && modelPtr != yCbCrPtr {
+		return 0, 0, false, nil
+	}
+	d.imgs[name] = &pdfImage{w: cfg.Width, h: cfg.Height, data: jpegBytes, format: "jpeg", gray: gray}
+	return cfg.Width, cfg.Height, true, nil
 }
 
 func decodePNGFlattenWhite(data []byte) (pix []byte, w, h int, err error) {
@@ -392,7 +436,16 @@ func (d *PDFDoc) Output() ([]byte, error) {
 
 	for _, name := range imageNames {
 		img := d.imgs[name]
-		dict := fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>", img.w, img.h, len(img.data))
+		var dict string
+		if img.format == "jpeg" {
+			colorSpace := "/DeviceRGB"
+			if img.gray {
+				colorSpace = "/DeviceGray"
+			}
+			dict = fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /DCTDecode /Length %d >>", img.w, img.h, colorSpace, len(img.data))
+		} else {
+			dict = fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>", img.w, img.h, len(img.data))
+		}
 		writeStreamObj(imageIDs[name], dict, img.data)
 	}
 

@@ -216,6 +216,25 @@ function pickBuktiDukungFile() {
 }
 function onBuktiDukungFileChosen(e) {
   const file = e.target.files?.[0] || null
+  // Bukti dukung Berita Acara HANYA menerima gambar (JPG/JPEG/PNG) --
+  // PDF/format lain DITOLAK di sini juga (bukan cuma di backend) supaya
+  // penggunanya langsung tahu saat memilih berkas, tanpa perlu menunggu
+  // submit dulu (lihat parseBuktiDukungUpload di
+  // handlers/berita_acara.go untuk validasi sisi server-nya).
+  if (file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    if (!['jpg', 'jpeg', 'png'].includes(ext)) {
+      toast.add({
+        severity: 'error',
+        summary: 'Format tidak didukung',
+        detail: 'Bukti dukung harus berupa gambar JPG/JPEG atau PNG -- berkas PDF atau format lain tidak diterima.',
+        life: 7000,
+      })
+      e.target.value = ''
+      buktiDukungFile.value = null
+      return
+    }
+  }
   if (file && file.size > BUKTI_DUKUNG_MAX_FILE_BYTES) {
     toast.add({
       severity: 'error',
@@ -598,8 +617,8 @@ onMounted(() => {
       </div>
 
       <div class="form-field" v-if="form.jenis === 'individu'">
-        <label>Bukti Dukung (PDF/JPG/PNG) -- wajib</label>
-        <input ref="buktiDukungFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onBuktiDukungFileChosen" />
+        <label>Bukti Dukung (JPG/JPEG/PNG) -- wajib</label>
+        <input ref="buktiDukungFileInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onBuktiDukungFileChosen" />
         <Button
           :label="buktiDukungFile ? buktiDukungFile.name : 'Pilih Berkas'"
           icon="pi pi-file"
