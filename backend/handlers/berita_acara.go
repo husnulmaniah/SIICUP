@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	neturl "net/url"
@@ -135,6 +138,94 @@ func parseBuktiDukungUpload(r *http.Request) (namaFile, contentType string, data
 		return "", "", nil, "bukti dukung yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang"
 	}
 	return fh.Filename, dokumenContentType(fh.Filename), raw, ""
+}
+
+// buktiDukungPNGUntukPDF mengonversi data bukti dukung menjadi PNG + dimensi
+// piksel aslinya (lebar, tinggi), siap diregister ke utils.PDFDoc lewat
+// RegisterImage supaya bisa digambar sebagai isi halaman PDF (lihat
+// addBuktiDukungPage di bawah). HANYA menangani gambar (JPG/PNG) --
+// RegisterImage di utils/pdfwriter.go cuma bisa decode PNG, jadi JPG
+// di-decode dulu (image/jpeg, stdlib) lalu di-encode ulang jadi PNG
+// (image/png, stdlib) sebelum diregister. Berkas PDF dikembalikan sebagai
+// error supaya pemanggil jatuh ke catatan teks (lihat addBuktiDukungPage) --
+// utils/pdfwriter.go adalah penulis PDF internal tanpa dependensi eksternal
+// yang TIDAK punya kemampuan menggabungkan/embed halaman dari PDF lain.
+func buktiDukungPNGUntukPDF(data []byte, contentType string) (pngBytes []byte, w, h int, err error) {
+	switch contentType {
+	case "image/png":
+		cfg, decErr := png.DecodeConfig(bytes.NewReader(data))
+		if decErr != nil {
+			return nil, 0, 0, decErr
+		}
+		return data, cfg.Width, cfg.Height, nil
+	case "image/jpeg":
+		img, decErr := jpeg.Decode(bytes.NewReader(data))
+		if decErr != nil {
+			return nil, 0, 0, decErr
+		}
+		var buf bytes.Buffer
+		if encErr := png.Encode(&buf, img); encErr != nil {
+			return nil, 0, 0, encErr
+		}
+		b := img.Bounds()
+		return buf.Bytes(), b.Dx(), b.Dy(), nil
+	default:
+		return nil, 0, 0, fmt.Errorf("format %q tidak bisa ditampilkan sebagai gambar", contentType)
+	}
+}
+
+// addBuktiDukungPage menambahkan HALAMAN KEDUA pada PDF Berita Acara
+// "individu" berisi bukti dukung yang diupload pengguna (lihat
+// parseBuktiDukungUpload), sesuai permintaan pengguna supaya bukti dukung
+// "muat di halaman kedua pdf" -- bukan cuma tersimpan sebagai lampiran
+// terpisah yang harus diunduh sendiri lewat endpoint
+// /bukti-dukung. Gambar (JPG/PNG) digambar LANGSUNG mengisi halaman
+// (diskalakan proporsional biar pas, lihat buktiDukungPNGUntukPDF di atas);
+// berkas PDF TIDAK bisa digabung/ditempel sebagai halaman PDF lain karena
+// utils/pdfwriter.go tidak punya kemampuan itu tanpa dependensi eksternal
+// baru -- untuk kasus itu halaman kedua hanya berisi catatan bahwa bukti
+// dukungnya berupa dokumen PDF terpisah yang tetap tersimpan & bisa diunduh
+// lewat sistem. Tidak melakukan apa pun kalau data kosong (kolektif, atau
+// pengajuan lama sebelum fitur ini ada, tidak mewajibkan bukti dukung).
+func addBuktiDukungPage(doc *utils.PDFDoc, marginX, rightX float64, data []byte, contentType, namaFile string) {
+	if len(data) == 0 {
+		return
+	}
+	const lineH = 15.0
+	p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
+	doc.AddPage(p)
+	centerX := marginX + (rightX-marginX)/2
+	y := 48.0
+	p.SetFont(true, 13)
+	const judul = "LAMPIRAN -- BUKTI DUKUNG"
+	p.TextCentered(centerX, y, judul)
+	titleW := utils.TextWidth(judul, 13)
+	p.Line(centerX-titleW/2, y+3, centerX+titleW/2, y+3)
+	y += lineH * 1.8
+
+	pngBytes, imgW, imgH, convErr := buktiDukungPNGUntukPDF(data, contentType)
+	if convErr != nil || imgW == 0 || imgH == 0 {
+		p.SetFont(false, 12)
+		p.MultilineText(marginX, y, rightX-marginX, lineH,
+			"Bukti dukung berupa berkas \""+namaOrDash(namaFile)+"\" tersimpan pada sistem dan dapat diunduh melalui menu Berita Acara/Pengajuan Berita Acara (ikon lampiran).")
+		return
+	}
+	if regErr := doc.RegisterImage("bukti_dukung_img", pngBytes); regErr != nil {
+		p.SetFont(false, 12)
+		p.MultilineText(marginX, y, rightX-marginX, lineH,
+			"Bukti dukung berupa berkas \""+namaOrDash(namaFile)+"\" tersimpan pada sistem dan dapat diunduh melalui menu Berita Acara/Pengajuan Berita Acara (ikon lampiran).")
+		return
+	}
+	maxW := rightX - marginX
+	maxH := utils.PageHeightA4 - y - 48.0
+	scale := maxW / float64(imgW)
+	if scaledH := float64(imgH) * scale; scaledH > maxH {
+		scale = maxH / float64(imgH)
+	}
+	drawW := float64(imgW) * scale
+	drawH := float64(imgH) * scale
+	drawX := marginX + (maxW-drawW)/2
+	p.Image("bukti_dukung_img", drawX, y, drawW, drawH)
 }
 
 // RegisterBeritaAcaraRoutes mendaftarkan seluruh endpoint di bawah
@@ -504,7 +595,7 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 
-	pdfBytes, err := buildBeritaAcaraPDF(jenis, pegawaiDiinput, signer, tglKejadian, tglSurat, nomorSurat, alasan)
+	pdfBytes, err := buildBeritaAcaraPDF(jenis, pegawaiDiinput, signer, tglKejadian, tglSurat, nomorSurat, alasan, buktiFileData, buktiContentType, buktiNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
@@ -909,7 +1000,7 @@ func buildSignatureQRBeritaAcara(signerNama, signerJabatan, nomorSurat, alasan s
 // beberapa unit kerja (sesuai keputusan pengguna) tetap punya SATU kop yang
 // konsisten, yaitu kop kantor/sekolah tempat penandatangan bertugas &
 // menandatangani surat ini.
-func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beritaAcaraSigner, tglKejadian, tglSurat time.Time, nomorSurat, alasan string) ([]byte, error) {
+func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beritaAcaraSigner, tglKejadian, tglSurat time.Time, nomorSurat, alasan string, buktiDukungData []byte, buktiDukungContentType, buktiDukungNamaFile string) ([]byte, error) {
 	doc := utils.NewPDFDoc()
 
 	marginX := 48.0
@@ -1072,6 +1163,8 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 		y = p.JustifiedText(marginX, y, rightX-marginX, lineH, penutup) + lineH*1.8
 
 		drawTtdBlock(p, y)
+
+		addBuktiDukungPage(doc, marginX, rightX, buktiDukungData, buktiDukungContentType, buktiDukungNamaFile)
 
 		return doc.Output()
 	}

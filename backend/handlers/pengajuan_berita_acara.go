@@ -120,7 +120,7 @@ func canApproveFinalPengajuanBeritaAcara(claims *utils.Claims) bool {
 // memakai Unit Kerja/sekolah pegawai sendiri, sama seperti pola Lampiran 3
 // Surat Rekomendasi -- lihat buildSuratRekomendasiSekolah) -- tampilkanQR
 // HANYA true setelah tahap akhir (admin) menyetujui.
-func buildPengajuanBeritaAcaraPDF(pegawai models.Pegawai, tglKejadian time.Time, alasan, nomorSurat string, tampilkanQR bool) ([]byte, error) {
+func buildPengajuanBeritaAcaraPDF(pegawai models.Pegawai, tglKejadian time.Time, alasan, nomorSurat string, tampilkanQR bool, buktiDukungData []byte, buktiDukungContentType, buktiDukungNamaFile string) ([]byte, error) {
 	signerNama, signerNip, signerJabatan, signerPangkatGol := "-", "-", "Kepala Sekolah", "-"
 	if pegawai.Atasan != nil {
 		a := pegawai.Atasan
@@ -141,7 +141,7 @@ func buildPengajuanBeritaAcaraPDF(pegawai models.Pegawai, tglKejadian time.Time,
 		Nama: signerNama, NIP: signerNip, Jabatan: signerJabatan, PangkatGol: signerPangkatGol,
 		UnitKerja: unitKerjaNama, UnitKerjaKop: unitKerjaKop, TampilkanQR: tampilkanQR,
 	}
-	return buildBeritaAcaraPDF("individu", []models.Pegawai{pegawai}, signer, tglKejadian, tglKejadian, nomorSurat, alasan)
+	return buildBeritaAcaraPDF("individu", []models.Pegawai{pegawai}, signer, tglKejadian, tglKejadian, nomorSurat, alasan, buktiDukungData, buktiDukungContentType, buktiDukungNamaFile)
 }
 
 // tanggalPengajuanBeritaAcaraValid memvalidasi tanggal kejadian yang
@@ -220,7 +220,7 @@ func buatPengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.D
 		return
 	}
 
-	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, "", false)
+	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, "", false, buktiFileData, buktiContentType, buktiNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
@@ -314,7 +314,7 @@ func updatePengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm
 		item.BuktiDukungContentType = buktiContentType
 	}
 
-	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, "", false)
+	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, "", false, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
@@ -434,7 +434,7 @@ func setujuiPengajuanBeritaAcaraAtasan(w http.ResponseWriter, r *http.Request, d
 	if item.NomorSurat != nil {
 		nomor = *item.NomorSurat
 	}
-	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomor, false)
+	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomor, false, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
@@ -525,7 +525,7 @@ func setujuiPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db
 	if nomorSurat != "" {
 		nomorSurat = nomorSuratBeritaAcaraLengkap(nomorSurat, item.TanggalKejadian)
 	}
-	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomorSurat, true)
+	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomorSurat, true, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
