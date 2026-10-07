@@ -448,14 +448,34 @@ type absensiDokumenSayaOut struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// listAbsensiDokumenSaya menangani GET /api/absensi/dokumen -- menerima
+// query opsional bulan/tahun (default: bulan berjalan, SAMA pola dengan
+// listAbsensiDokumenAdmin di atas) supaya tabel "Surat Pendukung (Diinput
+// Administrator)" di menu Absen otomatis ikut tersaring sesuai bulan yang
+// sedang dipilih pegawai pada bagian "Riwayat Absen" di atasnya (permintaan
+// pengguna -- sebelumnya endpoint ini selalu mengembalikan SEMUA surat dari
+// awal waktu, tidak sinkron dengan filter bulan "Riwayat Absen").
 func listAbsensiDokumenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	if claims.IDPegawai == nil {
 		utils.Success(w, "ok", []absensiDokumenSayaOut{})
 		return
 	}
+	now := absensiNow()
+	bulan := int(now.Month())
+	tahun := now.Year()
+	if v, err := strconv.Atoi(r.URL.Query().Get("bulan")); err == nil && v >= 1 && v <= 12 {
+		bulan = v
+	}
+	if v, err := strconv.Atoi(r.URL.Query().Get("tahun")); err == nil && v > 2000 {
+		tahun = v
+	}
+	loc := now.Location()
+	start := time.Date(tahun, time.Month(bulan), 1, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 1, -1)
+
 	items := []models.AbsensiDokumen{}
-	if err := db.Omit("file").Where("id_pegawai = ?", *claims.IDPegawai).
+	if err := db.Omit("file").Where("id_pegawai = ? AND tanggal BETWEEN ? AND ?", *claims.IDPegawai, start, end).
 		Order("tanggal desc").Find(&items).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data")
 		return

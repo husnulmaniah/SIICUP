@@ -160,9 +160,16 @@ async function loadStatusHariIni() {
   }
 }
 
+// loadDokumen mengambil "Surat Pendukung (Diinput Administrator)" untuk
+// BULAN yang sama dengan periodDate (DatePicker "Riwayat Absen" di atasnya)
+// -- SENGAJA memakai bulan/tahun yang sama, bukan filter terpisah, supaya
+// kedua bagian ini SELALU sinkron (permintaan pengguna). Dipanggil ulang
+// lewat watch(periodDate, ...) di bawah setiap kali bulan diganti.
 async function loadDokumen() {
   try {
-    const { data } = await http.get('/absensi/dokumen')
+    const bulan = periodDate.value.getMonth() + 1
+    const tahun = periodDate.value.getFullYear()
+    const { data } = await http.get('/absensi/dokumen', { params: { bulan, tahun } })
     dokumenList.value = data.data || []
   } catch {
     // bagian ini tidak kritikal -- kalau gagal cukup dibiarkan kosong
@@ -758,7 +765,13 @@ function thumbUrl(row, jenis) {
   return thumbUrls.value[`${row.id}-${jenis}`] || ''
 }
 
-watch(periodDate, () => loadRiwayat())
+// loadDokumen ikut dipanggil ulang di sini (bukan cuma loadRiwayat) supaya
+// tabel "Surat Pendukung (Diinput Administrator)" otomatis tersaring sesuai
+// bulan yang baru dipilih -- lihat komentar loadDokumen di atas.
+watch(periodDate, () => {
+  loadRiwayat()
+  loadDokumen()
+})
 
 onMounted(async () => {
   await loadPengaturan()
