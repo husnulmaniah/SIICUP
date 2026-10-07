@@ -277,7 +277,18 @@ type beritaAcaraPegawaiOut struct {
 	// ID: id baris AbsensiDokumen pegawai ini -- dipakai frontend untuk
 	// memanggil ULANG endpoint hapus satuan yang sudah ada
 	// (DELETE /api/absensi/dokumen/{id}) per baris dalam batch ini.
-	ID        uint   `json:"id"`
+	// BUKAN id pegawai -- lihat IDPegawai untuk itu (dua id ini SERING
+	// beda nilai, jangan ditukar).
+	ID uint `json:"id"`
+	// IDPegawai: id pegawai (models.Pegawai) yang sebenarnya -- dipakai
+	// frontend untuk pre-select ulang pegawai ini di dialog Edit (Select/
+	// MultiSelect "Pegawai" beroperasi dengan id pegawai, BUKAN id baris
+	// AbsensiDokumen di atas) sebelum dikirim balik sebagai form-field
+	// "id_pegawai" ke PUT /api/berita-acara/{namaFile} (lihat
+	// updateBeritaAcara). Ditambahkan supaya fitur edit bisa tahu pegawai
+	// mana yang sebelumnya sudah ada di batch ini tanpa salah kira ID
+	// baris dokumen sebagai ID pegawai.
+	IDPegawai uint   `json:"id_pegawai"`
 	Nama      string `json:"nama"`
 	NIP       string `json:"nip"`
 	Jabatan   string `json:"jabatan"`
@@ -368,7 +379,7 @@ func listBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			}
 		}
 		b.Pegawai = append(b.Pegawai, beritaAcaraPegawaiOut{
-			ID: row.ID, Nama: nama, NIP: nip, Jabatan: jabatan, UnitKerja: unitKerja,
+			ID: row.ID, IDPegawai: row.IDPegawai, Nama: nama, NIP: nip, Jabatan: jabatan, UnitKerja: unitKerja,
 			AdaBuktiDukung: strings.TrimSpace(row.BuktiDukungNamaFile) != "",
 		})
 	}

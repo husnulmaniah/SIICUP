@@ -315,7 +315,14 @@ function nomorUrutanDariNomorLengkap(nomorLengkap) {
 // /api/berita-acara/{nama_file} karena editingItem terisi).
 async function bukaEditDialog(item) {
   editingItem.value = item
-  const idPegawai = item.pegawai.map((pg) => pg.id)
+  // PENTING: pg.id pada item.pegawai adalah ID BARIS AbsensiDokumen (dipakai
+  // hapusSatuBatch/unduhBatch di atas), BUKAN id pegawai -- Select/
+  // MultiSelect "Pegawai" di bawah beroperasi dengan id PEGAWAI, jadi WAJIB
+  // pakai pg.id_pegawai (lihat beritaAcaraPegawaiOut.IDPegawai di
+  // handlers/berita_acara.go) supaya pre-select & submit id_pegawai ke PUT
+  // tidak salah kirim ID baris dokumen (yang menyebabkan error "data
+  // pegawai yang dipilih tidak ditemukan/tidak lengkap" di backend).
+  const idPegawai = item.pegawai.map((pg) => pg.id_pegawai)
   form.value = {
     jenis: item.jenis,
     id_pegawai_individu: item.jenis === 'individu' ? idPegawai[0] ?? null : null,
@@ -383,7 +390,9 @@ const isDinasOnly = computed(() => {
 const canReuseBuktiDukung = computed(() => {
   if (!editingItem.value || form.value.jenis !== 'individu' || editingItem.value.jenis !== 'individu') return false
   const satuSatunya = idPegawaiTerpilih.value[0]
-  return satuSatunya != null && editingItem.value.pegawai[0]?.id === satuSatunya && !!editingItem.value.pegawai[0]?.ada_bukti_dukung
+  // SAMA catatan dengan bukaEditDialog -- bandingkan dengan id_pegawai,
+  // BUKAN id (baris AbsensiDokumen).
+  return satuSatunya != null && editingItem.value.pegawai[0]?.id_pegawai === satuSatunya && !!editingItem.value.pegawai[0]?.ada_bukti_dukung
 })
 
 async function submitBuat() {
