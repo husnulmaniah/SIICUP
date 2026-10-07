@@ -1232,10 +1232,26 @@ type AbsensiDokumen struct {
 	// sistem, bukan berkas yang diupload). Baris lama (sebelum fitur ini ada)
 	// maupun baris jenis lain/Berita Acara "kolektif" tetap kosong --
 	// ditampilkan "-"/tombol unduh disembunyikan di frontend, bukan error.
-	BuktiDukungNamaFile    string    `json:"bukti_dukung_nama_file,omitempty" gorm:"column:bukti_dukung_nama_file;size:255"`
-	BuktiDukungFile        []byte    `json:"-" gorm:"column:bukti_dukung_file;type:bytea"`
-	BuktiDukungContentType string    `json:"-" gorm:"column:bukti_dukung_content_type;size:100"`
-	CreatedAt              time.Time `json:"created_at" gorm:"autoCreateTime"`
+	BuktiDukungNamaFile    string `json:"bukti_dukung_nama_file,omitempty" gorm:"column:bukti_dukung_nama_file;size:255"`
+	BuktiDukungFile        []byte `json:"-" gorm:"column:bukti_dukung_file;type:bytea"`
+	BuktiDukungContentType string `json:"-" gorm:"column:bukti_dukung_content_type;size:100"`
+	// IDPengajuanBeritaAcara: diisi HANYA kalau baris jenis "berita_acara" ini
+	// berasal dari persetujuan tahap akhir Berita Acara Sekolah MANDIRI
+	// (pengajuan pegawai bertugas di sekolah, lihat
+	// setujuiPengajuanBeritaAcaraAdmin di handlers/pengajuan_berita_acara.go)
+	// -- nil/kosong untuk baris yang dibuat admin/administrator LANGSUNG lewat
+	// menu Berita Acara (buatBeritaAcara) ATAUPUN jenis lain. Dipakai SATU-
+	// SATUNYA untuk membedakan sumber baris Berita Acara di listBeritaAcara
+	// (handlers/berita_acara.go) -- sesuai permintaan pengguna: menu "Berita
+	// Acara" HANYA menampilkan yang dibuat langsung administrator/admin;
+	// yang berasal dari pengajuan mandiri sekolah (disetujui admin absen/
+	// admin verifikasi/administrator/admin lewat tab "Verifikasi Berita Acara
+	// Sekolah" di Rekap Absen) tetap tercatat DD seperti biasa tapi TIDAK
+	// ikut muncul di menu "Berita Acara" -- cukup terlihat lewat Rekap Absen/
+	// riwayat pengajuannya sendiri.
+	IDPengajuanBeritaAcara *uint                 `json:"id_pengajuan_berita_acara,omitempty" gorm:"column:id_pengajuan_berita_acara"`
+	PengajuanBeritaAcara   *PengajuanBeritaAcara `json:"-" gorm:"foreignKey:IDPengajuanBeritaAcara;references:ID"`
+	CreatedAt              time.Time             `json:"created_at" gorm:"autoCreateTime"`
 	// UpdatedAt -- dipakai listAbsensiDokumenAdmin untuk mengurutkan tabel
 	// "Surat yang Sudah Diinput Bulan Ini" berdasarkan PENGINPUTAN paling
 	// baru (bukan tanggal absennya) -- GORM otomatis mengisi ini baik saat

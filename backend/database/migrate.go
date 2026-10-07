@@ -141,5 +141,31 @@ func Migrate(db *gorm.DB) {
 		log.Printf("peringatan: gagal mengosongkan jam kerja khusus unit_kerja lama: %v", err)
 	}
 
+	// Menu "Berita Acara" sekarang HANYA menampilkan baris AbsensiDokumen yang
+	// dibuat administrator/admin LANGSUNG lewat menu itu (lihat listBeritaAcara
+	// di handlers/berita_acara.go & komentar models.AbsensiDokumen.
+	// IDPengajuanBeritaAcara) -- baris yang berasal dari persetujuan tahap
+	// akhir pengajuan mandiri Berita Acara Sekolah disaring keluar lewat
+	// kolom id_pengajuan_berita_acara. Kolom ini baru mulai diisi MULAI
+	// SEKARANG oleh setujuiPengajuanBeritaAcaraAdmin -- baris historis yang
+	// sudah lebih dulu disetujui lewat alur itu (sebelum perubahan ini)
+	// masih NULL, sehingga tanpa backfill berikut, baris-baris lama itu akan
+	// SALAH tetap muncul di menu "Berita Acara". Dicocokkan lewat id_pegawai
+	// + tanggal (AbsensiDokumen.Tanggal == PengajuanBeritaAcara.
+	// TanggalKejadian) pada pengajuan yang statusnya "disetujui" -- aman
+	// dijalankan berkali-kali (hanya menyentuh baris yang masih NULL).
+	if err := db.Exec(`
+		UPDATE absensi_dokumen ad
+		SET id_pengajuan_berita_acara = pba.id
+		FROM pengajuan_berita_acara pba
+		WHERE ad.jenis = ?
+		  AND ad.id_pengajuan_berita_acara IS NULL
+		  AND pba.status = 'disetujui'
+		  AND pba.id_pegawai = ad.id_pegawai
+		  AND pba.tanggal_kejadian = ad.tanggal
+	`, models.AbsensiDokumenBeritaAcara).Error; err != nil {
+		log.Printf("peringatan: gagal backfill absensi_dokumen.id_pengajuan_berita_acara: %v", err)
+	}
+
 	log.Println("migrasi database berhasil")
 }

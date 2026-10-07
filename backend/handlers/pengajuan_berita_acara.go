@@ -718,6 +718,13 @@ func setujuiPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db
 		}
 		userID := claims.UserID
 		existing.IDDiinputOleh = &userID
+		// IDPengajuanBeritaAcara: menandai baris ini berasal dari pengajuan
+		// mandiri sekolah (BUKAN dibuat admin langsung lewat menu Berita
+		// Acara) -- lihat komentar field ini di models.go, dipakai
+		// listBeritaAcara (berita_acara.go) untuk menyaring menu "Berita
+		// Acara" supaya HANYA menampilkan yang dibuat langsung administrator/
+		// admin, sesuai permintaan pengguna.
+		existing.IDPengajuanBeritaAcara = &item.ID
 		if found {
 			db.Save(&existing)
 		} else {
