@@ -1482,7 +1482,10 @@ async function downloadDokumen(item) {
       </div>
 
       <div v-if="isSekolahSaya" class="section">
-        <h3>Ajukan Surat Kolektif</h3>
+        <div class="surat-form-title">
+          <span class="surat-form-icon"><i class="pi pi-send" aria-hidden="true"></i></span>
+          <h3>Ajukan Surat Kolektif</h3>
+        </div>
         <Message severity="info" :closable="false">
           Khusus pegawai bertugas di sekolah: ajukan surat (Surat Tugas/Berita Acara/Surat Izin/SKS/dst) untuk
           beberapa tanggal sekaligus -- boleh tanggal yang sudah terlewat (belum ada absen) MAUPUN tanggal ke
@@ -1490,62 +1493,68 @@ async function downloadDokumen(item) {
           Pengajuan menunggu persetujuan administrator/admin verifikasi -- absen Anda baru berubah jadi bersurat
           setelah disetujui.
         </Message>
-        <div class="kolektif-self-form">
-          <div class="field">
-            <label>Tanggal</label>
-            <MultiSelect
-              v-model="kolektifSelfForm.tanggal"
-              :options="opsiTanggalKolektif"
-              optionLabel="label"
-              optionValue="value"
-              placeholder="Pilih satu atau beberapa tanggal"
-              display="chip"
-              style="width: 100%"
-            />
-            <small v-if="!opsiTanggalKolektif.length" class="text-muted">Tidak ada tanggal yang bisa diajukan pada bulan yang sedang dilihat.</small>
+        <div class="surat-form-card">
+          <div class="surat-form-grid">
+            <div class="field field-full">
+              <label>Tanggal</label>
+              <MultiSelect
+                v-model="kolektifSelfForm.tanggal"
+                :options="opsiTanggalKolektif"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="Pilih satu atau beberapa tanggal"
+                display="chip"
+                style="width: 100%"
+              />
+              <small v-if="!opsiTanggalKolektif.length" class="text-muted">Tidak ada tanggal yang bisa diajukan pada bulan yang sedang dilihat.</small>
+            </div>
+            <div class="field">
+              <label>Jenis Surat</label>
+              <Select
+                v-model="kolektifSelfForm.jenis"
+                :options="jenisSuratOptionsKolektifSelf"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="Pilih jenis surat"
+                filter
+                style="width: 100%"
+              />
+              <small class="text-muted">Untuk Berita Acara, gunakan form "Ajukan Berita Acara" di bawah.</small>
+            </div>
+            <div class="field">
+              <label>Berkas (PDF/JPG/PNG)</label>
+              <input ref="kolektifSelfFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onKolektifSelfFileChosen" />
+              <Button
+                :label="kolektifSelfFile ? kolektifSelfFile.name : 'Pilih Berkas'"
+                icon="pi pi-paperclip"
+                severity="secondary"
+                outlined
+                class="surat-file-btn"
+                :class="{ 'surat-file-btn-filled': kolektifSelfFile }"
+                @click="pickKolektifSelfFile"
+              />
+            </div>
+            <div class="field field-full">
+              <label>Keterangan</label>
+              <Select
+                v-model="kolektifSelfKeteranganPilihan"
+                :options="KETERANGAN_SURAT_DROPDOWN"
+                placeholder="Pilih keterangan"
+                showClear
+                style="width: 100%"
+              />
+              <Textarea
+                v-if="kolektifSelfKeteranganPilihan === KETERANGAN_LAINNYA"
+                v-model="kolektifSelfKeteranganLainnya"
+                rows="2"
+                placeholder="Isi keterangan sesuai surat"
+                style="width: 100%; margin-top: 0.5rem"
+              />
+            </div>
           </div>
-          <div class="field">
-            <label>Jenis Surat</label>
-            <Select
-              v-model="kolektifSelfForm.jenis"
-              :options="jenisSuratOptionsKolektifSelf"
-              optionLabel="label"
-              optionValue="value"
-              placeholder="Pilih jenis surat"
-              filter
-              style="width: 100%"
-            />
-            <small class="text-muted">Untuk Berita Acara, gunakan form "Ajukan Berita Acara" di bawah.</small>
+          <div class="surat-form-actions">
+            <Button label="Ajukan" icon="pi pi-send" :loading="submittingKolektifSelf" @click="submitKolektifSelf" />
           </div>
-          <div class="field">
-            <label>Berkas (PDF/JPG/PNG)</label>
-            <input ref="kolektifSelfFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onKolektifSelfFileChosen" />
-            <Button
-              :label="kolektifSelfFile ? kolektifSelfFile.name : 'Pilih Berkas'"
-              icon="pi pi-file"
-              severity="secondary"
-              outlined
-              @click="pickKolektifSelfFile"
-            />
-          </div>
-          <div class="field">
-            <label>Keterangan</label>
-            <Select
-              v-model="kolektifSelfKeteranganPilihan"
-              :options="KETERANGAN_SURAT_DROPDOWN"
-              placeholder="Pilih keterangan"
-              showClear
-              style="width: 100%"
-            />
-            <Textarea
-              v-if="kolektifSelfKeteranganPilihan === KETERANGAN_LAINNYA"
-              v-model="kolektifSelfKeteranganLainnya"
-              rows="2"
-              placeholder="Isi keterangan sesuai surat"
-              style="width: 100%; margin-top: 0.5rem"
-            />
-          </div>
-          <Button label="Ajukan" icon="pi pi-send" :loading="submittingKolektifSelf" @click="submitKolektifSelf" />
         </div>
 
         <div v-if="pengajuanSayaList.length" class="pengajuan-saya-list">
@@ -1582,7 +1591,10 @@ async function downloadDokumen(item) {
       </div>
 
       <div v-if="isSekolahSaya" class="section">
-        <h3>Ajukan Berita Acara</h3>
+        <div class="surat-form-title">
+          <span class="surat-form-icon"><i class="pi pi-file-edit" aria-hidden="true"></i></span>
+          <h3>Ajukan Berita Acara</h3>
+        </div>
         <Message severity="info" :closable="false">
           Khusus pegawai bertugas di sekolah: ajukan Berita Acara untuk SATU tanggal absen yang kosong (tidak dapat
           absen online). "Yang Mengetahui" otomatis diisi atasan langsung Anda -- PDF Berita Acara resminya dibuat
@@ -1591,41 +1603,47 @@ async function downloadDokumen(item) {
           persetujuan tahap akhir administrator/admin -- absen tanggal ini baru tercatat DD (Dinas Dalam) - Berita
           Acara setelah KEDUA persetujuan selesai.
         </Message>
-        <div class="kolektif-self-form">
-          <div class="field">
-            <label>Tanggal Kejadian</label>
-            <Select
-              v-model="pengajuanBaForm.tanggal_kejadian"
-              :options="opsiTanggalBa"
-              optionLabel="label"
-              optionValue="value"
-              placeholder="Pilih tanggal"
-              filter
-              style="width: 100%"
-            />
-            <small v-if="!opsiTanggalBa.length" class="text-muted">Tidak ada tanggal yang bisa diajukan pada bulan yang sedang dilihat.</small>
+        <div class="surat-form-card">
+          <div class="surat-form-grid">
+            <div class="field">
+              <label>Tanggal Kejadian</label>
+              <Select
+                v-model="pengajuanBaForm.tanggal_kejadian"
+                :options="opsiTanggalBa"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="Pilih tanggal"
+                filter
+                style="width: 100%"
+              />
+              <small v-if="!opsiTanggalBa.length" class="text-muted">Tidak ada tanggal yang bisa diajukan pada bulan yang sedang dilihat.</small>
+            </div>
+            <div class="field">
+              <label>Alasan</label>
+              <Select
+                v-model="pengajuanBaForm.alasan"
+                :options="alasanBaOptions"
+                placeholder="Pilih alasan"
+                style="width: 100%"
+              />
+            </div>
+            <div class="field field-full">
+              <label>Bukti Dukung (JPG/JPEG/PNG)</label>
+              <input ref="pengajuanBaFileInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onPengajuanBaFileChosen" />
+              <Button
+                :label="pengajuanBaFile ? pengajuanBaFile.name : 'Pilih Berkas'"
+                icon="pi pi-paperclip"
+                severity="secondary"
+                outlined
+                class="surat-file-btn"
+                :class="{ 'surat-file-btn-filled': pengajuanBaFile }"
+                @click="pickPengajuanBaFile"
+              />
+            </div>
           </div>
-          <div class="field">
-            <label>Alasan</label>
-            <Select
-              v-model="pengajuanBaForm.alasan"
-              :options="alasanBaOptions"
-              placeholder="Pilih alasan"
-              style="width: 100%"
-            />
+          <div class="surat-form-actions">
+            <Button label="Ajukan" icon="pi pi-send" :loading="submittingPengajuanBa" @click="submitPengajuanBa" />
           </div>
-          <div class="field">
-            <label>Bukti Dukung (JPG/JPEG/PNG)</label>
-            <input ref="pengajuanBaFileInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onPengajuanBaFileChosen" />
-            <Button
-              :label="pengajuanBaFile ? pengajuanBaFile.name : 'Pilih Berkas'"
-              icon="pi pi-file"
-              severity="secondary"
-              outlined
-              @click="pickPengajuanBaFile"
-            />
-          </div>
-          <Button label="Ajukan" icon="pi pi-send" :loading="submittingPengajuanBa" @click="submitPengajuanBa" />
         </div>
 
         <div v-if="pengajuanBaSayaList.length" class="pengajuan-saya-list">
@@ -2099,12 +2117,82 @@ async function downloadDokumen(item) {
   margin-bottom: 0.3rem;
   color: #374151;
 }
-.kolektif-self-form {
-  max-width: 480px;
+/* ---------- form "Ajukan Surat Kolektif" & "Ajukan Berita Acara" ---------- */
+.surat-form-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.surat-form-title h3 {
+  margin: 0;
+}
+.surat-form-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #ccfbf1;
+  color: #0d9488;
+  font-size: 1rem;
+}
+.surat-form-card {
+  position: relative;
+  max-width: 820px;
+  overflow: hidden;
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
+  border-radius: 14px;
+  padding: 1.5rem 1.5rem 1.25rem;
   margin-top: 0.75rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.2s ease;
+}
+.surat-form-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #0d9488, #2dd4bf);
+}
+.surat-form-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+.surat-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem 1.5rem;
+}
+.surat-form-grid .field {
+  margin-bottom: 0;
+}
+.field-full {
+  grid-column: 1 / -1;
+}
+.surat-file-btn {
+  width: 100%;
+  justify-content: flex-start;
+  border-style: dashed !important;
+}
+.surat-file-btn-filled {
+  border-style: solid !important;
+  color: #0d9488 !important;
+  border-color: #0d9488 !important;
+}
+.surat-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f1f5f9;
+}
+.surat-form-actions :deep(.p-button) {
+  min-width: 140px;
+  justify-content: center;
 }
 .pengajuan-saya-list {
   margin-top: 1.5rem;
@@ -2133,6 +2221,18 @@ async function downloadDokumen(item) {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.35rem;
+  }
+  .surat-form-card {
+    padding: 1.1rem 1rem 1rem;
+  }
+  .surat-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .surat-form-actions {
+    justify-content: stretch;
+  }
+  .surat-form-actions :deep(.p-button) {
+    width: 100%;
   }
 }
 </style>
