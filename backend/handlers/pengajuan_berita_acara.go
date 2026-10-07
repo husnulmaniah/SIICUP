@@ -31,13 +31,16 @@ import (
 //     atasan pegawai) TANPA QR -- bisa dilihat pegawai & atasan sebagai
 //     draft/preview sebelum disetujui.
 //  2. Atasan langsung menyetujui -> status "menunggu_admin" (PDF digenerate
-//     ulang, MASIH tanpa QR, DAN nomor surat OTOMATIS dibuat & diisi, lihat
+//     ulang DENGAN QR tanda tangan atasan/Kepala Sekolah LANGSUNG tampil --
+//     QR ini milik tanda tangan atasan sendiri, jadi TIDAK perlu menunggu
+//     tahap akhir admin, SAMA pola dengan Surat Rekomendasi Sekolah -- DAN
+//     nomor surat OTOMATIS dibuat & diisi, lihat
 //     nextNomorUrutPengajuanBeritaAcara) ATAU mengembalikan ->
 //     "dikembalikan_atasan" (pegawai edit & ajukan ulang, balik ke
-//     "menunggu_atasan").
+//     "menunggu_atasan", QR & nomor surat hilang lagi sampai disetujui ulang).
 //  3. Administrator/admin/akun ber-flag IsAdminAbsensi ATAU IsAdminVerifikasi
-//     menyetujui -> status "disetujui": PDF digenerate ULANG dengan QR
-//     disertakan, DAN baris AbsensiDokumen (jenis "berita_acara") otomatis
+//     menyetujui -> status "disetujui": PDF digenerate ULANG, QR tanda
+//     tangan atasan tetap disertakan, DAN baris AbsensiDokumen (jenis "berita_acara") otomatis
 //     dibuat/diperbarui untuk tanggal kejadian ini -- inilah yang membuat
 //     tanggal itu otomatis tercatat DD (Dinas Dalam) - Berita Acara di Rekap
 //     Absen pegawai tsb, PERSIS seperti Berita Acara yang dibuat admin
@@ -127,16 +130,24 @@ func canApproveFinalPengajuanBeritaAcara(claims *utils.Claims) bool {
 // untuk SATU pengajuan, dengan signer = atasan langsung pegawai (kop surat
 // memakai Unit Kerja/sekolah pegawai sendiri, sama seperti pola Lampiran 3
 // Surat Rekomendasi -- lihat buildSuratRekomendasiSekolah) -- tampilkanQR
-// HANYA true setelah tahap akhir (admin) menyetujui.
+// true begitu atasan/Kepala Sekolah menyetujui tahap pertama (lihat
+// setujuiPengajuanBeritaAcaraAtasan), TIDAK perlu menunggu tahap akhir admin
+// -- tanda tangan QR di baris "Mengetahui, Kepala Sekolah" ini MILIK
+// atasan/Kepala Sekolah sendiri, jadi ditampilkan begitu merekalah yang
+// menyetujui, SAMA pola dengan QR pada Surat Rekomendasi Sekolah (lihat
+// doApprove di ArsipSuratView.vue, approveSuratRekomendasi).
 func buildPengajuanBeritaAcaraPDF(pegawai models.Pegawai, tglKejadian time.Time, alasan, nomorSurat string, tampilkanQR bool, buktiDukungData []byte, buktiDukungContentType, buktiDukungNamaFile string) ([]byte, error) {
+	// signerJabatan SENGAJA selalu "Kepala Sekolah" -- TIDAK memakai jabatan
+	// FORMAL atasan (models.Pegawai.Jabatan, mis. "Guru Ahli Madya" kalau
+	// Kepala Sekolah yang bersangkutan jabatan struktural aslinya guru) --
+	// baris "Yang Mengetahui" di Berita Acara ini harus selalu menyebut
+	// "Kepala Sekolah" sesuai permintaan pengguna, karena itulah PERAN atasan
+	// langsung pegawai sekolah di alur ini, bukan jabatan formalnya.
 	signerNama, signerNip, signerJabatan, signerPangkatGol := "-", "-", "Kepala Sekolah", "-"
 	if pegawai.Atasan != nil {
 		a := pegawai.Atasan
 		signerNama = a.Nama
 		signerNip = a.NIP
-		if a.Jabatan != nil && strings.TrimSpace(a.Jabatan.Jabatan) != "" {
-			signerJabatan = a.Jabatan.Jabatan
-		}
 		signerPangkatGol = pegawaiPangkatGolText(*a)
 	}
 	unitKerjaNama := "-"
@@ -335,11 +346,21 @@ func updatePengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm
 	statusSebelumnya := item.Status
 	langsungKeAdmin := statusSebelumnya == models.PengajuanBeritaAcaraDikembalikanAdmin
 
+	// nomorUntukPdf & tampilkanQR: KHUSUS yang langsung ke admin (atasan
+	// sudah menyetujui, tanda tangan QR-nya MASIH berlaku, nomor surat
+	// otomatis yang sudah ada tetap dipakai) -- yang balik ke atasan HARUS
+	// menunggu atasan menyetujui ULANG dulu (data tanggal/alasan berubah),
+	// jadi QR & nomor surat lama TIDAK ditampilkan sampai atasan menyetujui
+	// kembali lewat setujuiPengajuanBeritaAcaraAtasan.
 	nomorUntukPdf := ""
-	if langsungKeAdmin && item.NomorSurat != nil {
-		nomorUntukPdf = *item.NomorSurat
+	tampilkanQR := false
+	if langsungKeAdmin {
+		tampilkanQR = true
+		if item.NomorSurat != nil {
+			nomorUntukPdf = *item.NomorSurat
+		}
 	}
-	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, nomorUntukPdf, false, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
+	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, nomorUntukPdf, tampilkanQR, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
@@ -515,8 +536,11 @@ func nextNomorUrutPengajuanBeritaAcara(db *gorm.DB, tahun int) (string, error) {
 // setujuiPengajuanBeritaAcaraAtasan menangani PUT
 // /api/pengajuan-berita-acara/{id}/setujui-atasan -- atasan langsung pegawai
 // menyetujui tahap pertama (status -> "menunggu_admin", PDF digenerate ulang
-// MASIH tanpa QR, DAN nomor surat OTOMATIS dibuat & diisi kalau belum ada,
-// lihat nextNomorUrutPengajuanBeritaAcara).
+// DENGAN QR tanda tangan atasan/Kepala Sekolah LANGSUNG tampil -- SAMA pola
+// dengan Surat Rekomendasi Sekolah, QR tidak perlu menunggu tahap akhir
+// admin karena itu MILIK tanda tangan atasan sendiri -- DAN nomor surat
+// OTOMATIS dibuat & diisi kalau belum ada, lihat
+// nextNomorUrutPengajuanBeritaAcara).
 func setujuiPengajuanBeritaAcaraAtasan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
@@ -552,7 +576,9 @@ func setujuiPengajuanBeritaAcaraAtasan(w http.ResponseWriter, r *http.Request, d
 		item.NomorSurat = &nomorBaru
 	}
 	nomor := *item.NomorSurat
-	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomor, false, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
+	// tampilkanQR=true -- tanda tangan QR atasan/Kepala Sekolah LANGSUNG
+	// tampil begitu mereka menyetujui (lihat komentar buildPengajuanBeritaAcaraPDF).
+	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomor, true, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return

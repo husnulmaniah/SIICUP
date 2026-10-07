@@ -1328,23 +1328,27 @@ func (p *PengajuanSuratKolektif) SetTanggalList(tanggal []string) {
 // langsungnya (Pegawai.IDAtasan, Kepala Sekolah/dst sesuai unit kerja)
 // menyetujui/mengembalikan lebih dulu -> BARU administrator/admin/akun
 // ber-flag IsAdminAbsensi ATAU IsAdminVerifikasi menyetujui/menolak/
-// mengembalikan tahap akhir -- baru pada tahap akhir inilah baris
-// AbsensiDokumen (DD -- Dinas Dalam) otomatis dibuat & QR tanda tangan
-// disertakan di PDF.
+// mengembalikan tahap akhir -- baris AbsensiDokumen (DD -- Dinas Dalam)
+// otomatis dibuat baru pada tahap akhir ini, TAPI QR tanda tangan atasan
+// sendiri sudah tampil begitu MEREKA menyetujui (tahap pertama), tidak perlu
+// menunggu tahap akhir -- SAMA pola dengan QR Surat Rekomendasi Sekolah.
 //
 //   - Menunggu diajukan -> MenungguAtasan.
-//   - Atasan menyetujui -> MenungguAdmin (PDF di-generate ulang, TAPI masih
-//     TANPA QR -- QR baru muncul setelah tahap akhir selesai, lihat
-//     Disetujui di bawah) -- NomorSurat OTOMATIS dibuat & diisi pada langkah
-//     ini (lihat nextNomorUrutPengajuanBeritaAcara di
+//   - Atasan menyetujui -> MenungguAdmin (PDF di-generate ulang DENGAN QR
+//     tanda tangan atasan/Kepala Sekolah LANGSUNG tampil -- QR ini milik
+//     tanda tangan atasan sendiri, bukan tanda tangan admin) --
+//     NomorSurat OTOMATIS dibuat & diisi pada langkah ini (lihat
+//     nextNomorUrutPengajuanBeritaAcara di
 //     handlers/pengajuan_berita_acara.go), TANPA perlu diketik siapa pun.
 //   - Atasan mengembalikan -> DikembalikanAtasan (pegawai bisa edit &
 //     mengajukan ulang, balik ke MenungguAtasan -- lihat
-//     updatePengajuanBeritaAcara).
-//   - Admin tahap akhir menyetujui -> Disetujui (PDF di-generate ulang DENGAN
-//     QR, baris AbsensiDokumen jenis "berita_acara" otomatis dibuat/
-//     diperbarui untuk tanggal kejadian ini; NomorSurat otomatis dari tahap
-//     atasan TETAP dipakai kecuali admin mengoreksinya manual).
+//     updatePengajuanBeritaAcara, QR & NomorSurat hilang lagi sampai
+//     disetujui ulang).
+//   - Admin tahap akhir menyetujui -> Disetujui (PDF di-generate ulang, QR
+//     tanda tangan atasan TETAP disertakan, baris AbsensiDokumen jenis
+//     "berita_acara" otomatis dibuat/diperbarui untuk tanggal kejadian ini;
+//     NomorSurat otomatis dari tahap atasan TETAP dipakai kecuali admin
+//     mengoreksinya manual).
 //   - Admin tahap akhir MENOLAK -> Ditolak, status AKHIR/permanen -- TIDAK
 //     bisa diedit/diajukan ulang pegawai (beda dari "mengembalikan" di bawah
 //     yang masih memberi pegawai kesempatan merevisi), dan TIDAK lagi
