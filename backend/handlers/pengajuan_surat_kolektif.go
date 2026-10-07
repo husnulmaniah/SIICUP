@@ -530,6 +530,15 @@ func setujuiPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *g
 		existing.NamaFile = item.NamaFile
 		existing.File = item.File
 		existing.Keterangan = item.Keterangan
+		// DiinputLangsungMenuBeritaAcara/IDPengajuanBeritaAcara di-set ULANG
+		// ke false/nil secara EKSPLISIT -- baris ini masuk lewat persetujuan
+		// pengajuan mandiri "Surat Kolektif" pegawai, BUKAN lewat menu
+		// Berita Acara, jadi TIDAK boleh tampil di menu itu (lihat
+		// listBeritaAcara) WALAUPUN item.Jenis kebetulan "Berita Acara" DAN
+		// walaupun baris pegawai/tanggal ini sebelumnya pernah dibuat lewat
+		// menu Berita Acara.
+		existing.DiinputLangsungMenuBeritaAcara = false
+		existing.IDPengajuanBeritaAcara = nil
 		// IDDiinputOleh diisi verifikator (claims.UserID) -- baris
 		// AbsensiDokumen di sini justru BARU tercatat/berubah lewat aksi
 		// menyetujui ini, bukan lewat inputAbsensiDokumenKolektif, jadi tanpa

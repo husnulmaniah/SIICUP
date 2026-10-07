@@ -167,5 +167,37 @@ func Migrate(db *gorm.DB) {
 		log.Printf("peringatan: gagal backfill absensi_dokumen.id_pengajuan_berita_acara: %v", err)
 	}
 
+	// Lanjutan dari backfill id_pengajuan_berita_acara di atas: menu "Berita
+	// Acara" SEKARANG disaring lewat kolom diinput_langsung_menu_berita_acara
+	// (lihat komentarnya di models.go) yang baru mulai diisi MULAI SEKARANG
+	// oleh buatBeritaAcara -- bukan lagi hanya lewat id_pengajuan_berita_acara
+	// IS NULL, karena ternyata ADA jalur lain yang juga bisa menghasilkan
+	// baris jenis "berita_acara" tapi BUKAN dari menu Berita Acara: input
+	// manual admin/admin absen lewat Rekap Absen -> "Input Surat Kolektif"
+	// (inputAbsensiDokumenKolektif), maupun persetujuan admin verifikasi atas
+	// pengajuan mandiri "Surat Kolektif" pegawai yang jenisnya kebetulan
+	// Berita Acara (setujuiPengajuanSuratKolektif) -- baris dari jalur-jalur
+	// ini tetap salah tampil di menu "Berita Acara" kalau hanya disaring
+	// lewat id_pengajuan_berita_acara IS NULL. Baris historis (sebelum
+	// kolom ini ada) di-backfill dengan heuristik nama berkas:
+	// buatBeritaAcara (DAN HANYA buatBeritaAcara/alur pengajuan Berita Acara
+	// Sekolah mandiri, yang sudah disaring lewat id_pengajuan_berita_acara
+	// IS NULL di atas) SATU-SATUNYA yang menamai berkasnya otomatis lewat
+	// generateBeritaAcaraNamaFile dengan pola tetap
+	// "berita_acara_YYYYMMDD_<angka>.pdf" -- sedangkan inputAbsensiDokumenKolektif
+	// & setujuiPengajuanSuratKolektif SELALU memakai nama berkas ASLI yang
+	// diupload admin/pegawai, yang hampir pasti TIDAK mengikuti pola ini.
+	// Aman dijalankan berkali-kali (hanya menyentuh baris yang masih cocok).
+	if err := db.Exec(`
+		UPDATE absensi_dokumen
+		SET diinput_langsung_menu_berita_acara = true
+		WHERE jenis = ?
+		  AND id_pengajuan_berita_acara IS NULL
+		  AND diinput_langsung_menu_berita_acara = false
+		  AND nama_file ~ '^berita_acara_[0-9]{8}_[0-9]+\.pdf$'
+	`, models.AbsensiDokumenBeritaAcara).Error; err != nil {
+		log.Printf("peringatan: gagal backfill absensi_dokumen.diinput_langsung_menu_berita_acara: %v", err)
+	}
+
 	log.Println("migrasi database berhasil")
 }

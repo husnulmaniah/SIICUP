@@ -1239,19 +1239,36 @@ type AbsensiDokumen struct {
 	// berasal dari persetujuan tahap akhir Berita Acara Sekolah MANDIRI
 	// (pengajuan pegawai bertugas di sekolah, lihat
 	// setujuiPengajuanBeritaAcaraAdmin di handlers/pengajuan_berita_acara.go)
-	// -- nil/kosong untuk baris yang dibuat admin/administrator LANGSUNG lewat
-	// menu Berita Acara (buatBeritaAcara) ATAUPUN jenis lain. Dipakai SATU-
-	// SATUNYA untuk membedakan sumber baris Berita Acara di listBeritaAcara
-	// (handlers/berita_acara.go) -- sesuai permintaan pengguna: menu "Berita
-	// Acara" HANYA menampilkan yang dibuat langsung administrator/admin;
-	// yang berasal dari pengajuan mandiri sekolah (disetujui admin absen/
-	// admin verifikasi/administrator/admin lewat tab "Verifikasi Berita Acara
-	// Sekolah" di Rekap Absen) tetap tercatat DD seperti biasa tapi TIDAK
-	// ikut muncul di menu "Berita Acara" -- cukup terlihat lewat Rekap Absen/
-	// riwayat pengajuannya sendiri.
+	// -- nil/kosong untuk baris yang berasal dari jalur lain. HANYA dipakai
+	// untuk jejak/audit asal baris (lihat juga DiinputLangsungMenuBeritaAcara
+	// di bawah, yang SEKARANG jadi satu-satunya penentu tampil/tidaknya baris
+	// ini di menu "Berita Acara").
 	IDPengajuanBeritaAcara *uint                 `json:"id_pengajuan_berita_acara,omitempty" gorm:"column:id_pengajuan_berita_acara"`
 	PengajuanBeritaAcara   *PengajuanBeritaAcara `json:"-" gorm:"foreignKey:IDPengajuanBeritaAcara;references:ID"`
-	CreatedAt              time.Time             `json:"created_at" gorm:"autoCreateTime"`
+	// DiinputLangsungMenuBeritaAcara: true HANYA kalau baris jenis
+	// "berita_acara" ini dibuat/terakhir ditimpa lewat tombol "Buat Berita
+	// Acara" di menu Berita Acara itu sendiri (buatBeritaAcara, lihat
+	// handlers/berita_acara.go) -- false untuk SEMUA jalur lain yang BISA
+	// JUGA menghasilkan baris jenis ini: persetujuan tahap akhir pengajuan
+	// mandiri Berita Acara Sekolah (setujuiPengajuanBeritaAcaraAdmin), input
+	// manual admin/admin absen lewat menu Rekap Absen -> "Input Surat
+	// Kolektif" (inputAbsensiDokumenKolektif, handlers/absensi_dokumen.go),
+	// ATAUPUN persetujuan admin verifikasi atas pengajuan mandiri "Surat
+	// Kolektif" pegawai yang jenisnya kebetulan Berita Acara
+	// (setujuiPengajuanSuratKolektif, handlers/pengajuan_surat_kolektif.go).
+	// SATU-SATUNYA dipakai listBeritaAcara (berita_acara.go) untuk menyaring
+	// menu "Berita Acara" -- sesuai permintaan pengguna: menu itu HANYA
+	// menampilkan yang benar-benar dibuat lewat menu itu sendiri; baris
+	// lainnya (termasuk yang diinput admin absen/admin verifikasi) tetap
+	// tercatat DD seperti biasa & tetap terlihat lewat Rekap Absen -> tab
+	// "Surat Kolektif", tapi TIDAK ikut muncul di menu "Berita Acara". Di-SET
+	// ULANG ke false secara EKSPLISIT di setiap jalur lain setiap kali baris
+	// yang sama ditimpa (bukan dibiarkan bernilai lama) -- supaya kalau baris
+	// yang tadinya dibuat lewat menu ini kemudian ditimpa admin absen lewat
+	// Input Surat Kolektif (pegawai/tanggal yang sama), baris itu benar-benar
+	// "berpindah" ke Surat Kolektif, bukan baris lama yang nilainya ke-cache.
+	DiinputLangsungMenuBeritaAcara bool      `json:"-" gorm:"column:diinput_langsung_menu_berita_acara;not null;default:false"`
+	CreatedAt                      time.Time `json:"created_at" gorm:"autoCreateTime"`
 	// UpdatedAt -- dipakai listAbsensiDokumenAdmin untuk mengurutkan tabel
 	// "Surat yang Sudah Diinput Bulan Ini" berdasarkan PENGINPUTAN paling
 	// baru (bukan tanggal absennya) -- GORM otomatis mengisi ini baik saat

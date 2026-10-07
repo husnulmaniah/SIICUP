@@ -271,6 +271,17 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 			existing.NamaFile = namaFile
 			existing.File = fileData
 			existing.Keterangan = keterangan
+			// DiinputLangsungMenuBeritaAcara/IDPengajuanBeritaAcara di-set
+			// ULANG ke false/nil secara EKSPLISIT (bukan cuma dibiarkan
+			// default) -- baris ini masuk lewat "Input Surat Kolektif",
+			// BUKAN lewat menu Berita Acara, jadi TIDAK boleh tampil di
+			// menu itu (lihat listBeritaAcara) WALAUPUN jenis yang dipilih
+			// admin di sini kebetulan "Berita Acara" DAN walaupun baris
+			// pegawai/tanggal ini sebelumnya pernah dibuat lewat menu
+			// Berita Acara (overwrite harus benar-benar "berpindah" status,
+			// bukan baris lama yang nilainya ke-cache).
+			existing.DiinputLangsungMenuBeritaAcara = false
+			existing.IDPengajuanBeritaAcara = nil
 			if claims != nil {
 				userID := claims.UserID
 				existing.IDDiinputOleh = &userID

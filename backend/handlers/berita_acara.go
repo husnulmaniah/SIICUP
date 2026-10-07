@@ -300,31 +300,34 @@ type beritaAcaraBatchOut struct {
 	Pegawai   []beritaAcaraPegawaiOut `json:"pegawai"`
 }
 
-// listBeritaAcara mengembalikan Berita Acara yang dibuat LANGSUNG lewat menu
-// ini oleh administrator/admin (jenis "berita_acara" pada AbsensiDokumen,
-// DAN id_pengajuan_berita_acara IS NULL -- TIDAK dibatasi bulan berjalan
-// seperti listAbsensiDokumenAdmin di Rekap Absen, karena menu ini memang
-// arsip/riwayat Berita Acara tersendiri), dikelompokkan per "batch" (baris-
-// baris dengan nama_file yang sama = dibuat dalam satu kali "Buat Berita
-// Acara" yang sama, lihat generateBeritaAcaraNamaFile) supaya satu Berita
-// Acara kolektif untuk 5 pegawai tampil sebagai SATU kartu berisi 5 nama,
-// bukan 5 baris terpisah.
+// listBeritaAcara mengembalikan Berita Acara yang dibuat LANGSUNG lewat
+// tombol "Buat Berita Acara" di menu ini sendiri (jenis "berita_acara" pada
+// AbsensiDokumen, DAN diinput_langsung_menu_berita_acara = true -- TIDAK
+// dibatasi bulan berjalan seperti listAbsensiDokumenAdmin di Rekap Absen,
+// karena menu ini memang arsip/riwayat Berita Acara tersendiri),
+// dikelompokkan per "batch" (baris-baris dengan nama_file yang sama = dibuat
+// dalam satu kali "Buat Berita Acara" yang sama, lihat
+// generateBeritaAcaraNamaFile) supaya satu Berita Acara kolektif untuk 5
+// pegawai tampil sebagai SATU kartu berisi 5 nama, bukan 5 baris terpisah.
 //
-// SENGAJA mengecualikan baris yang berasal dari persetujuan tahap akhir
-// Berita Acara Sekolah MANDIRI (id_pengajuan_berita_acara terisi, lihat
-// setujuiPengajuanBeritaAcaraAdmin di handlers/pengajuan_berita_acara.go) --
-// sesuai permintaan pengguna: menu "Berita Acara" ini HANYA untuk yang
-// dibuat langsung administrator/admin; yang berasal dari pengajuan mandiri
-// pegawai sekolah (disetujui admin absen/admin verifikasi/administrator/
-// admin lewat tab "Verifikasi Berita Acara Sekolah" di Rekap Absen) tetap
-// tercatat DD seperti biasa, hanya TIDAK ikut tampil di sini -- tetap bisa
-// dilihat lewat Rekap Absen/riwayat pengajuannya sendiri.
+// SENGAJA mengecualikan baris jenis "berita_acara" yang berasal dari jalur
+// LAIN (lihat komentar DiinputLangsungMenuBeritaAcara di models.go) --
+// persetujuan tahap akhir Berita Acara Sekolah MANDIRI
+// (setujuiPengajuanBeritaAcaraAdmin), input manual admin/admin absen lewat
+// Rekap Absen -> "Input Surat Kolektif" (inputAbsensiDokumenKolektif), MAUPUN
+// persetujuan admin verifikasi atas pengajuan mandiri "Surat Kolektif"
+// pegawai yang jenisnya kebetulan Berita Acara (setujuiPengajuanSuratKolektif)
+// -- sesuai permintaan pengguna: menu "Berita Acara" ini HANYA untuk yang
+// dibuat langsung lewat menu ini sendiri; baris dari jalur lain (termasuk
+// yang diinput admin absen/admin verifikasi) tetap tercatat DD seperti
+// biasa, hanya TIDAK ikut tampil di sini -- tetap bisa dilihat lewat Rekap
+// Absen -> tab "Surat Kolektif"/riwayat pengajuannya sendiri.
 func listBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 
 	var rows []models.AbsensiDokumen
 	err := db.Omit("file", "bukti_dukung_file").
-		Where("jenis = ? AND id_pengajuan_berita_acara IS NULL", models.AbsensiDokumenBeritaAcara).
+		Where("jenis = ? AND diinput_langsung_menu_berita_acara = ?", models.AbsensiDokumenBeritaAcara, true).
 		Preload("Pegawai.UnitKerja").Preload("Pegawai.Jabatan").
 		Order("created_at desc").
 		Find(&rows).Error
@@ -649,6 +652,17 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		existing.Keterangan = alasan
 		existing.Nomor = nomorPtr
 		existing.IDDiinputOleh = userIDPtr
+		// DiinputLangsungMenuBeritaAcara = true -- SATU-SATUNYA tempat ini
+		// pernah di-set true, karena ini SATU-SATUNYA handler untuk tombol
+		// "Buat Berita Acara" di menu Berita Acara itu sendiri (lihat
+		// komentar field ini di models.go). Di-set EKSPLISIT (bukan
+		// mengandalkan default false) supaya kalau baris pegawai/tanggal ini
+		// SEBELUMNYA berasal dari jalur lain (misalnya pernah diinput admin
+		// absen lewat Input Surat Kolektif), baris itu benar-benar
+		// "berpindah" status jadi tampil di menu Berita Acara, bukan baris
+		// lama yang nilainya ke-cache.
+		existing.DiinputLangsungMenuBeritaAcara = true
+		existing.IDPengajuanBeritaAcara = nil
 		if jenis == "individu" {
 			existing.BuktiDukungNamaFile = buktiNamaFile
 			existing.BuktiDukungFile = buktiFileData
