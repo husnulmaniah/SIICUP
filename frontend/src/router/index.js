@@ -36,7 +36,12 @@ const routes = [
       { path: 'pengajuan-cuti', name: 'pengajuan-cuti', component: PengajuanCutiView, meta: { roles: ['administrator', 'admin', 'pegawai', 'atasan'] } },
       { path: 'master/:tableKey', name: 'master', component: MasterDataView },
       { path: 'pengaturan-formulir', name: 'pengaturan-formulir', component: PengaturanFormulirView, meta: { roles: ['administrator', 'admin'] } },
-      { path: 'profil-saya', name: 'profil-saya', component: ProfilSayaView, meta: { roles: ['pegawai'] } },
+      // Profil Saya: atasan SEKARANG juga boleh mengakses (permintaan
+      // pengguna) -- mengajukan perubahan data, KP4, & pensiun sendiri sama
+      // seperti pegawai (lihat backend/handlers/perubahan_data.go, kp4.go,
+      // pengajuan_pensiun.go, yang sudah lebih dulu menangani role "atasan"
+      // di logika intinya, cuma rute middleware pegawaiOnly yang dibuka).
+      { path: 'profil-saya', name: 'profil-saya', component: ProfilSayaView, meta: { roles: ['pegawai', 'atasan'] } },
       // Absen: pegawai SELALU boleh, DAN atasan yang tempat tugasnya Dinas/
       // Kantor (BUKAN Sekolah) -- lihat requireAbsenAccess di beforeEach
       // (meta.roles saja tidak bisa membedakan atasan dinas vs. sekolah,
@@ -66,7 +71,10 @@ const routes = [
       // KP4: pegawai isi/lihat data KP4 SENDIRI (/kp4, sama pola akses
       // dengan /profil-saya) -- administrator/admin melihat rekap SEMUA
       // pegawai & boleh mengedit data KP4 pegawai manapun lewat /kp4-admin.
-      { path: 'kp4', name: 'kp4', component: Kp4View, meta: { roles: ['pegawai'] } },
+      // KP4: atasan SEKARANG juga boleh mengisi/lihat data KP4 sendiri lewat
+      // /kp4, sama seperti pegawai (permintaan pengguna, lihat komentar pada
+      // rute profil-saya di atas).
+      { path: 'kp4', name: 'kp4', component: Kp4View, meta: { roles: ['pegawai', 'atasan'] } },
       { path: 'kp4-admin', name: 'kp4-admin', component: Kp4AdminView, meta: { roles: ['administrator', 'admin'] } },
       { path: 'pengaturan-kp4', name: 'pengaturan-kp4', component: PengaturanKp4View, meta: { roles: ['administrator', 'admin'] } },
       // Surat Rekomendasi (kirim, khusus administrator/admin) & Arsip Surat

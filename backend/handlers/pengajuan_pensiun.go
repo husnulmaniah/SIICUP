@@ -98,7 +98,12 @@ func RegisterPengajuanPensiunRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// anyRole di sini juga TIDAK benar-benar "role apa saja" -- lihat catatan
 	// yang sama di RegisterPerubahanDataRoutes (perubahan_data.go).
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
-	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai") }
+	// pegawaiOnly: SEKARANG juga meloloskan role "atasan" -- atasan boleh
+	// mengajukan pensiun sendiri lewat Profil Saya sama seperti pegawai
+	// (permintaan pengguna). canAccessPengajuanPensiun/listPengajuanPensiun
+	// di bawah sudah lebih dulu menangani "pegawai"/"atasan" secara setara,
+	// jadi cukup dibuka di sini saja.
+	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan") }
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 
 	// Pengaturan usia pensiun -- GET dibuka untuk semua role terautentikasi

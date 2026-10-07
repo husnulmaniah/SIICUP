@@ -129,7 +129,12 @@ func RegisterPerubahanDataRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// akun ber-role pegawai/atasan/dll, jadi akun tersebut tetap otomatis
 	// tercakup di sini lewat role dasarnya.
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
-	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai") }
+	// pegawaiOnly: SEKARANG juga meloloskan role "atasan" -- atasan boleh
+	// mengajukan perubahan data sendiri sama seperti pegawai (permintaan
+	// pengguna). createPerubahanData/canAccessPerubahanData/listPerubahanData
+	// di bawah sudah lebih dulu menangani "pegawai"/"atasan" secara setara
+	// (lihat switch claims.RoleName), jadi cukup dibuka di sini saja.
+	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan") }
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 
 	mux.Handle("GET /api/perubahan-data", anyRole(func(w http.ResponseWriter, r *http.Request) { listPerubahanData(w, r, db) }))

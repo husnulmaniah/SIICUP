@@ -240,10 +240,21 @@ func canAccessPegawaiRow(claims *utils.Claims, item *models.Pegawai) bool {
 	if claims.RoleName == "administrator" || claims.RoleName == "admin" {
 		return true
 	}
+	// Akses ke DATA SENDIRI selalu diperbolehkan untuk pegawai MAUPUN atasan
+	// -- dicek LEBIH DULU sebelum pengecekan khusus "atasan" di bawah, supaya
+	// atasan tetap bisa melihat SK/foto/TTD miliknya sendiri lewat Profil
+	// Saya (permintaan pengguna: atasan bisa mengajukan perubahan data & KP4
+	// sama seperti pegawai, yang butuh akses ke dokumen SK-nya sendiri).
+	// Sebelumnya atasan HANYA dicek lewat IDAtasan (lihat cabang di bawah),
+	// yang berarti IDPegawai milik atasan sendiri tidak pernah cocok (itu
+	// bukan ID atasannya), jadi akses ke data sendiri selalu ditolak.
+	if claims.IDPegawai != nil && item.ID == *claims.IDPegawai {
+		return true
+	}
 	if claims.RoleName == "atasan" {
 		return item.IDAtasan != nil && claims.IDPegawai != nil && *item.IDAtasan == *claims.IDPegawai
 	}
-	return claims.IDPegawai != nil && item.ID == *claims.IDPegawai
+	return false
 }
 
 func downloadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {

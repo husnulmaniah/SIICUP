@@ -116,17 +116,25 @@ const navSections = computed(() => {
         { label: 'KP4', icon: 'pi pi-users', to: '/kp4' },
       ],
     })
-  } else if (auth.isAtasan && !auth.isSekolah) {
-    // Atasan yang tempat tugasnya Dinas/Kantor (BUKAN Sekolah) juga boleh
-    // absen sendiri lewat kamera, sama seperti pegawai -- backend
+  } else if (auth.isAtasan) {
+    // Profil Saya & KP4 SEKARANG dimunculkan untuk SEMUA atasan (Dinas
+    // maupun Sekolah) -- atasan bisa mengajukan perubahan data, KP4, &
+    // pensiun sendiri sama seperti pegawai (permintaan pengguna; lihat
+    // komentar pada rute profil-saya/kp4 di router/index.js). Absen tetap
+    // HANYA untuk atasan Dinas/Kantor (BUKAN Sekolah) -- backend
     // (pegawaiOnly & absensiEligible di backend/handlers/absensi.go) sudah
     // mengizinkan & bahkan SELALU meloloskan atasan Dinas terlepas dari
-    // filter Pengaturan Absen manapun. Atasan Sekolah (Kepala Sekolah/
-    // Puskesmas) TIDAK diberi menu ini -- cuma atasan Dinas, sesuai
-    // permintaan. Profil Saya & KP4 tetap tidak dimunculkan untuk atasan
-    // karena rutenya memang masih khusus role pegawai (meta.roles di
-    // router/index.js), belum diminta untuk atasan.
-    sections.push({ header: null, items: [{ label: 'Absen', icon: 'pi pi-camera', to: '/absen' }] })
+    // filter Pengaturan Absen manapun, sedangkan atasan Sekolah (Kepala
+    // Sekolah/Puskesmas) TIDAK diberi menu ini, sesuai permintaan
+    // sebelumnya -- aturan ini TIDAK berubah, cuma Profil Saya/KP4 yang kini
+    // ditambahkan terlepas dari status sekolah.
+    const items = []
+    if (!auth.isSekolah) {
+      items.push({ label: 'Absen', icon: 'pi pi-camera', to: '/absen' })
+    }
+    items.push({ label: 'Profil Saya', icon: 'pi pi-user-edit', to: '/profil-saya' })
+    items.push({ label: 'KP4', icon: 'pi pi-users', to: '/kp4' })
+    sections.push({ header: null, items })
   }
 
   // Arsip Surat: surat rekomendasi (perpanjangan kontrak PPPK/PPPK Paruh

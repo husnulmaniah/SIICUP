@@ -358,11 +358,15 @@ func RegisterKp4Routes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
 		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole(roles...))
 	}
-	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai") }
+	// pegawaiOnly: SEKARANG juga meloloskan role "atasan" -- atasan boleh
+	// mengisi/melihat data KP4 sendiri sama seperti pegawai (permintaan
+	// pengguna). kp4Saya/simpanKp4Saya di bawah sudah netral terhadap role
+	// (cuma memakai claims.IDPegawai), jadi cukup dibuka di sini saja.
+	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan") }
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
-	// cetak: pegawai sendiri ATAU admin/administrator (canAksesKp4Pegawai di
-	// bawah mengecek lagi apakah {id} ini benar milik pegawai yang login).
-	cetakRoles := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai") }
+	// cetak: pegawai/atasan sendiri ATAU admin/administrator (pengecekan
+	// kepemilikan {id} ada di kp4CetakAdmin di bawah).
+	cetakRoles := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
 
 	mux.Handle("GET /api/kp4/saya", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { kp4Saya(w, r, db) }))
 	mux.Handle("PUT /api/kp4/saya", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { simpanKp4Saya(w, r, db) }))
@@ -738,7 +742,11 @@ func kp4CetakAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	claims, _ := middleware.GetClaims(r)
-	if claims.RoleName == "pegawai" && (claims.IDPegawai == nil || *claims.IDPegawai != idPegawai) {
+	// pengaman: cetakRoles di atas meloloskan "pegawai"/"atasan" juga, jadi
+	// kedua role itu HARUS dibatasi hanya boleh mencetak KP4 miliknya
+	// sendiri di sini -- hanya administrator/admin yang boleh mencetak KP4
+	// pegawai manapun lewat endpoint ini.
+	if (claims.RoleName == "pegawai" || claims.RoleName == "atasan") && (claims.IDPegawai == nil || *claims.IDPegawai != idPegawai) {
 		utils.Error(w, http.StatusForbidden, "tidak boleh mencetak KP4 pegawai lain")
 		return
 	}
