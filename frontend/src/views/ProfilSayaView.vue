@@ -1123,20 +1123,23 @@ function formatDate(v) {
       <Message severity="info" :closable="false" style="margin-bottom: 1rem">
         NIP tidak bisa diubah lewat form ini. Perubahan yang anda ajukan baru berlaku setelah disetujui administrator/admin.
       </Message>
+      <!-- semua field col-12 (1 kolom penuh) -- permintaan pengguna "buat
+           menjadi col-12 agar simetris": sebelumnya banyak field berdampingan
+           2 kolom (md:col-6) di tablet/desktop, sekarang seragam 1 kolom. -->
       <div class="grid formgrid ajukan-form-grid">
         <div class="col-12">
           <label class="field-label">Nama <span style="color: #ef4444">*</span></label>
           <InputText v-model="form.nama" style="width: 100%" />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Jabatan</label>
           <Select v-model="form.id_jabatan" :options="refJabatan" optionLabel="jabatan" optionValue="id" filter showClear style="width: 100%" placeholder="Pilih..." />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Unit Kerja</label>
           <Select v-model="form.id_unit_kerja" :options="refUnitKerja" optionLabel="unit" optionValue="id" filter showClear style="width: 100%" placeholder="Pilih..." />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Pangkat / Golongan</label>
           <Select
             v-model="form.id_pangkat_gol"
@@ -1149,32 +1152,32 @@ function formatDate(v) {
             placeholder="Pilih..."
           />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Status Kepegawaian</label>
           <Select v-model="form.id_status" :options="refStatus" optionLabel="status" optionValue="id" filter showClear style="width: 100%" placeholder="Pilih..." />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Tempat Tugas</label>
           <Select v-model="form.tempat_tgs" :options="tempatKerjaOptions" optionLabel="label" optionValue="id" showClear style="width: 100%" placeholder="Pilih..." />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">TMT</label>
           <DatePicker v-model="form.tmt" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Tanggal Lahir</label>
           <DatePicker v-model="form.tgl_lahir" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
           <small class="field-hint">Dipakai untuk menghitung usia &amp; kelayakan pensiun anda.</small>
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">No HP</label>
           <InputText v-model="form.no_hp" style="width: 100%" />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Email</label>
           <InputText v-model="form.email" style="width: 100%" />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">
             Kenaikan Gaji Berkala Terakhir
             <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
@@ -1182,7 +1185,7 @@ function formatDate(v) {
           <DatePicker v-model="form.tgl_kenaikan_gaji_berkala_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
           <small class="field-hint">Dipakai menghitung kapan kenaikan gaji berkala berikutnya jatuh tempo.</small>
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">
             Kenaikan Pangkat Terakhir
             <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>

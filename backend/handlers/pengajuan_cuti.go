@@ -317,9 +317,10 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// akun ber-role pegawai/atasan/dll, jadi akun tersebut tetap otomatis
 	// tercakup di sini lewat role dasarnya.
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
-	// approve/reject/return: atasan (bawahannya sendiri) DAN admin/administrator
-	// (siapa saja) -- canAccessPengajuan di bawah masih mengecek relasi
-	// atasan-bawahan untuk role "atasan".
+	// approve/reject/kembalikan/return: atasan (bawahannya sendiri saja,
+	// BUKAN pengajuan miliknya sendiri -- lihat guard isSelfSubmission di
+	// masing-masing handler) DAN admin/administrator (siapa saja, termasuk
+	// pengajuan milik atasan sendiri).
 	approverRoles := func(h http.HandlerFunc) http.Handler { return authed(h, "atasan", "administrator", "admin") }
 
 	mux.Handle("GET /api/pengajuan-cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { listPengajuan(w, r, db) }))
@@ -444,9 +445,19 @@ func listPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			utils.Success(w, "ok", []models.PengajuanCuti{})
 			return
 		}
-		sub := "id_pegawai IN (SELECT id FROM pegawai WHERE id_atasan = ?)"
-		query = query.Where(sub, *claims.IDPegawai)
-		countQuery = countQuery.Where(sub, *claims.IDPegawai)
+		// scope=saya: tab "Cuti Saya" di frontend -- atasan melihat pengajuan
+		// MILIKNYA SENDIRI, persis seperti pegawai biasa (permintaan pengguna
+		// "atasan dapat mengajukan cuti seperti pegawai biasa"). Tanpa
+		// scope (default/"bawahan"): tab "Cuti Bawahan", perilaku lama --
+		// hanya pengajuan bawahan langsungnya untuk ditinjau/disetujui.
+		if q.Get("scope") == "saya" {
+			query = query.Where("id_pegawai = ?", *claims.IDPegawai)
+			countQuery = countQuery.Where("id_pegawai = ?", *claims.IDPegawai)
+		} else {
+			sub := "id_pegawai IN (SELECT id FROM pegawai WHERE id_atasan = ?)"
+			query = query.Where(sub, *claims.IDPegawai)
+			countQuery = countQuery.Where(sub, *claims.IDPegawai)
+		}
 	}
 
 	if status := q.Get("status"); status != "" {
@@ -471,9 +482,32 @@ func canAccessPengajuan(claims *utils.Claims, item models.PengajuanCuti) bool {
 	case "pegawai":
 		return claims.IDPegawai != nil && item.IDPegawai == *claims.IDPegawai
 	case "atasan":
-		return claims.IDPegawai != nil && item.Pegawai != nil && item.Pegawai.IDAtasan != nil && *item.Pegawai.IDAtasan == *claims.IDPegawai
+		// atasan boleh akses pengajuan BAWAHAN langsungnya (pola lama) MAUPUN
+		// pengajuan MILIKNYA SENDIRI (permintaan pengguna "atasan dapat
+		// mengajukan cuti seperti pegawai biasa") -- lihat juga tab "Cuti
+		// Saya" di PengajuanCutiView.vue & scope=saya di listPengajuan di bawah.
+		if claims.IDPegawai == nil {
+			return false
+		}
+		if item.IDPegawai == *claims.IDPegawai {
+			return true
+		}
+		return item.Pegawai != nil && item.Pegawai.IDAtasan != nil && *item.Pegawai.IDAtasan == *claims.IDPegawai
 	}
 	return false
+}
+
+// isSelfSubmission: true kalau pengajuan ini diajukan sendiri oleh pemilik
+// akun yang sedang login (pegawai ATAU atasan mengajukan untuk dirinya
+// sendiri) -- dipakai untuk membatasi edit/hapus hanya saat status masih
+// "pending"/"dikembalikan", SAMA seperti aturan pegawai biasa. Sengaja
+// TIDAK true untuk atasan yang mengakses pengajuan BAWAHANNYA (itu
+// ranahnya approve/reject/kembalikan, bukan edit/hapus isi pengajuan).
+func isSelfSubmission(claims *utils.Claims, item models.PengajuanCuti) bool {
+	if claims.IDPegawai == nil {
+		return false
+	}
+	return (claims.RoleName == "pegawai" || claims.RoleName == "atasan") && item.IDPegawai == *claims.IDPegawai
 }
 
 func getPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -662,7 +696,7 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
 		return
 	}
-	if (claims.RoleName == "pegawai") && item.Status != models.StatusPending && item.Status != models.StatusDikembalikan {
+	if isSelfSubmission(claims, item) && item.Status != models.StatusPending && item.Status != models.StatusDikembalikan {
 		utils.Error(w, http.StatusBadRequest, "pengajuan yang sudah diproses tidak dapat diubah")
 		return
 	}
@@ -726,7 +760,7 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			}
 			fh := formFileHeader(r, "dokumen_"+d.Jenis)
 			if fh == nil {
-				if claims.RoleName == "pegawai" {
+				if isSelfSubmission(claims, item) {
 					stillMissing = append(stillMissing, d.Label)
 				}
 				continue
@@ -858,7 +892,7 @@ func deletePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
 		return
 	}
-	if claims.RoleName == "pegawai" && item.Status != models.StatusPending && item.Status != models.StatusDikembalikan {
+	if isSelfSubmission(claims, item) && item.Status != models.StatusPending && item.Status != models.StatusDikembalikan {
 		utils.Error(w, http.StatusBadRequest, "pengajuan yang sudah diproses tidak dapat dihapus")
 		return
 	}
@@ -899,6 +933,15 @@ func approvePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	if !canAccessPengajuan(claims, item) {
 		utils.Error(w, http.StatusForbidden, "anda hanya dapat memproses pengajuan cuti bawahan anda")
+		return
+	}
+	// atasan TIDAK BOLEH menyetujui/menolak/mengembalikan pengajuan cuti
+	// MILIKNYA SENDIRI (canAccessPengajuan di atas sengaja mengizinkan akses
+	// lihat/edit/hapus untuk pengajuan sendiri -- lihat isSelfSubmission --
+	// tapi memproses/approval tetap harus administrator/admin, bukan
+	// menyetujui pengajuannya sendiri).
+	if isSelfSubmission(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak dapat memproses pengajuan cuti milik sendiri, menunggu persetujuan administrator/admin")
 		return
 	}
 	if item.Status != models.StatusPending {
@@ -952,6 +995,12 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda hanya dapat memproses pengajuan cuti bawahan anda")
 		return
 	}
+	// atasan TIDAK BOLEH memproses pengajuan cuti MILIKNYA SENDIRI -- lihat
+	// catatan selengkapnya pada approvePengajuan.
+	if isSelfSubmission(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak dapat memproses pengajuan cuti milik sendiri, menunggu persetujuan administrator/admin")
+		return
+	}
 	if item.Status != models.StatusPending {
 		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya")
 		return
@@ -998,6 +1047,12 @@ func kembalikanPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	if !canAccessPengajuan(claims, item) {
 		utils.Error(w, http.StatusForbidden, "anda hanya dapat memproses pengajuan cuti bawahan anda")
+		return
+	}
+	// atasan TIDAK BOLEH memproses pengajuan cuti MILIKNYA SENDIRI -- lihat
+	// catatan selengkapnya pada approvePengajuan.
+	if isSelfSubmission(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak dapat memproses pengajuan cuti milik sendiri, menunggu persetujuan administrator/admin")
 		return
 	}
 	if item.Status != models.StatusPending {
@@ -1051,6 +1106,12 @@ func returnPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	if !canAccessPengajuan(claims, item) {
 		utils.Error(w, http.StatusForbidden, "anda hanya dapat memproses pengajuan cuti bawahan anda")
+		return
+	}
+	// atasan TIDAK BOLEH memproses pengajuan cuti MILIKNYA SENDIRI -- lihat
+	// catatan selengkapnya pada approvePengajuan.
+	if isSelfSubmission(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak dapat memproses pengajuan cuti milik sendiri, menunggu persetujuan administrator/admin")
 		return
 	}
 	if item.Status == models.StatusPending {

@@ -23,6 +23,9 @@ import InputIcon from 'primevue/inputicon'
 import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
 import ProgressSpinner from 'primevue/progressspinner'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -104,12 +107,35 @@ const isManage = computed(() => auth.isAdministrator || auth.isAdmin)
 const isAtasan = computed(() => auth.isAtasan)
 const isPegawai = computed(() => auth.isPegawai)
 
+// Khusus akun atasan: halaman ini punya 2 tab (permintaan pengguna "role
+// atasan dapat mengajukan cuti seperti pegawai biasa") -- "saya" (pengajuan
+// cuti miliknya sendiri, persis seperti pegawai biasa: ada tombol Ajukan
+// Cuti & bisa edit/hapus pengajuan sendiri yang masih pending/dikembalikan)
+// dan "bawahan" (perilaku lama: tabel bawahan untuk ditinjau/disetujui).
+// Tidak relevan untuk role lain (pegawai/isManage tidak punya tab).
+const cutiTab = ref('saya')
+
+// viewingOwn: true kalau tabel yang sedang ditampilkan berisi pengajuan
+// MILIK SENDIRI (pegawai biasa, ATAU atasan yang sedang di tab "Cuti Saya")
+// -- dipakai menggantikan isPegawai di hampir semua v-if yang sebelumnya
+// berarti "tampilan self-service", supaya atasan di tab "Cuti Saya"
+// mendapat pengalaman yang SAMA seperti pegawai biasa.
+const viewingOwn = computed(() => isPegawai.value || (isAtasan.value && cutiTab.value === 'saya'))
+// viewingBawahanApprover: true kalau akun ini boleh memproses (Setujui/
+// Tolak/Kembalikan) baris yang sedang ditampilkan -- isManage (admin/
+// administrator, selalu boleh) ATAU atasan yang sedang di tab "Cuti
+// Bawahan" (BUKAN saat di tab "Cuti Saya" -- backend juga menolak atasan
+// memproses pengajuannya sendiri, lihat isSelfSubmission di
+// handlers/pengajuan_cuti.go).
+const viewingBawahanApprover = computed(() => isManage.value || (isAtasan.value && cutiTab.value === 'bawahan'))
+
 // Baris boleh dihapus (satuan maupun lewat centang-banyak) kalau:
 // - isManage (administrator/admin): baris apa pun, status apa pun.
-// - pegawai: hanya pengajuan miliknya sendiri yang masih "pending" atau
-//   "dikembalikan" -- cermin persis dari v-if tombol hapus satuan di Aksi.
+// - viewingOwn (pegawai biasa, atau atasan di tab "Cuti Saya"): hanya
+//   pengajuan miliknya sendiri yang masih "pending" atau "dikembalikan" --
+//   cermin persis dari v-if tombol hapus satuan di Aksi.
 function canDeleteRow(row) {
-  return (isPegawai.value && (row.status === 'pending' || row.status === 'dikembalikan')) || isManage.value
+  return (viewingOwn.value && (row.status === 'pending' || row.status === 'dikembalikan')) || isManage.value
 }
 
 function statusSeverity(status) {
@@ -152,7 +178,15 @@ async function fetchList() {
   selectedRows.value = []
   try {
     const { data } = await http.get('/pengajuan-cuti', {
-      params: { page: page.value, pageSize: pageSize.value, status: statusFilter.value || undefined },
+      params: {
+        page: page.value,
+        pageSize: pageSize.value,
+        status: statusFilter.value || undefined,
+        // scope=saya: tab "Cuti Saya" -- lihat listPengajuan di
+        // handlers/pengajuan_cuti.go. Tidak relevan untuk role selain
+        // atasan (backend mengabaikannya).
+        scope: isAtasan.value ? cutiTab.value : undefined,
+      },
     })
     items.value = data.data || []
     total.value = data.meta?.total ?? items.value.length
@@ -162,6 +196,13 @@ async function fetchList() {
     loading.value = false
   }
 }
+
+// Ganti tab "Cuti Saya" <-> "Cuti Bawahan" (khusus atasan) -- muat ulang
+// dari halaman 1 dengan scope baru.
+watch(cutiTab, () => {
+  page.value = 1
+  fetchList()
+})
 
 function onPage(event) {
   page.value = Math.floor(event.first / event.rows) + 1
@@ -849,10 +890,39 @@ onMounted(() => {
   <div class="page-wrap">
     <div class="page-title">Pengajuan Cuti</div>
     <p class="page-subtitle">
-      <span v-if="isPegawai">Ajukan cuti dan pantau status persetujuannya di sini.</span>
+      <span v-if="viewingOwn">Ajukan cuti dan pantau status persetujuannya di sini.</span>
       <span v-else-if="isAtasan">Tinjau dan proses pengajuan cuti bawahan anda.</span>
       <span v-else>Pantau dan kelola seluruh pengajuan cuti pegawai.</span>
     </p>
+
+    <!-- Khusus akun atasan: 2 tab "Cuti Saya" & "Cuti Bawahan" (permintaan
+         pengguna "role atasan dapat mengajukan cuti seperti pegawai biasa")
+         -- nama tab dilengkapi ikon SVG. Sengaja HANYA Tabs+TabList (tanpa
+         TabPanels/TabPanel) karena isi tabelnya memakai komponen & markup
+         yang SAMA untuk kedua tab (cuma sumber data & beberapa kolom/aksi
+         yang beda, dikontrol lewat viewingOwn/viewingBawahanApprover di
+         bawah) -- jadi tidak perlu 2 blok tabel yang terduplikasi. -->
+    <Tabs v-if="isAtasan" v-model:value="cutiTab" style="margin-bottom: 1rem">
+      <TabList>
+        <Tab value="saya">
+          <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="17" rx="2" />
+            <path d="M8 2v4M16 2v4M3 10h18" />
+            <path d="M8.5 15.5l1.8 1.8L15.5 13" />
+          </svg>
+          <span>Cuti Saya</span>
+        </Tab>
+        <Tab value="bawahan">
+          <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="9" cy="7.5" r="3" />
+            <path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5" />
+            <circle cx="17" cy="8.5" r="2.3" />
+            <path d="M15.3 14.8c2.2 0 4 1.9 4 5.2" />
+          </svg>
+          <span>Cuti Bawahan</span>
+        </Tab>
+      </TabList>
+    </Tabs>
 
     <div class="card">
       <SelectButton
@@ -883,7 +953,7 @@ onMounted(() => {
             <Button icon="pi pi-chevron-down" iconPos="right" label="Menu" class="overlay-menu-trigger" @click="toggleActionsMenu" aria-haspopup="true" />
             <Menu ref="actionsMenuRef" :model="actionsMenuItems" popup class="overlay-actions-menu" />
           </template>
-          <Button v-else-if="isPegawai" icon="pi pi-plus" label="Ajukan Cuti" @click="openCreate" />
+          <Button v-else-if="viewingOwn" icon="pi pi-plus" label="Ajukan Cuti" @click="openCreate" />
         </div>
       </div>
 
@@ -907,7 +977,7 @@ onMounted(() => {
         >
           <template #empty><div style="padding: 1.5rem; text-align: center; color: var(--p-text-muted-color)">Tidak ada data</div></template>
           <Column selectionMode="multiple" headerStyle="width: 3rem" :exportable="false"></Column>
-          <Column v-if="!isPegawai" field="pegawai.nama" header="Pegawai" />
+          <Column v-if="!viewingOwn" field="pegawai.nama" header="Pegawai" />
           <Column field="jenis_cuti.jenis" header="Jenis Cuti" />
           <Column header="Tanggal">
             <template #body="{ data }">{{ formatDate(data.tgl_mulai) }} &ndash; {{ formatDate(data.tgl_selesai) }}</template>
@@ -921,8 +991,8 @@ onMounted(() => {
               <div style="display: flex; gap: 0.35rem; flex-wrap: wrap">
                 <Button icon="pi pi-eye" size="small" severity="secondary" rounded text @click="openDetail(data)" />
                 <template v-if="data.status === 'disetujui'">
-                  <!-- admin/administrator/atasan: cetak formulir mentah (belum ttd) untuk diajukan ttd ke Kepala Dinas -->
-                  <template v-if="!isPegawai">
+                  <!-- admin/administrator/atasan (bawahan): cetak formulir mentah (belum ttd) untuk diajukan ttd ke Kepala Dinas -->
+                  <template v-if="!viewingOwn">
                     <Button
                       icon="pi pi-file-pdf"
                       size="small"
@@ -1012,14 +1082,14 @@ onMounted(() => {
                   </template>
                 </template>
                 <Button
-                  v-if="(isAtasan || isManage) && data.status === 'pending'"
+                  v-if="viewingBawahanApprover && data.status === 'pending'"
                   icon="pi pi-check-square"
                   size="small"
                   label="Proses"
                   @click="openApproval(data)"
                 />
                 <Button
-                  v-if="(isAtasan || isManage) && data.status !== 'pending'"
+                  v-if="viewingBawahanApprover && data.status !== 'pending'"
                   icon="pi pi-undo"
                   size="small"
                   severity="warn"
@@ -1027,14 +1097,14 @@ onMounted(() => {
                   label="Kembalikan"
                   @click="confirmReturn(data)"
                 />
-                <template v-if="(isPegawai && (data.status === 'pending' || data.status === 'dikembalikan')) || isManage">
+                <template v-if="(viewingOwn && (data.status === 'pending' || data.status === 'dikembalikan')) || isManage">
                   <Button icon="pi pi-pencil" size="small" severity="secondary" rounded text @click="openEdit(data)" />
                   <Button icon="pi pi-trash" size="small" severity="danger" rounded text @click="confirmDelete(data)" />
                 </template>
               </div>
             </template>
           </Column>
-          <Column v-if="isPegawai" header="" style="width: 180px">
+          <Column v-if="viewingOwn" header="" style="width: 180px">
             <template #body="{ data }">
               <a
                 v-if="data.status === 'disetujui'"
@@ -1058,7 +1128,10 @@ onMounted(() => {
       <Message v-if="flaggedEditDocs.length" severity="warn" :closable="false" style="margin-bottom: 1rem">
         Pengajuan ini dikembalikan{{ editReturnNote ? ': ' + editReturnNote : '' }}. Silakan upload ulang berkas yang ditandai di bawah ini.
       </Message>
-      <!-- grid responsive (PrimeFlex): 1 kolom di HP, otomatis jadi 2 kolom di tablet/desktop (>=768px) -->
+      <!-- semua field col-12 (1 kolom penuh) -- permintaan pengguna "buat
+           menjadi col-12 agar simetris": sebelumnya sebagian field (Tanggal
+           Mulai/Selesai, Alasan/Alamat) berdampingan 2 kolom di tablet/desktop
+           sementara field lain tetap 1 kolom, jadi tidak rata. -->
       <div class="grid formgrid">
         <div v-if="isManage" class="col-12">
           <label class="field-label">Pegawai *</label>
@@ -1068,11 +1141,11 @@ onMounted(() => {
           <label class="field-label">Jenis Cuti *</label>
           <Select v-model="form.id_jenis_cuti" :options="jenisCutiOptions" optionLabel="jenis" optionValue="id" style="width: 100%" placeholder="Pilih jenis cuti" />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Tanggal Mulai *</label>
           <DatePicker v-model="form.tgl_mulai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Tanggal Selesai *</label>
           <DatePicker v-model="form.tgl_selesai" dateFormat="dd-mm-yy" showIcon style="width: 100%" />
         </div>
@@ -1081,11 +1154,11 @@ onMounted(() => {
             Pola hari kerja dihitung otomatis dari tempat tugas pegawai: tempat tugas "Sekolah" &rarr; 6 hari kerja (Senin&ndash;Sabtu), tempat tugas lainnya (Dinas/Kantor) &rarr; 5 hari kerja (Senin&ndash;Jumat).
           </Message>
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Alasan Cuti</label>
           <Textarea v-model="form.alasan_cuti" rows="2" style="width: 100%" />
         </div>
-        <div class="col-12 md:col-6">
+        <div class="col-12">
           <label class="field-label">Alamat Selama Cuti</label>
           <Textarea v-model="form.alamat_selama_cuti" rows="2" style="width: 100%" />
         </div>
@@ -1191,7 +1264,7 @@ onMounted(() => {
     <!-- detail dialog (semua role) -->
     <Dialog v-model:visible="detailDialog" modal header="Detail Pengajuan Cuti" :style="{ width: '32rem', maxWidth: '95vw' }">
       <div v-if="detailRow" style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem">
-        <div v-if="!isPegawai"><strong>Pegawai:</strong> {{ detailRow.pegawai?.nama }}</div>
+        <div v-if="!viewingOwn"><strong>Pegawai:</strong> {{ detailRow.pegawai?.nama }}</div>
         <div><strong>Jenis Cuti:</strong> {{ detailRow.jenis_cuti?.jenis }}</div>
         <div><strong>Tanggal:</strong> {{ formatDate(detailRow.tgl_mulai) }} &ndash; {{ formatDate(detailRow.tgl_selesai) }} ({{ detailRow.jumlah_hari }} hari)</div>
         <div><strong>Status:</strong> <Tag :value="detailRow.status" :severity="statusSeverity(detailRow.status)" /></div>
@@ -1212,9 +1285,10 @@ onMounted(() => {
           </div>
         </div>
         <div v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Tidak ada berkas yang diupload.</div>
-        <!-- pegawai tidak perlu melihat/mencetak draf formulir yang belum di-ttd --
-             cukup admin/administrator/atasan yang mencetaknya untuk diajukan ttd. -->
-        <div v-if="detailRow.status === 'disetujui' && !isPegawai" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
+        <!-- pemilik pengajuan sendiri (pegawai, atau atasan di tab "Cuti Saya")
+             tidak perlu melihat/mencetak draf formulir yang belum di-ttd --
+             cukup admin/administrator/atasan (bawahan) yang mencetaknya untuk diajukan ttd. -->
+        <div v-if="detailRow.status === 'disetujui' && !viewingOwn" style="margin-top: 0.75rem; border-top: 1px solid var(--p-content-border-color); padding-top: 0.75rem">
           <div style="font-weight: 600; margin-bottom: 0.5rem">Formulir Cetak (dibuat otomatis oleh sistem, belum TTD)</div>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
             <Button
@@ -1361,6 +1435,13 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.tab-icon-svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin-right: 0.45rem;
+  vertical-align: -2px;
+}
 .field-label {
   display: block;
   font-size: 0.85rem;

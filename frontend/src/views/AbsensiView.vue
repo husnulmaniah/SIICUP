@@ -2178,10 +2178,14 @@ async function downloadDokumen(item) {
 .surat-form-card:hover {
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
+/* 1 kolom penuh (col-12) untuk semua field -- permintaan pengguna "buat
+   menjadi col-12 agar simetris": sebelumnya grid auto-fit membuat sebagian
+   field berdampingan 2 kolom (mis. Tanggal Kejadian + Alasan) sementara field
+   lain di bawahnya penuh 1 baris, jadi tidak rata/simetris. */
 .surat-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 1rem 1.5rem;
+  grid-template-columns: 1fr;
+  gap: 1rem;
 }
 .surat-form-grid .field {
   margin-bottom: 0;
