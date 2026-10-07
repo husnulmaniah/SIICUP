@@ -513,7 +513,7 @@ onMounted(() => {
 <template>
   <div class="page-wrap">
     <div class="page-header-row">
-      <div>
+      <div style="flex: 1; min-width: 0">
         <div class="page-title">Berita Acara</div>
         <p class="page-subtitle">
           Buat Berita Acara resmi untuk pegawai yang tidak bisa melakukan absensi online lewat E-Office pada satu

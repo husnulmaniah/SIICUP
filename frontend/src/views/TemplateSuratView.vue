@@ -279,7 +279,7 @@ onUnmounted(() => {
 <template>
   <div class="page-wrap">
     <div class="page-header-row">
-      <div>
+      <div style="flex: 1; min-width: 0">
         <div class="page-title">Template Surat</div>
         <p class="page-subtitle">
           {{ canManage

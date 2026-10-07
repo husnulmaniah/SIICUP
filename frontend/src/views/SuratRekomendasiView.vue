@@ -497,7 +497,7 @@ async function unduhExcel() {
 <template>
   <div class="page-wrap">
     <div class="page-header-row">
-      <div>
+      <div style="flex: 1; min-width: 0">
         <div class="page-title">Surat Rekomendasi</div>
         <p class="page-subtitle">
           Kirim surat rekomendasi perpanjangan kontrak untuk pegawai PPPK/PPPK Paruh Waktu -- satu-satu atau

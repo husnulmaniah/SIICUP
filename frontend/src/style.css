@@ -47,16 +47,50 @@ a {
   }
 }
 
+/* Kartu judul halaman -- permintaan pengguna: SETIAP judul halaman
+   dibuatkan "card" dengan latar yang lebih gelap (dibanding putih polos
+   sebelumnya) tapi tetap serasi dengan warna Dashboard (gradien pastel
+   teal yang sama dipakai di .dashboard-banner pada DashboardView.vue &
+   sidebar pada AppLayout.vue). .page-title & .page-subtitle dipakai
+   berpasangan sebagai elemen BERSEBELAHAN LANGSUNG di hampir semua
+   halaman (div judul lalu <p> subjudul tepat sesudahnya) -- lihat
+   views/*.vue & components/CrudManager.vue -- jadi keduanya "disatukan"
+   jadi satu kartu lewat warna & radius yang menyambung (judul rounded di
+   atas, subjudul rounded di bawah, TANPA jahitan box-shadow di
+   tengah supaya tidak ada garis dobel). :has(+ .page-subtitle) dipakai
+   supaya judul yang BERDIRI SENDIRI tanpa subjudul (mis. ArsipSuratView)
+   tetap otomatis jadi kartu bulat utuh di keempat sisinya, bukan terpotong
+   rata di bawah. CATATAN: DashboardView.vue me-reset gaya ini secara
+   scoped khusus di dalam .dashboard-header, karena di sana sudah ada
+   .dashboard-banner-nya sendiri -- supaya tidak terjadi "kartu di dalam
+   kartu". */
 .page-title {
   font-size: 1.35rem;
   font-weight: 700;
-  margin: 0 0 .25rem 0;
+  margin: 0;
+  color: #0f766e;
+  background: linear-gradient(135deg, #ccfbf1 0%, #e0f7f2 100%);
+  padding: 0.95rem 1.25rem;
+  border-radius: 16px;
+}
+
+.page-title:has(+ .page-subtitle) {
+  border-radius: 16px 16px 0 0;
+  padding-bottom: 0.3rem;
 }
 
 .page-subtitle {
   color: var(--p-text-muted-color, #64748b);
   margin: 0 0 1.25rem 0;
   font-size: .9rem;
+}
+
+.page-title + .page-subtitle {
+  color: #0f766e;
+  opacity: 0.8;
+  background: linear-gradient(135deg, #ccfbf1 0%, #e0f7f2 100%);
+  padding: 0 1.25rem 1rem;
+  border-radius: 0 0 16px 16px;
 }
 
 .card {

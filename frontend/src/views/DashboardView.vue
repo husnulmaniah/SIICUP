@@ -423,6 +423,27 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+/* Reset kartu .page-title/.page-subtitle global (lihat style.css) KHUSUS
+   di dalam .dashboard-header -- .dashboard-banner di sini sudah punya
+   kartu gradien soft-nya sendiri, jadi judul & subjudul "Selamat
+   datang..." di dalamnya dikembalikan transparan tanpa padding/radius
+   sendiri, supaya tidak muncul "kartu di dalam kartu". Scoped (data-v-)
+   otomatis lebih spesifik daripada aturan global di style.css tanpa perlu
+   !important -- pola yang sama dipakai untuk override .stat-card di atas. */
+.dashboard-header .page-title,
+.dashboard-header .page-title:has(+ .page-subtitle),
+.dashboard-header .page-title + .page-subtitle {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+  opacity: 1;
+}
+
+.dashboard-header .page-title {
+  color: #0f172a;
+}
+
 @media (max-width: 480px) {
   .dashboard-banner {
     padding: 1rem;
