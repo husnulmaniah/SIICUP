@@ -2715,7 +2715,8 @@ const defaultTab = computed(() => {
       <InputText v-model="setujuiBaNomor" placeholder="Boleh dikosongkan, nomor otomatis di atas akan dipakai" style="width: 100%" />
       <small class="text-muted" style="display: block; margin-top: 0.35rem">
         Hanya isi kalau ingin MENGOREKSI nomor yang sudah otomatis terisi -- cukup ketik nomor urutnya saja, sistem
-        otomatis merangkai jadi "800/{{ setujuiBaNomor || '...' }}/Disdikbud/{bulan romawi berjalan}/{tahun berjalan}".
+        otomatis merangkai jadi "800/{{ setujuiBaNomor || '...' }}/{singkatan unit kerja sekolah}/{bulan romawi
+        berjalan}/{tahun berjalan}".
       </small>
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeSetujuiBaDialog" />

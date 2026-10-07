@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -441,10 +442,36 @@ func listPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db *g
 	utils.Success(w, "ok", out)
 }
 
+// nomorSuratPengajuanBeritaAcaraLengkap merangkai nomor surat LENGKAP khusus
+// Berita Acara Sekolah mandiri ini -- BEDA dari nomorSuratBeritaAcaraLengkap
+// (berita_acara.go, dipakai menu Berita Acara admin langsung, penandatangan
+// Kepala Dinas) dalam SATU hal: segmen "Disdikbud" diganti singkatan Unit
+// Kerja (sekolah) pegawai sendiri, SAMA pola dengan
+// nomorSuratRekomendasiSekolahLengkap (surat_rekomendasi.go) -- karena
+// Berita Acara Sekolah ditandatangani Kepala Sekolah ("Yang Mengetahui"),
+// BUKAN Kepala Dinas, jadi "Disdikbud" tidak relevan di sini. Singkatan
+// diisi manual admin di menu Unit Kerja (models.UnitKerja.Singkatan),
+// tampil "-" kalau belum diisi.
+func nomorSuratPengajuanBeritaAcaraLengkap(urutan string, tglSurat time.Time, singkatanUnitKerja string) string {
+	return fmt.Sprintf("800/%s/%s/%s/%d", urutan, singkatanUnitKerja, romanMonth(tglSurat.Month()), tglSurat.Year())
+}
+
+// singkatanUnitKerjaPegawai: singkatan Unit Kerja (sekolah) pegawai, "-"
+// kalau belum diisi admin -- lihat models.UnitKerja.Singkatan.
+func singkatanUnitKerjaPegawai(pegawai models.Pegawai) string {
+	if pegawai.UnitKerja != nil && pegawai.UnitKerja.Singkatan != nil && strings.TrimSpace(*pegawai.UnitKerja.Singkatan) != "" {
+		return strings.TrimSpace(*pegawai.UnitKerja.Singkatan)
+	}
+	return "-"
+}
+
 // nomorUrutPengajuanBARegex mencocokkan nomor surat LENGKAP hasil
-// nomorSuratBeritaAcaraLengkap (berita_acara.go), mis. "800/1389/Disdikbud/
-// IX/2026" -- grup 1 = nomor urut, grup 2 = tahun.
-var nomorUrutPengajuanBARegex = regexp.MustCompile(`^800/(\d+)/Disdikbud/[IVXLCDM]+/(\d{4})$`)
+// nomorSuratPengajuanBeritaAcaraLengkap di atas, mis. "800/1/SDN-LMR/X/2026"
+// -- grup 1 = nomor urut, grup 2 = tahun. Segmen singkatan Unit Kerja
+// SENGAJA dicocokkan bebas ([^/]+, bisa "-" atau apa pun) karena berbeda-
+// beda per sekolah, bukan string tetap seperti "Disdikbud" pada nomor
+// Berita Acara admin langsung.
+var nomorUrutPengajuanBARegex = regexp.MustCompile(`^800/(\d+)/[^/]+/[IVXLCDM]+/(\d{4})$`)
 
 // nextNomorUrutPengajuanBeritaAcara menghitung nomor urut berikutnya untuk
 // penomoran OTOMATIS Berita Acara Sekolah (diisi begitu atasan/Kepala
@@ -521,7 +548,7 @@ func setujuiPengajuanBeritaAcaraAtasan(w http.ResponseWriter, r *http.Request, d
 			utils.Error(w, http.StatusInternalServerError, "gagal membuat nomor surat otomatis: "+numErr.Error())
 			return
 		}
-		nomorBaru := nomorSuratBeritaAcaraLengkap(urutan, item.TanggalKejadian)
+		nomorBaru := nomorSuratPengajuanBeritaAcaraLengkap(urutan, item.TanggalKejadian, singkatanUnitKerjaPegawai(*item.Pegawai))
 		item.NomorSurat = &nomorBaru
 	}
 	nomor := *item.NomorSurat
@@ -610,19 +637,22 @@ func setujuiPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db
 	// nomorSurat: SUDAH terisi otomatis sejak atasan/Kepala Sekolah menyetujui
 	// (lihat setujuiPengajuanBeritaAcaraAtasan) -- admin tahap akhir di sini
 	// HANYA perlu mengetik nomor urut kalau mau MENGOREKSI/mengubah nomor
-	// yang sudah ada (opsional, SAMA pola mengetik dengan buatBeritaAcara menu
-	// admin, dirangkai otomatis jadi format baku "800/{urutan}/Disdikbud/
-	// {bulan romawi}/{tahun}" lewat nomorSuratBeritaAcaraLengkap di
-	// berita_acara.go, bulan romawi & tahun mengikuti tanggal kejadian). Kalau
-	// field "nomor_surat" dikosongkan, nomor otomatis yang sudah tersimpan di
-	// item.NomorSurat TETAP dipakai, TIDAK dikosongkan (bug lama: form kosong
-	// dulu menghapus nomor otomatis yang sudah ada).
+	// yang sudah ada (opsional), dirangkai otomatis jadi format baku
+	// "800/{urutan}/{singkatan unit kerja sekolah}/{bulan romawi}/{tahun}"
+	// lewat nomorSuratPengajuanBeritaAcaraLengkap di atas (BEDA dari
+	// nomorSuratBeritaAcaraLengkap di berita_acara.go yang dipakai menu
+	// Berita Acara admin langsung -- di sana "Disdikbud" karena
+	// penandatangannya Kepala Dinas, di sini singkatan sekolah karena
+	// penandatangannya Kepala Sekolah). Kalau field "nomor_surat"
+	// dikosongkan, nomor otomatis yang sudah tersimpan di item.NomorSurat
+	// TETAP dipakai, TIDAK dikosongkan (bug lama: form kosong dulu menghapus
+	// nomor otomatis yang sudah ada).
 	nomorSurat := ""
 	if item.NomorSurat != nil {
 		nomorSurat = *item.NomorSurat
 	}
 	if manual := strings.TrimSpace(r.FormValue("nomor_surat")); manual != "" {
-		nomorSurat = nomorSuratBeritaAcaraLengkap(manual, item.TanggalKejadian)
+		nomorSurat = nomorSuratPengajuanBeritaAcaraLengkap(manual, item.TanggalKejadian, singkatanUnitKerjaPegawai(*item.Pegawai))
 	}
 	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomorSurat, true, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
