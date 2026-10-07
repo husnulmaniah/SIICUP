@@ -197,6 +197,7 @@ function formatTanggalBa(v) {
 }
 function statusBaSeverity(status) {
   if (status === 'disetujui') return 'success'
+  if (status === 'ditolak') return 'danger'
   if (status === 'dikembalikan_atasan' || status === 'dikembalikan_admin') return 'danger'
   return 'warn'
 }
@@ -204,6 +205,7 @@ function statusBaLabel(status) {
   if (status === 'menunggu_atasan') return 'Menunggu Persetujuan Anda'
   if (status === 'menunggu_admin') return 'Menunggu Persetujuan Admin'
   if (status === 'disetujui') return 'Disetujui'
+  if (status === 'ditolak') return 'Ditolak Admin'
   if (status === 'dikembalikan_atasan') return 'Dikembalikan (oleh Anda)'
   if (status === 'dikembalikan_admin') return 'Dikembalikan Admin'
   return status

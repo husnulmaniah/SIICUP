@@ -1511,6 +1511,7 @@ const baStatusFilter = ref('menunggu_admin')
 const baStatusOptions = [
   { label: 'Menunggu Persetujuan Admin', value: 'menunggu_admin' },
   { label: 'Disetujui', value: 'disetujui' },
+  { label: 'Ditolak', value: 'ditolak' },
   { label: 'Semua', value: 'semua' },
 ]
 const baSearch = ref('')
@@ -1561,13 +1562,15 @@ function formatTanggalBa(v) {
 }
 function statusBaSeverity(status) {
   if (status === 'disetujui') return 'success'
-  if (status === 'dikembalikan_atasan' || status === 'dikembalikan_admin') return 'danger'
+  if (status === 'ditolak') return 'danger'
+  if (status === 'dikembalikan_atasan' || status === 'dikembalikan_admin') return 'warn'
   return 'warn'
 }
 function statusBaLabel(status) {
   if (status === 'menunggu_atasan') return 'Menunggu Atasan'
   if (status === 'menunggu_admin') return 'Menunggu Admin'
   if (status === 'disetujui') return 'Disetujui'
+  if (status === 'ditolak') return 'Ditolak'
   if (status === 'dikembalikan_atasan') return 'Dikembalikan Atasan'
   if (status === 'dikembalikan_admin') return 'Dikembalikan Admin'
   return status
@@ -1632,6 +1635,45 @@ async function submitKembalikanBa() {
     toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
     submittingKembalikanBa.value = false
+  }
+}
+
+// ------------------------------------------------------------
+// Tolak pengajuan Berita Acara sekolah (tahap akhir) -- PERMANEN, beda dari
+// "kembalikan" di atas yang masih memberi pegawai kesempatan merevisi &
+// mengajukan ulang. Lihat tolakPengajuanBeritaAcaraAdmin di
+// handlers/pengajuan_berita_acara.go.
+// ------------------------------------------------------------
+const tolakBaDialog = ref(false)
+const tolakBaItem = ref(null)
+const tolakBaCatatan = ref('')
+const submittingTolakBa = ref(false)
+function bukaTolakBaDialog(item) {
+  tolakBaItem.value = item
+  tolakBaCatatan.value = ''
+  tolakBaDialog.value = true
+}
+function closeTolakBaDialog() {
+  tolakBaDialog.value = false
+  tolakBaItem.value = null
+}
+async function submitTolakBa() {
+  if (!tolakBaCatatan.value.trim()) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Catatan alasan penolakan wajib diisi', life: 4000 })
+    return
+  }
+  submittingTolakBa.value = true
+  try {
+    const fd = new FormData()
+    fd.append('catatan', tolakBaCatatan.value.trim())
+    const { data } = await http.put(`/pengajuan-berita-acara/${tolakBaItem.value.id}/tolak-admin`, fd)
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    closeTolakBaDialog()
+    await Promise.all([loadPengajuanBaAdmin(), loadJumlahMenungguBa()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    submittingTolakBa.value = false
   }
 }
 
@@ -2285,8 +2327,11 @@ const defaultTab = computed(() => {
       <h3 style="margin-top: 0">Verifikasi Berita Acara Sekolah (Tahap Akhir)</h3>
       <p class="text-muted">
         Pengajuan Berita Acara MANDIRI pegawai sekolah yang SUDAH disetujui atasan langsungnya (lihat menu Arsip
-        Surat pada akun atasan) -- menyetujui di sini membuat absen pegawai otomatis tercatat DD (Dinas Dalam) -
-        Berita Acara DAN menyertakan QR tanda tangan ke PDF-nya. Nomor surat boleh diisi (opsional) saat menyetujui.
+        Surat pada akun atasan) -- nomor surat sudah otomatis terisi sejak atasan/Kepala Sekolah menyetujui, admin
+        tahap akhir di sini bisa Menyetujui (membuat absen pegawai otomatis tercatat DD (Dinas Dalam) - Berita Acara
+        DAN menyertakan QR tanda tangan ke PDF-nya), Menolak (permanen, pegawai tidak bisa mengajukan ulang pengajuan
+        ini), atau Mengembalikan untuk direvisi (pegawai bisa mengedit & mengajukan ulang, langsung ke verifikasi
+        admin lagi tanpa perlu persetujuan atasan ulang).
       </p>
       <div class="rekap-toolbar">
         <IconField class="table-search" style="min-width: 220px; max-width: 320px; flex: 1">
@@ -2322,7 +2367,8 @@ const defaultTab = computed(() => {
             <Button icon="pi pi-eye" size="small" text rounded title="Lihat PDF" @click="previewVerifikasiFile(`/pengajuan-berita-acara/${data.id}/file`, data.nama_file)" />
             <template v-if="data.status === 'menunggu_admin'">
               <Button icon="pi pi-check" size="small" text rounded severity="success" title="Setujui" @click="bukaSetujuiBaDialog(data)" />
-              <Button icon="pi pi-undo" size="small" text rounded severity="danger" title="Kembalikan untuk direvisi" @click="bukaKembalikanBaDialog(data)" />
+              <Button icon="pi pi-times" size="small" text rounded severity="danger" title="Tolak" @click="bukaTolakBaDialog(data)" />
+              <Button icon="pi pi-undo" size="small" text rounded severity="warn" title="Kembalikan untuk direvisi" @click="bukaKembalikanBaDialog(data)" />
             </template>
           </template>
         </Column>
@@ -2662,11 +2708,14 @@ const defaultTab = computed(() => {
         Menyetujui Berita Acara <b>{{ setujuiBaItem?.pegawai?.nama }}</b> tanggal {{ formatTanggalBa(setujuiBaItem?.tanggal_kejadian) }} --
         absen pegawai akan otomatis tercatat DD (Dinas Dalam) - Berita Acara, dan QR tanda tangan akan disertakan ke PDF-nya.
       </p>
-      <div class="field-label">Nomor Urut Surat (opsional)</div>
-      <InputText v-model="setujuiBaNomor" placeholder="Boleh dikosongkan, cth: 483.1" style="width: 100%" />
+      <p class="text-muted" v-if="setujuiBaItem?.nomor_surat">
+        Nomor surat sudah otomatis terisi sejak atasan/Kepala Sekolah menyetujui: <b>{{ setujuiBaItem?.nomor_surat }}</b>
+      </p>
+      <div class="field-label">Ubah Nomor Urut Surat (opsional)</div>
+      <InputText v-model="setujuiBaNomor" placeholder="Boleh dikosongkan, nomor otomatis di atas akan dipakai" style="width: 100%" />
       <small class="text-muted" style="display: block; margin-top: 0.35rem">
-        Cukup isi nomor urutnya saja -- sistem otomatis merangkai jadi
-        "800/{{ setujuiBaNomor || '...' }}/Disdikbud/{bulan romawi berjalan}/{tahun berjalan}".
+        Hanya isi kalau ingin MENGOREKSI nomor yang sudah otomatis terisi -- cukup ketik nomor urutnya saja, sistem
+        otomatis merangkai jadi "800/{{ setujuiBaNomor || '...' }}/Disdikbud/{bulan romawi berjalan}/{tahun berjalan}".
       </small>
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeSetujuiBaDialog" />
@@ -2691,7 +2740,29 @@ const defaultTab = computed(() => {
       <Textarea v-model="kembalikanBaCatatan" rows="3" style="width: 100%" autofocus />
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="closeKembalikanBaDialog" />
-        <Button label="Kembalikan" icon="pi pi-undo" severity="danger" :loading="submittingKembalikanBa" @click="submitKembalikanBa" />
+        <Button label="Kembalikan" icon="pi pi-undo" severity="warn" :loading="submittingKembalikanBa" @click="submitKembalikanBa" />
+      </template>
+    </Dialog>
+
+    <!-- ================= dialog tolak pengajuan Berita Acara sekolah (tahap akhir) ================= -->
+    <Dialog
+      v-model:visible="tolakBaDialog"
+      modal
+      header="Tolak Berita Acara"
+      :style="{ width: '440px' }"
+      :breakpoints="{ '640px': '94vw' }"
+      @hide="closeTolakBaDialog"
+    >
+      <p class="text-muted">
+        Pengajuan dari <b>{{ tolakBaItem?.pegawai?.nama }}</b> akan DITOLAK secara permanen -- pegawai TIDAK bisa
+        mengedit atau mengajukan ulang pengajuan ini, tapi tetap bisa mengajukan Berita Acara baru untuk tanggal yang
+        sama kalau diperlukan. Jelaskan alasan penolakan.
+      </p>
+      <div class="field-label">Catatan Alasan Penolakan (wajib)</div>
+      <Textarea v-model="tolakBaCatatan" rows="3" style="width: 100%" autofocus />
+      <template #footer>
+        <Button label="Batal" severity="secondary" text @click="closeTolakBaDialog" />
+        <Button label="Tolak" icon="pi pi-times" severity="danger" :loading="submittingTolakBa" @click="submitTolakBa" />
       </template>
     </Dialog>
 

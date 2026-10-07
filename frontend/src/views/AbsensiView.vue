@@ -653,6 +653,7 @@ function statusBaBisaEdit(status) {
 }
 function statusBaSeverity(status) {
   if (status === 'disetujui') return 'success'
+  if (status === 'ditolak') return 'danger'
   if (statusBaBisaEdit(status)) return 'danger'
   return 'warn'
 }
@@ -660,13 +661,14 @@ function statusBaLabel(status) {
   if (status === 'menunggu_atasan') return 'Menunggu Persetujuan Atasan'
   if (status === 'menunggu_admin') return 'Menunggu Persetujuan Admin'
   if (status === 'disetujui') return 'Disetujui'
+  if (status === 'ditolak') return 'Ditolak'
   if (status === 'dikembalikan_atasan') return 'Dikembalikan Atasan (perlu revisi)'
   if (status === 'dikembalikan_admin') return 'Dikembalikan Admin (perlu revisi)'
   return status
 }
 function catatanBaTerkini(item) {
   if (item.status === 'dikembalikan_atasan') return item.catatan_atasan || '-'
-  if (item.status === 'dikembalikan_admin') return item.catatan_admin || '-'
+  if (item.status === 'dikembalikan_admin' || item.status === 'ditolak') return item.catatan_admin || '-'
   return '-'
 }
 

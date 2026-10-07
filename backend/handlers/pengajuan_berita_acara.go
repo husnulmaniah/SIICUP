@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,17 +30,22 @@ import (
 //     atasan pegawai) TANPA QR -- bisa dilihat pegawai & atasan sebagai
 //     draft/preview sebelum disetujui.
 //  2. Atasan langsung menyetujui -> status "menunggu_admin" (PDF digenerate
-//     ulang, MASIH tanpa QR) ATAU mengembalikan -> "dikembalikan_atasan"
-//     (pegawai edit & ajukan ulang, balik ke "menunggu_atasan").
+//     ulang, MASIH tanpa QR, DAN nomor surat OTOMATIS dibuat & diisi, lihat
+//     nextNomorUrutPengajuanBeritaAcara) ATAU mengembalikan ->
+//     "dikembalikan_atasan" (pegawai edit & ajukan ulang, balik ke
+//     "menunggu_atasan").
 //  3. Administrator/admin/akun ber-flag IsAdminAbsensi ATAU IsAdminVerifikasi
 //     menyetujui -> status "disetujui": PDF digenerate ULANG dengan QR
 //     disertakan, DAN baris AbsensiDokumen (jenis "berita_acara") otomatis
 //     dibuat/diperbarui untuk tanggal kejadian ini -- inilah yang membuat
 //     tanggal itu otomatis tercatat DD (Dinas Dalam) - Berita Acara di Rekap
 //     Absen pegawai tsb, PERSIS seperti Berita Acara yang dibuat admin
-//     langsung. ATAU mengembalikan -> "dikembalikan_admin" (pegawai edit &
-//     ajukan ulang, balik ke "menunggu_atasan" lagi -- supaya atasan ikut
-//     meninjau ulang perubahan apa pun).
+//     langsung. ATAU menolak -> "ditolak" (status AKHIR/permanen, TIDAK bisa
+//     diedit/diajukan ulang pegawai, lihat tolakPengajuanBeritaAcaraAdmin).
+//     ATAU mengembalikan -> "dikembalikan_admin" (pegawai edit & ajukan ulang
+//     LANGSUNG diteruskan lagi ke "menunggu_admin", TIDAK perlu persetujuan
+//     atasan lagi, karena atasan sudah menyetujui & nomor surat otomatis
+//     sudah ada sebelumnya).
 
 // pengajuanBeritaAcaraOut: DTO respons API.
 type pengajuanBeritaAcaraOut struct {
@@ -147,8 +154,10 @@ func buildPengajuanBeritaAcaraPDF(pegawai models.Pegawai, tglKejadian time.Time,
 // tanggalPengajuanBeritaAcaraValid memvalidasi tanggal kejadian yang
 // diajukan: hari kerja pegawai tsb, bukan tanggal merah, belum ada absen
 // masuk sungguhan, belum ada AbsensiDokumen, dan belum ada pengajuan Berita
-// Acara LAIN yang masih berjalan (belum "disetujui" dikembalikan dianggap
-// sudah tidak berjalan) untuk tanggal yang sama -- memakai basis pengecekan
+// Acara LAIN yang masih berjalan (status "disetujui" ATAU "ditolak" dianggap
+// SUDAH SELESAI/tidak berjalan lagi -- "ditolak" bersifat akhir & permanen,
+// jadi TIDAK boleh menghalangi pegawai mengajukan Berita Acara baru untuk
+// tanggal yang sama) untuk tanggal yang sama -- memakai basis pengecekan
 // yang SAMA dengan tanggalTerlewatValid (pengajuan_surat_kolektif.go) supaya
 // definisinya konsisten di seluruh aplikasi, ditambah pengecekan KHUSUS
 // terhadap tabel PengajuanBeritaAcara sendiri.
@@ -157,7 +166,8 @@ func tanggalPengajuanBeritaAcaraValid(db *gorm.DB, pegawai models.Pegawai, tangg
 		return false, reason
 	}
 	var rows []models.PengajuanBeritaAcara
-	db.Where("id_pegawai = ? AND tanggal_kejadian = ? AND status != ?", pegawai.ID, tanggal, models.PengajuanBeritaAcaraDisetujui).Find(&rows)
+	db.Where("id_pegawai = ? AND tanggal_kejadian = ? AND status NOT IN ?", pegawai.ID, tanggal,
+		[]string{models.PengajuanBeritaAcaraDisetujui, models.PengajuanBeritaAcaraDitolak}).Find(&rows)
 	for _, row := range rows {
 		if row.ID == excludeID {
 			continue
@@ -314,7 +324,21 @@ func updatePengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm
 		item.BuktiDukungContentType = buktiContentType
 	}
 
-	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, "", false, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
+	// statusSebelumnya menentukan tujuan pengajuan ulang: KHUSUS yang
+	// dikembalikan ADMIN (tahap akhir), atasan SUDAH menyetujui sebelumnya --
+	// jadi pengajuan ulang LANGSUNG diteruskan lagi ke verifikasi admin (skip
+	// atasan), nomor surat otomatis yang sudah ada tetap dipakai, sesuai
+	// permintaan pengguna. Yang dikembalikan ATASAN tetap balik ke menunggu
+	// persetujuan atasan seperti semula (nomor surat belum pernah dibuat pada
+	// tahap ini, lihat setujuiPengajuanBeritaAcaraAtasan).
+	statusSebelumnya := item.Status
+	langsungKeAdmin := statusSebelumnya == models.PengajuanBeritaAcaraDikembalikanAdmin
+
+	nomorUntukPdf := ""
+	if langsungKeAdmin && item.NomorSurat != nil {
+		nomorUntukPdf = *item.NomorSurat
+	}
+	pdfBytes, err := buildPengajuanBeritaAcaraPDF(pegawai, tglKejadian, alasan, nomorUntukPdf, false, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
 		return
@@ -324,19 +348,30 @@ func updatePengajuanBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm
 	item.Alasan = alasan
 	item.NamaFile = generateBeritaAcaraNamaFile(tglKejadian)
 	item.File = pdfBytes
-	item.Status = models.PengajuanBeritaAcaraMenungguAtasan
-	item.CatatanAtasan = ""
-	item.IDAtasanApprove = nil
-	item.TglAtasanApprove = nil
-	item.CatatanAdmin = ""
-	item.IDAdminApprove = nil
-	item.TglAdminApprove = nil
-	item.NomorSurat = nil
+	if langsungKeAdmin {
+		item.Status = models.PengajuanBeritaAcaraMenungguAdmin
+		item.CatatanAdmin = ""
+		item.IDAdminApprove = nil
+		item.TglAdminApprove = nil
+	} else {
+		item.Status = models.PengajuanBeritaAcaraMenungguAtasan
+		item.CatatanAtasan = ""
+		item.IDAtasanApprove = nil
+		item.TglAtasanApprove = nil
+		item.CatatanAdmin = ""
+		item.IDAdminApprove = nil
+		item.TglAdminApprove = nil
+		item.NomorSurat = nil
+	}
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan pengajuan: "+err.Error())
 		return
 	}
-	utils.Success(w, "pengajuan berhasil diperbarui & dikirim ulang, menunggu persetujuan atasan", nil)
+	pesan := "pengajuan berhasil diperbarui & dikirim ulang, menunggu persetujuan atasan"
+	if langsungKeAdmin {
+		pesan = "pengajuan berhasil diperbarui & dikirim ulang, langsung diteruskan ke verifikasi administrator/admin (tidak perlu persetujuan atasan lagi)"
+	}
+	utils.Success(w, pesan, nil)
 }
 
 // listPengajuanBeritaAcaraSaya menangani GET
@@ -406,10 +441,55 @@ func listPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db *g
 	utils.Success(w, "ok", out)
 }
 
+// nomorUrutPengajuanBARegex mencocokkan nomor surat LENGKAP hasil
+// nomorSuratBeritaAcaraLengkap (berita_acara.go), mis. "800/1389/Disdikbud/
+// IX/2026" -- grup 1 = nomor urut, grup 2 = tahun.
+var nomorUrutPengajuanBARegex = regexp.MustCompile(`^800/(\d+)/Disdikbud/[IVXLCDM]+/(\d{4})$`)
+
+// nextNomorUrutPengajuanBeritaAcara menghitung nomor urut berikutnya untuk
+// penomoran OTOMATIS Berita Acara Sekolah (diisi begitu atasan/Kepala
+// Sekolah menyetujui tahap pertama, lihat setujuiPengajuanBeritaAcaraAtasan),
+// sesuai permintaan pengguna ("kepala sekolah menyetujui dan memuat no
+// otomatis"). SENGAJA memakai urutan TERPISAH dari nomor Berita Acara yang
+// diinput admin langsung lewat menu Berita Acara (AbsensiDokumen.Nomor,
+// bebas format non-numerik seperti "483.1" -- tidak aman diparse sebagai
+// angka), supaya penomoran di sini selalu bisa diparse murni sebagai angka:
+// cari nomor urut TERBESAR pada PengajuanBeritaAcara.NomorSurat tahun yang
+// sama (mengikuti tahun tanggal kejadian, basis yang SAMA dipakai
+// nomorSuratBeritaAcaraLengkap di sini), lalu +1.
+func nextNomorUrutPengajuanBeritaAcara(db *gorm.DB, tahun int) (string, error) {
+	var nomorList []string
+	if err := db.Model(&models.PengajuanBeritaAcara{}).
+		Where("nomor_surat IS NOT NULL").
+		Pluck("nomor_surat", &nomorList).Error; err != nil {
+		return "", err
+	}
+	maxUrut := 0
+	for _, s := range nomorList {
+		m := nomorUrutPengajuanBARegex.FindStringSubmatch(s)
+		if m == nil {
+			continue
+		}
+		y, err := strconv.Atoi(m[2])
+		if err != nil || y != tahun {
+			continue
+		}
+		u, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		if u > maxUrut {
+			maxUrut = u
+		}
+	}
+	return strconv.Itoa(maxUrut + 1), nil
+}
+
 // setujuiPengajuanBeritaAcaraAtasan menangani PUT
 // /api/pengajuan-berita-acara/{id}/setujui-atasan -- atasan langsung pegawai
 // menyetujui tahap pertama (status -> "menunggu_admin", PDF digenerate ulang
-// MASIH tanpa QR).
+// MASIH tanpa QR, DAN nomor surat OTOMATIS dibuat & diisi kalau belum ada,
+// lihat nextNomorUrutPengajuanBeritaAcara).
 func setujuiPengajuanBeritaAcaraAtasan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
@@ -430,10 +510,21 @@ func setujuiPengajuanBeritaAcaraAtasan(w http.ResponseWriter, r *http.Request, d
 		return
 	}
 
-	nomor := ""
-	if item.NomorSurat != nil {
-		nomor = *item.NomorSurat
+	// Nomor surat OTOMATIS: begitu atasan/Kepala Sekolah menyetujui, sistem
+	// langsung merangkai nomor urut berikutnya TANPA perlu diketik siapa pun.
+	// Kalau item.NomorSurat SUDAH terisi (semestinya tidak terjadi normal di
+	// endpoint ini, tapi dijaga untuk keamanan), nomor LAMA dipertahankan,
+	// TIDAK dibuat ulang.
+	if item.NomorSurat == nil {
+		urutan, numErr := nextNomorUrutPengajuanBeritaAcara(db, item.TanggalKejadian.Year())
+		if numErr != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal membuat nomor surat otomatis: "+numErr.Error())
+			return
+		}
+		nomorBaru := nomorSuratBeritaAcaraLengkap(urutan, item.TanggalKejadian)
+		item.NomorSurat = &nomorBaru
 	}
+	nomor := *item.NomorSurat
 	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomor, false, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
@@ -516,14 +607,22 @@ func setujuiPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db
 		return
 	}
 
-	// nomorSurat: SAMA pola dengan buatBeritaAcara (menu admin) -- admin HANYA
-	// mengetik bagian nomor urutnya saja, dirangkai otomatis jadi format baku
-	// "800/{urutan}/Disdikbud/{bulan romawi}/{tahun}" (nomorSuratBeritaAcaraLengkap
-	// di berita_acara.go), bulan romawi & tahun mengikuti tanggal kejadian
-	// (tidak ada field "tanggal surat" terpisah pada alur pengajuan mandiri ini).
-	nomorSurat := strings.TrimSpace(r.FormValue("nomor_surat"))
-	if nomorSurat != "" {
-		nomorSurat = nomorSuratBeritaAcaraLengkap(nomorSurat, item.TanggalKejadian)
+	// nomorSurat: SUDAH terisi otomatis sejak atasan/Kepala Sekolah menyetujui
+	// (lihat setujuiPengajuanBeritaAcaraAtasan) -- admin tahap akhir di sini
+	// HANYA perlu mengetik nomor urut kalau mau MENGOREKSI/mengubah nomor
+	// yang sudah ada (opsional, SAMA pola mengetik dengan buatBeritaAcara menu
+	// admin, dirangkai otomatis jadi format baku "800/{urutan}/Disdikbud/
+	// {bulan romawi}/{tahun}" lewat nomorSuratBeritaAcaraLengkap di
+	// berita_acara.go, bulan romawi & tahun mengikuti tanggal kejadian). Kalau
+	// field "nomor_surat" dikosongkan, nomor otomatis yang sudah tersimpan di
+	// item.NomorSurat TETAP dipakai, TIDAK dikosongkan (bug lama: form kosong
+	// dulu menghapus nomor otomatis yang sudah ada).
+	nomorSurat := ""
+	if item.NomorSurat != nil {
+		nomorSurat = *item.NomorSurat
+	}
+	if manual := strings.TrimSpace(r.FormValue("nomor_surat")); manual != "" {
+		nomorSurat = nomorSuratBeritaAcaraLengkap(manual, item.TanggalKejadian)
 	}
 	pdfBytes, err := buildPengajuanBeritaAcaraPDF(*item.Pegawai, item.TanggalKejadian, item.Alasan, nomorSurat, true, item.BuktiDukungFile, item.BuktiDukungContentType, item.BuktiDukungNamaFile)
 	if err != nil {
@@ -623,6 +722,46 @@ func kembalikanPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	utils.Success(w, "pengajuan dikembalikan ke pegawai untuk direvisi", nil)
+}
+
+// tolakPengajuanBeritaAcaraAdmin menangani PUT
+// /api/pengajuan-berita-acara/{id}/tolak-admin -- tahap akhir MENOLAK
+// pengajuan secara PERMANEN (beda dari "kembalikan" yang masih memberi
+// pegawai kesempatan merevisi & mengajukan ulang), sesuai permintaan
+// pengguna ("admin bisa menyetujui, menolak dan mengembalikan BA"). Catatan
+// alasan penolakan wajib diisi, TIDAK ada AbsensiDokumen yang dibuat/
+// diperbarui, dan status "ditolak" ini bersifat akhir: pegawai TIDAK bisa
+// mengedit/mengajukan ulang pengajuan ini (lihat updatePengajuanBeritaAcara
+// yang hanya menerima status "dikembalikan_atasan"/"dikembalikan_admin"),
+// tapi TIDAK lagi menghalangi pegawai mengajukan Berita Acara baru untuk
+// tanggal yang sama (lihat tanggalPengajuanBeritaAcaraValid).
+func tolakPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.PengajuanBeritaAcara
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "pengajuan tidak ditemukan")
+		return
+	}
+	if item.Status != models.PengajuanBeritaAcaraMenungguAdmin {
+		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya, atau belum disetujui atasan (status: "+item.Status+")")
+		return
+	}
+	catatan := strings.TrimSpace(r.FormValue("catatan"))
+	if catatan == "" {
+		utils.Error(w, http.StatusBadRequest, "catatan wajib diisi supaya pegawai tahu alasan penolakan")
+		return
+	}
+	now := absensiNow()
+	item.Status = models.PengajuanBeritaAcaraDitolak
+	item.CatatanAdmin = catatan
+	item.IDAdminApprove = &claims.UserID
+	item.TglAdminApprove = &now
+	if err := db.Save(&item).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan: "+err.Error())
+		return
+	}
+	utils.Success(w, "pengajuan Berita Acara ditolak", nil)
 }
 
 // canAccessPengajuanBeritaAcara: pegawai pemilik, atasan langsungnya, atau
@@ -746,6 +885,7 @@ func RegisterPengajuanBeritaAcaraRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("GET /api/pengajuan-berita-acara", final(func(w http.ResponseWriter, r *http.Request) { listPengajuanBeritaAcaraAdmin(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-berita-acara/{id}/setujui-admin", final(func(w http.ResponseWriter, r *http.Request) { setujuiPengajuanBeritaAcaraAdmin(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-berita-acara/{id}/kembalikan-admin", final(func(w http.ResponseWriter, r *http.Request) { kembalikanPengajuanBeritaAcaraAdmin(w, r, db) }))
+	mux.Handle("PUT /api/pengajuan-berita-acara/{id}/tolak-admin", final(func(w http.ResponseWriter, r *http.Request) { tolakPengajuanBeritaAcaraAdmin(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-berita-acara/{id}/file", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadPengajuanBeritaAcara(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-berita-acara/{id}/bukti-dukung", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadPengajuanBeritaAcaraBuktiDukung(w, r, db) }))
 }

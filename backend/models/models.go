@@ -1327,28 +1327,39 @@ func (p *PengajuanSuratKolektif) SetTanggalList(tanggal []string) {
 // satu tahap), sesuai permintaan pengguna: pegawai mengajukan -> ATASAN
 // langsungnya (Pegawai.IDAtasan, Kepala Sekolah/dst sesuai unit kerja)
 // menyetujui/mengembalikan lebih dulu -> BARU administrator/admin/akun
-// ber-flag IsAdminAbsensi ATAU IsAdminVerifikasi menyetujui/mengembalikan
-// tahap akhir -- baru pada tahap akhir inilah baris AbsensiDokumen (DD --
-// Dinas Dalam) otomatis dibuat & QR tanda tangan disertakan di PDF.
+// ber-flag IsAdminAbsensi ATAU IsAdminVerifikasi menyetujui/menolak/
+// mengembalikan tahap akhir -- baru pada tahap akhir inilah baris
+// AbsensiDokumen (DD -- Dinas Dalam) otomatis dibuat & QR tanda tangan
+// disertakan di PDF.
 //
 //   - Menunggu diajukan -> MenungguAtasan.
 //   - Atasan menyetujui -> MenungguAdmin (PDF di-generate ulang, TAPI masih
 //     TANPA QR -- QR baru muncul setelah tahap akhir selesai, lihat
-//     DisetujuiAdmin di bawah).
+//     Disetujui di bawah) -- NomorSurat OTOMATIS dibuat & diisi pada langkah
+//     ini (lihat nextNomorUrutPengajuanBeritaAcara di
+//     handlers/pengajuan_berita_acara.go), TANPA perlu diketik siapa pun.
 //   - Atasan mengembalikan -> DikembalikanAtasan (pegawai bisa edit &
 //     mengajukan ulang, balik ke MenungguAtasan -- lihat
 //     updatePengajuanBeritaAcara).
 //   - Admin tahap akhir menyetujui -> Disetujui (PDF di-generate ulang DENGAN
 //     QR, baris AbsensiDokumen jenis "berita_acara" otomatis dibuat/
-//     diperbarui untuk tanggal kejadian ini).
+//     diperbarui untuk tanggal kejadian ini; NomorSurat otomatis dari tahap
+//     atasan TETAP dipakai kecuali admin mengoreksinya manual).
+//   - Admin tahap akhir MENOLAK -> Ditolak, status AKHIR/permanen -- TIDAK
+//     bisa diedit/diajukan ulang pegawai (beda dari "mengembalikan" di bawah
+//     yang masih memberi pegawai kesempatan merevisi), dan TIDAK lagi
+//     menghalangi pegawai mengajukan Berita Acara baru untuk tanggal yang
+//     sama (lihat tanggalPengajuanBeritaAcaraValid).
 //   - Admin tahap akhir mengembalikan -> DikembalikanAdmin (pegawai bisa edit
-//     & mengajukan ulang -- SENGAJA balik ke MenungguAtasan lagi, BUKAN
-//     langsung ke MenungguAdmin, supaya atasan ikut meninjau ulang kalau ada
-//     perubahan data setelah dikembalikan admin).
+//     & mengajukan ulang -- LANGSUNG diteruskan lagi ke verifikasi admin
+//     (MenungguAdmin), TIDAK perlu persetujuan atasan lagi, karena atasan
+//     sudah menyetujui & NomorSurat otomatis sudah ada sebelumnya -- lihat
+//     updatePengajuanBeritaAcara).
 const (
 	PengajuanBeritaAcaraMenungguAtasan     = "menunggu_atasan"
 	PengajuanBeritaAcaraMenungguAdmin      = "menunggu_admin"
 	PengajuanBeritaAcaraDisetujui          = "disetujui"
+	PengajuanBeritaAcaraDitolak            = "ditolak"
 	PengajuanBeritaAcaraDikembalikanAtasan = "dikembalikan_atasan"
 	PengajuanBeritaAcaraDikembalikanAdmin  = "dikembalikan_admin"
 )
@@ -1374,9 +1385,11 @@ const (
 //     akhir menyetujui/mengembalikan (User, BUKAN Pegawai -- sama seperti
 //     IDVerifikator pada PengajuanSuratKolektif, karena yang bertindak akun
 //     administrator/admin, bukan pegawai per se).
-//   - NomorSurat: opsional, boleh diisi admin tahap akhir saat menyetujui
-//     (kalau tidak diisi, dicetak "-" sama seperti Berita Acara admin yang
-//     nomornya dikosongkan).
+//   - NomorSurat: diisi OTOMATIS oleh sistem begitu atasan/Kepala Sekolah
+//     menyetujui tahap pertama (lihat setujuiPengajuanBeritaAcaraAtasan &
+//     nextNomorUrutPengajuanBeritaAcara di handlers/pengajuan_berita_acara.go)
+//     -- admin tahap akhir boleh mengoreksinya manual saat menyetujui kalau
+//     memang perlu, tapi TIDAK wajib lagi.
 type PengajuanBeritaAcara struct {
 	ID              uint      `json:"id" gorm:"primaryKey"`
 	IDPegawai       uint      `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
