@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -101,6 +102,27 @@ func absensiManualInputHandler(w http.ResponseWriter, r *http.Request, db *gorm.
 
 	var existing models.Absensi
 	found := db.Where("id_pegawai = ? AND tanggal = ?", idPegawai, tanggal).First(&existing).Error == nil
+
+	// Lindungi absen ASLI (sudah absen masuk & pulang sungguhan, lihat
+	// absensiDianggapHadir di absensi.go) dari tertimpa lewat form ini --
+	// permintaan pengguna: "jika nama pegawai telah melakukan absensi
+	// masuk dan absensi pulang walaupun namanya di input maka absensi
+	// masuk dan absensi pulang tidak akan tertimpa", SAMA aturan yang
+	// sudah berlaku untuk input Berita Acara/Surat Tugas/Surat Kolektif
+	// (lihat buatBeritaAcara, updateBeritaAcara & inputAbsensiDokumenKolektif)
+	// -- supaya konsisten di SEMUA jalur yang bisa menimpa data absen.
+	// Baris TAP (absen masuk tanpa absen pulang, bukan dinas dalam, tanggal
+	// sudah lewat) TETAP dianggap "belum hadir" oleh absensiDianggapHadir,
+	// jadi tetap boleh dilengkapi/diperbaiki lewat form ini -- hanya baris
+	// yang SUDAH benar-benar hadir penuh yang ditolak di sini. Kalau admin
+	// memang harus mengganti absen asli ini, hapus dulu lewat tombol Hapus
+	// (DELETE /absensi/manual/{id}) sebelum menginput ulang.
+	if found && absensiDianggapHadir(existing) {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf(
+			"%s sudah memiliki absen masuk dan pulang (hadir) pada tanggal ini -- data absen asli tidak bisa ditimpa lewat input manual. Hapus dulu absen yang ada (tombol Hapus) kalau memang harus diganti.",
+			pegawai.Nama))
+		return
+	}
 
 	if !found {
 		existing = models.Absensi{

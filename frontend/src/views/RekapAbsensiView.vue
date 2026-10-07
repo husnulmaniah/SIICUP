@@ -657,6 +657,17 @@ const manualAbsenFotoPulangInput = ref(null)
 const manualAbsenNamaPegawai = ref('')
 const manualAbsenAdaFotoMasuk = ref(false)
 const manualAbsenAdaFotoPulang = ref(false)
+// manualAbsenHadirPenuhSaatDibuka: true kalau baris yang dibuka SUDAH punya
+// jam masuk & jam pulang SEBELUM dialog ini dibuka (lihat bukaManualAbsenEdit
+// di bawah) -- dipakai untuk peringatan dini & menonaktifkan tombol Simpan
+// di SISI FRONTEND, sebelum sempat dikirim. Backend (absensiManualInputHandler
+// di handlers/absensi_manual.go, lewat absensiDianggapHadir) adalah sumber
+// kebenaran sebenarnya & akan menolak submit ini juga walau tombolnya
+// berhasil diklik (mis. dinas dalam yang tidak terdeteksi di sini) --
+// permintaan pengguna: pegawai yang sudah absen masuk & pulang tidak boleh
+// tertimpa lewat input manual, SAMA aturan yang berlaku untuk Berita Acara/
+// Surat Kolektif.
+const manualAbsenHadirPenuhSaatDibuka = ref(false)
 
 function resetManualAbsenFoto() {
   manualAbsenFotoMasuk.value = null
@@ -672,6 +683,7 @@ function bukaManualAbsenEdit(row) {
   manualAbsenForm.jam_pulang = row.jam_pulang ? formatJam(row.jam_pulang) : ''
   manualAbsenAdaFotoMasuk.value = !!row.jam_masuk
   manualAbsenAdaFotoPulang.value = !!row.jam_pulang
+  manualAbsenHadirPenuhSaatDibuka.value = !!row.jam_masuk && !!row.jam_pulang
   resetManualAbsenFoto()
   manualAbsenDialog.value = true
 }
@@ -685,6 +697,7 @@ function bukaManualAbsenTambah(tglKey) {
   manualAbsenForm.jam_pulang = ''
   manualAbsenAdaFotoMasuk.value = false
   manualAbsenAdaFotoPulang.value = false
+  manualAbsenHadirPenuhSaatDibuka.value = false
   resetManualAbsenFoto()
   manualAbsenDialog.value = true
 }
@@ -710,6 +723,15 @@ const JAM_HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/
 
 async function submitManualAbsen() {
   if (!manualAbsenForm.id_pegawai || !manualAbsenForm.tanggal) return
+  if (manualAbsenHadirPenuhSaatDibuka.value) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Tidak bisa disimpan',
+      detail: 'Pegawai ini sudah memiliki absen masuk & pulang (hadir) pada tanggal ini -- data absen asli tidak bisa ditimpa lewat input manual.',
+      life: 6000,
+    })
+    return
+  }
   if (!manualAbsenForm.jam_masuk && !manualAbsenForm.jam_pulang) {
     toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Isi minimal salah satu: jam masuk atau jam pulang', life: 4000 })
     return
@@ -2651,14 +2673,23 @@ const defaultTab = computed(() => {
           </div>
         </div>
 
-        <Message severity="info" :closable="false">
+        <Message v-if="manualAbsenHadirPenuhSaatDibuka" severity="warn" :closable="false">
+          Pegawai ini sudah memiliki absen masuk &amp; pulang (hadir) pada tanggal ini -- data absen asli tidak bisa ditimpa lewat input manual. Hapus dulu lewat tombol Hapus kalau memang harus diganti.
+        </Message>
+        <Message v-else severity="info" :closable="false">
           Isi minimal salah satu jam (masuk/pulang). Foto bersifat opsional -- kalau tidak dipilih, foto yang sudah tersimpan (kalau ada) tidak akan diubah.
         </Message>
       </div>
 
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="closeManualAbsenDialog" />
-        <Button label="Simpan" icon="pi pi-save" :loading="manualAbsenSubmitting" @click="submitManualAbsen" />
+        <Button
+          label="Simpan"
+          icon="pi pi-save"
+          :loading="manualAbsenSubmitting"
+          :disabled="manualAbsenHadirPenuhSaatDibuka"
+          @click="submitManualAbsen"
+        />
       </template>
     </Dialog>
 
