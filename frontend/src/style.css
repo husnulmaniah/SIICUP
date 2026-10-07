@@ -236,7 +236,9 @@ a {
   background: var(--p-surface-50, #f8fafc) !important;
 }
 
-/* Dropdown "entries per page" custom di pojok kiri atas tabel */
+/* Dropdown "entries per page" custom di pojok kiri atas tabel -- pil lembut
+   dengan border tipis & transisi fokus teal, serasi dengan search box dan
+   tombol Menu di sampingnya. */
 .entries-picker {
   display: flex;
   flex-direction: column;
@@ -253,35 +255,124 @@ a {
 .entries-picker .p-select {
   min-width: 88px;
   border-radius: 999px;
+  border-color: var(--p-surface-200, #e2e8f0);
+  background: var(--p-surface-50, #f8fafc);
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
 
-/* Search box model pil, ikon di sisi kanan */
+.entries-picker .p-select:not(.p-disabled):hover {
+  border-color: #5eead4;
+}
+
+.entries-picker .p-select.p-focus {
+  background: var(--p-content-background, #fff);
+  border-color: #0d9488;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, .14);
+}
+
+/* Search box model pil, ikon di sisi kanan, highlight teal lembut saat fokus */
 .table-search .p-inputtext {
   border-radius: 999px;
   background: var(--p-surface-50, #f8fafc);
+  border-color: var(--p-surface-200, #e2e8f0);
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.table-search .p-inputtext:hover {
+  border-color: #5eead4;
 }
 
 .table-search .p-inputtext:focus {
   background: var(--p-content-background, #fff);
+  border-color: #0d9488;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, .14);
 }
 
-/* Kolom Aksi -- tombol bulat/rounded solid kecil berwarna, ikon putih */
+.table-search .p-inputicon {
+  color: var(--p-text-muted-color, #94a3b8);
+}
+
+/* ============================================================
+   Kolom Aksi -- diubah dari tombol bulat SOLID berwarna (ikon putih,
+   flat) menjadi tombol bulat PASTEL lembut: latar tint lembut + ikon
+   berwarna, serasi dengan palet teal-pastel yang sudah dipakai di
+   Dashboard/sidebar/kartu judul halaman. Hover memberi efek "terangkat"
+   (lift halus + shadow berwarna) supaya tetap terasa interaktif & modern
+   walau tidak lagi solid.
+
+   PrimeVue 4.5.4 menerapkan warna severity lewat ATRIBUT DOM
+   data-p-severity="info|success|warn|..." (bukan class p-button-info dst),
+   jadi override per-warna di sini pakai selector atribut. border-radius
+   dipaksa !important karena ikon-only + rounded di PrimeVue menghasilkan
+   rule bawaan `.p-button-icon-only.p-button-rounded{border-radius:50%}`
+   dengan spesifisitas yang sama (2 class) -- !important memastikan ukuran
+   & radius kita yang menang terlepas dari urutan pemuatan stylesheet. ============================================================ */
 .table-actions {
   display: flex;
-  gap: .4rem;
+  gap: .5rem;
 }
 
 .table-action-btn.p-button {
-  width: 2.15rem;
-  height: 2.15rem;
-  border-radius: 8px;
+  width: 2.25rem !important;
+  height: 2.25rem !important;
+  border-radius: 50% !important;
+  border: 1px solid transparent;
+  box-shadow: none;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
 }
 
 .table-action-btn .p-button-icon {
-  font-size: .8rem;
+  font-size: .82rem;
 }
 
-/* Paginator bulat, teks "Showing..." didorong ke kiri */
+.table-action-btn.p-button:not(:disabled):hover {
+  transform: translateY(-2px);
+}
+
+/* Biru lembut -- "Lihat profil" */
+.table-action-btn.p-button[data-p-severity="info"] {
+  background: #e0f2fe;
+  border-color: #bae6fd;
+  color: #0369a1;
+}
+
+.table-action-btn.p-button[data-p-severity="info"]:not(:disabled):hover {
+  background: #bae6fd;
+  border-color: #7dd3fc;
+  color: #0369a1;
+  box-shadow: 0 6px 14px -6px rgba(3, 105, 161, .45);
+}
+
+/* Teal lembut -- "Edit", serasi dengan warna utama aplikasi */
+.table-action-btn.p-button[data-p-severity="success"] {
+  background: #ccfbf1;
+  border-color: #99f6e4;
+  color: #0f766e;
+}
+
+.table-action-btn.p-button[data-p-severity="success"]:not(:disabled):hover {
+  background: #99f6e4;
+  border-color: #5eead4;
+  color: #0f766e;
+  box-shadow: 0 6px 14px -6px rgba(15, 118, 110, .45);
+}
+
+/* Oranye lembut -- "Hapus" */
+.table-action-btn.p-button[data-p-severity="warn"] {
+  background: #ffedd5;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.table-action-btn.p-button[data-p-severity="warn"]:not(:disabled):hover {
+  background: #fed7aa;
+  border-color: #fdba74;
+  color: #c2410c;
+  box-shadow: 0 6px 14px -6px rgba(194, 65, 12, .45);
+}
+
+/* Paginator bulat, teks "Showing..." didorong ke kiri, hover halaman
+   belum terpilih diberi tint teal lembut agar terasa interaktif */
 .p-paginator {
   border: none;
   background: transparent;
@@ -313,12 +404,23 @@ a {
   height: 2rem;
   border-radius: 50%;
   margin: 0 .1rem;
+  transition: background .15s ease, color .15s ease;
+}
+
+.p-paginator-page:not(.p-paginator-page-selected):not(:disabled):hover,
+.p-paginator-first:not(:disabled):hover,
+.p-paginator-prev:not(:disabled):hover,
+.p-paginator-next:not(:disabled):hover,
+.p-paginator-last:not(:disabled):hover {
+  background: rgba(13, 148, 136, .1) !important;
+  color: #0f766e !important;
 }
 
 button.p-paginator-page.p-paginator-page-selected {
-  background: #26c0c7 !important;
-  border-color: #26c0c7 !important;
+  background: #0d9488 !important;
+  border-color: #0d9488 !important;
   color: #fff !important;
+  box-shadow: 0 4px 10px -4px rgba(13, 148, 136, .55);
 }
 
 /* ============================================================
@@ -373,21 +475,42 @@ button.p-paginator-page.p-paginator-page-selected {
    chevron-down) yang saat diklik membuka panel dropdown berisi setiap
    aksi sebagai baris ikon+label, dengan garis pemisah tipis sebelum
    aksi yang sifatnya berbeda (mis. Generate Akun dari Pegawai).
-   ============================================================ */
+   Trigger dibuat lebih pill/modern dengan shadow teal lembut + efek
+   terangkat saat hover, serasi dengan tombol Aksi & search box pil
+   di sampingnya. ============================================================ */
 .overlay-menu-trigger.p-button {
-  border-radius: 8px;
+  border-radius: 999px;
+  padding-inline: 1.1rem;
+  box-shadow: 0 3px 10px -4px rgba(13, 148, 136, .5);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.overlay-menu-trigger.p-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -5px rgba(13, 148, 136, .55);
 }
 
 .overlay-actions-menu.p-menu {
   min-width: 230px;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: .4rem;
+  box-shadow: 0 2px 4px rgba(15,23,42,.05), 0 14px 28px -10px rgba(15,23,42,.18);
 }
 
 .overlay-actions-menu .p-menu-item-link {
   border-radius: 8px;
   padding: .65rem .75rem;
   gap: .65rem;
+  transition: background .15s ease, color .15s ease;
+}
+
+.overlay-actions-menu .p-menu-item-link:hover {
+  background: rgba(13, 148, 136, .1);
+}
+
+.overlay-actions-menu .p-menu-item-link:hover .p-menu-item-icon,
+.overlay-actions-menu .p-menu-item-link:hover .p-menu-item-label {
+  color: #0f766e;
 }
 
 .overlay-actions-menu .p-menu-item-icon {
