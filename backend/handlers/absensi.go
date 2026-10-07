@@ -52,6 +52,34 @@ func absensiToday() time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 }
 
+// absensiDianggapHadir menentukan apakah satu baris Absensi dianggap "hadir
+// penuh" untuk keperluan tanggal_terlewat & validasi input dokumen (Berita
+// Acara/Surat Tugas/Surat Kolektif) -- BUKAN sekadar "ada absen masuk"
+// seperti pengecekan lama (JamMasuk != nil saja), supaya baris yang cuma
+// absen masuk tapi TIDAK absen pulang (TAP -- "Tidak Absen Pulang", lihat
+// tidakAbsenPulang() di RekapAbsensiView.vue) pada HARI YANG SUDAH LEWAT
+// tetap dianggap "tidak hadir" sehingga bisa ditimpa dengan Berita Acara
+// atau Surat Tugas, sesuai permintaan user ("absensi yg terlewat jika ada
+// rekapan TAP maka dia masuk kategori tdk absen").
+//
+// Dinas dalam (DinasDalamMasuk/DinasDalamPulang) dikecualikan dari aturan
+// TAP ini karena absen pulang dinas dalam memang punya mekanisme tersendiri.
+// Hari ini (dan tanggal ke depan) juga dikecualikan -- jendela absen pulang
+// (JamTutupPulang, berbeda per unit kerja & hari, lihat pengaturan absensi)
+// belum pasti tertutup untuk hari yang masih berjalan, jadi pegawai masih
+// punya kesempatan absen pulang dan belum selayaknya dianggap "tidak hadir".
+func absensiDianggapHadir(row models.Absensi) bool {
+	if row.JamMasuk == nil {
+		return false
+	}
+	if row.JamPulang != nil || row.IsDinasDalam() {
+		return true
+	}
+	// JamPulang kosong (TAP) -- tetap dianggap hadir kalau tanggalnya hari
+	// ini atau ke depan (jendela absen pulang belum pasti tertutup).
+	return !row.Tanggal.Before(absensiToday())
+}
+
 // mapsURL membuat tautan Google Maps ke satu titik koordinat. Format
 // "?api=1&query=lat,lng" adalah format resmi Google Maps yang langsung
 // membuka penanda pada titik tersebut, baik di browser maupun di aplikasi
@@ -1265,7 +1293,7 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 	hadirSet := map[string]bool{}
 	for _, row := range rows {
-		if row.JamMasuk != nil {
+		if absensiDianggapHadir(row) {
 			hadirSet[row.Tanggal.Format("2006-01-02")] = true
 		}
 	}

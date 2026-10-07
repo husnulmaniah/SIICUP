@@ -701,7 +701,7 @@ func setujuiPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db
 	// disimpan, supaya tidak mengganjal alur -- hanya baris Rekap Absen yang
 	// dilewati, dengan peringatan pada pesan respons).
 	var absensi models.Absensi
-	sudahHadir := db.Where("id_pegawai = ? AND tanggal = ?", item.IDPegawai, item.TanggalKejadian).First(&absensi).Error == nil && absensi.JamMasuk != nil
+	sudahHadir := db.Where("id_pegawai = ? AND tanggal = ?", item.IDPegawai, item.TanggalKejadian).First(&absensi).Error == nil && absensiDianggapHadir(absensi)
 
 	if !sudahHadir {
 		var existing models.AbsensiDokumen

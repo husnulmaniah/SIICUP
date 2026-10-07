@@ -109,7 +109,7 @@ func tanggalTerlewatValid(db *gorm.DB, pegawai models.Pegawai, tanggal time.Time
 		return false, "tanggal merah/hari libur"
 	}
 	var absensi models.Absensi
-	if err := db.Where("id_pegawai = ? AND tanggal = ?", pegawai.ID, tanggal).First(&absensi).Error; err == nil && absensi.JamMasuk != nil {
+	if err := db.Where("id_pegawai = ? AND tanggal = ?", pegawai.ID, tanggal).First(&absensi).Error; err == nil && absensiDianggapHadir(absensi) {
 		return false, "sudah tercatat absen masuk (hadir) pada tanggal ini"
 	}
 	var dokCount int64
@@ -517,7 +517,7 @@ func setujuiPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db *g
 			continue
 		}
 		var absensi models.Absensi
-		if err := db.Where("id_pegawai = ? AND tanggal = ?", item.IDPegawai, tgl).First(&absensi).Error; err == nil && absensi.JamMasuk != nil {
+		if err := db.Where("id_pegawai = ? AND tanggal = ?", item.IDPegawai, tgl).First(&absensi).Error; err == nil && absensiDianggapHadir(absensi) {
 			dilewati = append(dilewati, tglStr)
 			continue
 		}

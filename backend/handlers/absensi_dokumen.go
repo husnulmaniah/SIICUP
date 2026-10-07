@@ -242,7 +242,7 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	db.Where("id_pegawai IN ? AND tanggal BETWEEN ? AND ?", idList, tglMulai, tglSelesai).Find(&absensiRows)
 	hadirSet := map[string]bool{} // key: "<id_pegawai>|<yyyy-mm-dd>"
 	for _, a := range absensiRows {
-		if a.JamMasuk != nil {
+		if absensiDianggapHadir(a) {
 			hadirSet[fmt.Sprintf("%d|%s", a.IDPegawai, a.Tanggal.Format("2006-01-02"))] = true
 		}
 	}

@@ -250,7 +250,7 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 		a.FotoMasuk = nil
 		a.FotoPulang = nil
 		absensiByPegawai[a.IDPegawai] = append(absensiByPegawai[a.IDPegawai], a)
-		if a.JamMasuk != nil {
+		if absensiDianggapHadir(a) {
 			if hadirSet[a.IDPegawai] == nil {
 				hadirSet[a.IDPegawai] = map[string]bool{}
 			}

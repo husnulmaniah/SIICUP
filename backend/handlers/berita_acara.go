@@ -604,7 +604,7 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	db.Where("id_pegawai IN ? AND tanggal = ?", idList, tglKejadian).Find(&absensiRows)
 	hadirSet := map[uint]bool{}
 	for _, a := range absensiRows {
-		if a.JamMasuk != nil {
+		if absensiDianggapHadir(a) {
 			hadirSet[a.IDPegawai] = true
 		}
 	}
