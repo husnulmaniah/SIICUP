@@ -266,6 +266,7 @@ func RegisterBeritaAcaraRoutes(mux *http.ServeMux, db *gorm.DB) {
 		utils.Success(w, "ok", AlasanBeritaAcaraOptions)
 	}))
 	mux.Handle("POST /api/berita-acara", manage(func(w http.ResponseWriter, r *http.Request) { buatBeritaAcara(w, r, db) }))
+	mux.Handle("PUT /api/berita-acara/{namaFile}", manage(func(w http.ResponseWriter, r *http.Request) { updateBeritaAcara(w, r, db) }))
 }
 
 // ============================================================
@@ -679,6 +680,296 @@ func buatBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	pesan := fmt.Sprintf("Berita Acara berhasil dibuat untuk %d pegawai", len(pegawaiDiinput))
 	if len(dilewatiHadir) > 0 {
 		pesan += fmt.Sprintf(" -- %d pegawai dilewati karena sudah tercatat absen masuk pada tanggal ini: %s", len(dilewatiHadir), strings.Join(dilewatiHadir, ", "))
+	}
+	utils.Created(w, pesan, nil)
+}
+
+// ============================================================
+// ubah (update) -- edit batch Berita Acara yang sudah ada: ganti
+// alasan/tanggal/nomor surat/penandatangan, TERMASUK menambah atau
+// mengurangi pegawai dalam batch yang sama (sesuai permintaan pengguna:
+// "BA yg di buat menu administrator dan admin bisa di edit dan
+// menambahkan nama").
+// ============================================================
+
+// updateBeritaAcara mengubah SATU batch Berita Acara (dikenali lewat
+// nama_file pada path, SAMA nilai yang dikembalikan listBeritaAcara --
+// lihat beritaAcaraBatchOut.NamaFile) yang sebelumnya dibuat lewat
+// buatBeritaAcara di menu ini sendiri. Me-reuse ULANG seluruh pipa validasi
+// buatBeritaAcara (daftar alasan tetap, parse tanggal, resolusi
+// penandatangan Dinas-only vs manual, penyaringan pegawai yang sudah
+// tercatat hadir) -- BEDA utamanya:
+//   - jenis TIDAK diambil dari form terpisah (menghindari state individu/
+//     kolektif yang tidak konsisten kalau nama ditambah/dikurangi saat
+//     edit) -- melainkan DIHITUNG OTOMATIS dari jumlah pegawai akhir
+//     (setelah disaring hadir): 1 pegawai = "individu", >1 = "kolektif".
+//   - roster pegawai lama (existingByPegawai, dari baris AbsensiDokumen
+//     batch ini sebelum diubah) dipakai untuk: (a) MEMPERTAHANKAN baris
+//     (ID) pegawai yang tetap ada di roster baru -- supaya ID baris lama
+//     tidak hilang percuma kalau tidak perlu; (b) MENGHAPUS baris pegawai
+//     yang dihilangkan dari roster saat edit.
+//   - bukti dukung (khusus jenis akhir "individu"): kalau pegawai
+//     satu-satunya itu SAMA dengan sebelumnya (baris lama ada) DAN admin
+//     tidak mengupload berkas baru, bukti dukung LAMA dipakai ulang; kalau
+//     upload baru ada, dipakai itu; kalau jenis akhir berubah jadi
+//     "kolektif", field bukti dukung dikosongkan sepenuhnya (sama seperti
+//     buatBeritaAcara yang memang tidak pernah mengisinya untuk kolektif).
+func updateBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+
+	namaFile := strings.TrimSpace(r.PathValue("namaFile"))
+	if namaFile == "" {
+		utils.Error(w, http.StatusBadRequest, "nama berkas batch tidak valid")
+		return
+	}
+
+	var existingRows []models.AbsensiDokumen
+	if err := db.Preload("Pegawai").
+		Where("nama_file = ? AND jenis = ? AND diinput_langsung_menu_berita_acara = ?",
+			namaFile, models.AbsensiDokumenBeritaAcara, true).
+		Find(&existingRows).Error; err != nil || len(existingRows) == 0 {
+		utils.Error(w, http.StatusNotFound, "Berita Acara yang ingin diubah tidak ditemukan")
+		return
+	}
+	existingByPegawai := map[uint]models.AbsensiDokumen{}
+	for _, row := range existingRows {
+		existingByPegawai[row.IDPegawai] = row
+	}
+
+	utils.LimitBody(w, r, 15<<20)
+	if err := r.ParseMultipartForm(15 << 20); err != nil {
+		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
+		return
+	}
+
+	var rawIDs []uint
+	for _, s := range r.Form["id_pegawai"] {
+		v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+		if err == nil {
+			rawIDs = append(rawIDs, uint(v))
+		}
+	}
+	idList := uniqueOrderedUint(rawIDs)
+	if len(idList) == 0 {
+		utils.Error(w, http.StatusBadRequest, "pilih minimal satu pegawai")
+		return
+	}
+
+	alasan := strings.TrimSpace(r.FormValue("alasan"))
+	if !isAlasanBeritaAcaraValid(alasan) {
+		utils.Error(w, http.StatusBadRequest, "alasan tidak valid -- pilih salah satu dari daftar yang tersedia")
+		return
+	}
+
+	tglKejadian, err := utils.ParseDateCell(strings.TrimSpace(r.FormValue("tanggal_kejadian")))
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "tanggal kejadian tidak valid")
+		return
+	}
+	tglSurat := tglKejadian
+	if ts := strings.TrimSpace(r.FormValue("tanggal_surat")); ts != "" {
+		tglSurat, err = utils.ParseDateCell(ts)
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest, "tanggal surat tidak valid")
+			return
+		}
+	}
+	nomorSurat := strings.TrimSpace(r.FormValue("nomor_surat"))
+	if nomorSurat != "" {
+		nomorSurat = nomorSuratBeritaAcaraLengkap(nomorSurat, tglSurat)
+	}
+
+	var pegawaiRows []models.Pegawai
+	queryPegawai := db
+	for _, pl := range pegawaiPreloads {
+		queryPegawai = queryPegawai.Preload(pl)
+	}
+	if err := queryPegawai.Where("id IN ?", idList).Find(&pegawaiRows).Error; err != nil || len(pegawaiRows) != len(idList) {
+		utils.Error(w, http.StatusBadRequest, "data pegawai yang dipilih tidak ditemukan/tidak lengkap")
+		return
+	}
+	pegawaiByID := map[uint]models.Pegawai{}
+	for _, pg := range pegawaiRows {
+		pegawaiByID[pg.ID] = pg
+	}
+	pegawaiTerpilih := make([]models.Pegawai, 0, len(idList))
+	for _, id := range idList {
+		if pg, ok := pegawaiByID[id]; ok {
+			pegawaiTerpilih = append(pegawaiTerpilih, pg)
+		}
+	}
+
+	isDinasOnly := true
+	for _, pg := range pegawaiTerpilih {
+		if isSekolahPegawai(pg) {
+			isDinasOnly = false
+			break
+		}
+	}
+
+	var signer beritaAcaraSigner
+	if isDinasOnly {
+		var pengaturan models.PengaturanSurat
+		db.First(&pengaturan, 1)
+		nama, nip, jabatan, pangkatGol, unitKerja := resolveSignerFullRekomendasi(db, pengaturan)
+		signer = beritaAcaraSigner{
+			Nama: nama, NIP: nip, Jabatan: jabatan, PangkatGol: pangkatGol, UnitKerja: unitKerja,
+			UnitKerjaKop: nil, TampilkanQR: true, KopTetapDinas: true,
+		}
+	} else {
+		idPenandatangan, _ := strconv.ParseUint(strings.TrimSpace(r.FormValue("id_penandatangan")), 10, 64)
+		if idPenandatangan == 0 {
+			utils.Error(w, http.StatusBadRequest, "penandatangan (yang mengetahui) wajib dipilih")
+			return
+		}
+		var penandatangan models.Pegawai
+		queryTtd := db
+		for _, pl := range pegawaiPreloads {
+			queryTtd = queryTtd.Preload(pl)
+		}
+		if err := queryTtd.First(&penandatangan, idPenandatangan).Error; err != nil {
+			utils.Error(w, http.StatusBadRequest, "data penandatangan tidak ditemukan")
+			return
+		}
+		signer = beritaAcaraSigner{
+			Nama: penandatangan.Nama, NIP: penandatangan.NIP,
+			Jabatan: pegawaiJabatanText(penandatangan), PangkatGol: pegawaiPangkatGolText(penandatangan),
+			UnitKerja: pegawaiUnitKerjaText(penandatangan), UnitKerjaKop: penandatangan.UnitKerja,
+			TampilkanQR: false,
+		}
+	}
+
+	var jenisSurat models.JenisSurat
+	if err := db.Where("slug = ?", models.AbsensiDokumenBeritaAcara).First(&jenisSurat).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "master Jenis Surat \"Berita Acara\" tidak ditemukan -- hubungi pengembang aplikasi")
+		return
+	}
+
+	var absensiRows []models.Absensi
+	db.Where("id_pegawai IN ? AND tanggal = ?", idList, tglKejadian).Find(&absensiRows)
+	hadirSet := map[uint]bool{}
+	for _, a := range absensiRows {
+		if absensiDianggapHadir(a) {
+			hadirSet[a.IDPegawai] = true
+		}
+	}
+	var dilewatiHadir []string
+	pegawaiDiinput := make([]models.Pegawai, 0, len(pegawaiTerpilih))
+	for _, pg := range pegawaiTerpilih {
+		if hadirSet[pg.ID] {
+			dilewatiHadir = append(dilewatiHadir, pg.Nama)
+			continue
+		}
+		pegawaiDiinput = append(pegawaiDiinput, pg)
+	}
+	if len(pegawaiDiinput) == 0 {
+		utils.Error(w, http.StatusBadRequest,
+			"Berita Acara tidak diubah -- seluruh pegawai yang dipilih sudah tercatat absen masuk (hadir) pada tanggal ini: "+strings.Join(dilewatiHadir, ", "))
+		return
+	}
+
+	jenis := "individu"
+	if len(pegawaiDiinput) > 1 {
+		jenis = "kolektif"
+	}
+
+	var buktiNamaFile, buktiContentType string
+	var buktiFileData []byte
+	if jenis == "individu" {
+		satuSatunya := pegawaiDiinput[0]
+		if formFileHeader(r, "file") != nil {
+			var errMsg string
+			buktiNamaFile, buktiContentType, buktiFileData, errMsg = parseBuktiDukungUpload(r)
+			if errMsg != "" {
+				utils.Error(w, http.StatusBadRequest, errMsg)
+				return
+			}
+		} else if old, ok := existingByPegawai[satuSatunya.ID]; ok && strings.TrimSpace(old.BuktiDukungNamaFile) != "" {
+			buktiNamaFile = old.BuktiDukungNamaFile
+			buktiContentType = old.BuktiDukungContentType
+			buktiFileData = old.BuktiDukungFile
+		} else {
+			utils.Error(w, http.StatusBadRequest, "bukti dukung wajib diupload")
+			return
+		}
+	}
+
+	pdfBytes, err := buildBeritaAcaraPDF(jenis, pegawaiDiinput, signer, tglKejadian, tglSurat, nomorSurat, alasan, buktiFileData, buktiContentType, buktiNamaFile)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal membuat berkas PDF: "+err.Error())
+		return
+	}
+
+	var nomorPtr *string
+	if nomorSurat != "" {
+		nomorPtr = &nomorSurat
+	}
+	var userIDPtr *uint
+	if claims != nil {
+		userID := claims.UserID
+		userIDPtr = &userID
+	}
+
+	keptIDs := map[uint]bool{}
+	for _, pg := range pegawaiDiinput {
+		keptIDs[pg.ID] = true
+		existing, hasOld := existingByPegawai[pg.ID]
+		if !hasOld {
+			// Pegawai ini BARU ditambahkan saat edit (bukan bagian batch
+			// sebelumnya) -- pakai pola upsert yang sama dengan
+			// buatBeritaAcara (jaga-jaga kalau pegawai ini sudah punya baris
+			// AbsensiDokumen lain untuk tanggal yang sama dari jalur lain,
+			// supaya tidak menduplikasi baris).
+			db.Where("id_pegawai = ? AND tanggal = ?", pg.ID, tglKejadian).First(&existing)
+		}
+		existing.IDPegawai = pg.ID
+		existing.Tanggal = tglKejadian
+		existing.Jenis = models.AbsensiDokumenBeritaAcara
+		existing.Label = jenisSurat.Nama
+		existing.NamaFile = namaFile
+		existing.File = pdfBytes
+		existing.Keterangan = alasan
+		existing.Nomor = nomorPtr
+		existing.IDDiinputOleh = userIDPtr
+		existing.DiinputLangsungMenuBeritaAcara = true
+		existing.IDPengajuanBeritaAcara = nil
+		if jenis == "individu" && pg.ID == pegawaiDiinput[0].ID {
+			existing.BuktiDukungNamaFile = buktiNamaFile
+			existing.BuktiDukungFile = buktiFileData
+			existing.BuktiDukungContentType = buktiContentType
+		} else {
+			existing.BuktiDukungNamaFile = ""
+			existing.BuktiDukungFile = nil
+			existing.BuktiDukungContentType = ""
+		}
+		if existing.ID != 0 {
+			db.Save(&existing)
+		} else {
+			db.Create(&existing)
+		}
+	}
+
+	// Pegawai yang SEBELUMNYA ada di batch ini tapi tidak lagi dipilih saat
+	// edit (dihilangkan admin) -- baris AbsensiDokumen lamanya dihapus
+	// sepenuhnya, SAMA seperti kalau admin menghapusnya satu-satu lewat
+	// DELETE /api/absensi/dokumen/{id} (lihat komentar hapus kolektif di
+	// BeritaAcaraView.vue).
+	var dihapusKarenaDiedit []string
+	for idLama, rowLama := range existingByPegawai {
+		if !keptIDs[idLama] {
+			db.Delete(&models.AbsensiDokumen{}, rowLama.ID)
+			if rowLama.Pegawai != nil {
+				dihapusKarenaDiedit = append(dihapusKarenaDiedit, rowLama.Pegawai.Nama)
+			}
+		}
+	}
+
+	pesan := fmt.Sprintf("Berita Acara berhasil diubah untuk %d pegawai", len(pegawaiDiinput))
+	if len(dilewatiHadir) > 0 {
+		pesan += fmt.Sprintf(" -- %d pegawai dilewati karena sudah tercatat absen masuk pada tanggal ini: %s", len(dilewatiHadir), strings.Join(dilewatiHadir, ", "))
+	}
+	if len(dihapusKarenaDiedit) > 0 {
+		pesan += fmt.Sprintf(" -- %d pegawai dihapus dari Berita Acara ini: %s", len(dihapusKarenaDiedit), strings.Join(dihapusKarenaDiedit, ", "))
 	}
 	utils.Created(w, pesan, nil)
 }

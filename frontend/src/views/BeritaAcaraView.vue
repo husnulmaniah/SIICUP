@@ -189,10 +189,21 @@ const pegawaiPicker = makePegawaiPicker()
 const penandatanganPicker = makePegawaiPicker()
 
 // ============================================================
-// dialog "Buat Berita Acara"
+// dialog "Buat Berita Acara" / "Edit Berita Acara" -- SATU dialog & form
+// yang sama dipakai untuk dua mode (editingItem null = mode buat baru,
+// terisi = mode edit batch yang sudah ada), sesuai permintaan pengguna
+// "BA yg di buat menu administrator dan admin bisa di edit dan
+// menambahkan nama" -- mengedit jenis (individu<->kolektif) di dialog ini
+// SEKALIGUS cara "menambahkan nama" (tambah pegawai lewat MultiSelect
+// kolektif yang sama) atau menghapus nama (hilangkan dari MultiSelect),
+// dikirim ke PUT /api/berita-acara/{namaFile} (handlers/berita_acara.go --
+// updateBeritaAcara) yang MENGHITUNG ULANG jenis otomatis dari jumlah
+// pegawai akhir, bukan dari radio button jenis (lihat komentar di sana).
 // ============================================================
 const buatDialog = ref(false)
 const submitting = ref(false)
+const editingItem = ref(null)
+const isEditing = computed(() => !!editingItem.value)
 
 const form = ref({
   jenis: 'individu',
@@ -263,6 +274,7 @@ watch(() => form.value.id_pegawai_kolektif, (v) => pegawaiPicker.ingatTerpilih(v
 watch(() => form.value.id_penandatangan, (v) => penandatanganPicker.ingatTerpilih(v))
 
 function bukaBuatDialog() {
+  editingItem.value = null
   form.value = {
     jenis: 'individu',
     id_pegawai_individu: null,
@@ -281,6 +293,54 @@ function bukaBuatDialog() {
   if (penandatanganPicker.options.value.length === 0) penandatanganPicker.load()
   if (alasanOptions.value.length === 0) loadAlasanOptions()
   buatDialog.value = true
+}
+
+// nomorUrutanDariNomorLengkap: nomor yang tersimpan/ditampilkan
+// (beritaAcaraBatchOut.Nomor) sudah format LENGKAP "800/{urutan}/Disdikbud/
+// {bulan romawi}/{tahun}" (lihat nomorSuratBeritaAcaraLengkap di
+// handlers/berita_acara.go) -- field "Nomor Urut Surat" pada dialog ini
+// HANYA meminta bagian {urutan}-nya saja (dirangkai ulang otomatis oleh
+// backend tiap kali disimpan), jadi saat edit perlu diurai balik supaya
+// tidak ikut terbungkus dua kali ("800/800/.../Disdikbud/...").
+function nomorUrutanDariNomorLengkap(nomorLengkap) {
+  if (!nomorLengkap) return ''
+  const m = /^800\/(.+)\/Disdikbud\/[IVXLCDM]+\/\d{4}$/i.exec(nomorLengkap.trim())
+  return m ? m[1] : nomorLengkap
+}
+
+// bukaEditDialog: membuka dialog yang SAMA dengan "Buat Berita Acara" di
+// atas, tapi terisi data batch terpilih -- admin bebas mengubah
+// jenis/pegawai (termasuk menambah/menghapus nama)/alasan/tanggal/nomor/
+// penandatangan sebelum menyimpan lewat submitBuat (yang akan memanggil PUT
+// /api/berita-acara/{nama_file} karena editingItem terisi).
+async function bukaEditDialog(item) {
+  editingItem.value = item
+  const idPegawai = item.pegawai.map((pg) => pg.id)
+  form.value = {
+    jenis: item.jenis,
+    id_pegawai_individu: item.jenis === 'individu' ? idPegawai[0] ?? null : null,
+    id_pegawai_kolektif: item.jenis === 'kolektif' ? idPegawai : [],
+    id_penandatangan: null,
+    alasan: item.alasan,
+    tanggal_kejadian: item.tanggal ? new Date(item.tanggal) : null,
+    // tanggal_surat TIDAK tersimpan terpisah dari tanggal kejadian pada data
+    // batch (hanya ikut terbungkus di dalam Nomor yang sudah lengkap) --
+    // default disamakan dengan tanggal kejadian seperti saat membuat baru,
+    // admin bisa mengubahnya lagi kalau memang berbeda.
+    tanggal_surat: item.tanggal ? new Date(item.tanggal) : null,
+    nomor_surat: nomorUrutanDariNomorLengkap(item.nomor),
+  }
+  buktiDukungFile.value = null
+  tanggalSuratManual = false
+  pegawaiPicker.terpilihCache.value = []
+  penandatanganPicker.terpilihCache.value = []
+  if (alasanOptions.value.length === 0) loadAlasanOptions()
+  buatDialog.value = true
+  await Promise.all([pegawaiPicker.load(), penandatanganPicker.load()])
+  // Opsi baru saja termuat -- segarkan ulang cache "terpilih" supaya
+  // isDinasOnly (dan Select Penandatangan) langsung akurat memakai data
+  // is_sekolah pegawai yang baru didapat, bukan cache kosong sebelumnya.
+  pegawaiPicker.ingatTerpilih(idPegawai)
 }
 
 function toDateStr(d) {
@@ -313,6 +373,19 @@ const isDinasOnly = computed(() => {
   return ids.every((id) => dikenal.get(id) && !dikenal.get(id).isSekolah)
 })
 
+// canReuseBuktiDukung: khusus mode EDIT -- kalau jenis akhir masih
+// "individu" dengan pegawai yang SAMA PERSIS dengan sebelumnya (bukan hasil
+// ganti pegawai) dan batch lama memang sudah punya bukti dukung, upload
+// baru boleh dikosongkan (backend otomatis memakai ulang berkas lama --
+// lihat updateBeritaAcara di handlers/berita_acara.go). Begitu jenis
+// berubah jadi kolektif, atau pegawainya diganti, atau ini mode buat baru,
+// upload tetap wajib seperti biasa.
+const canReuseBuktiDukung = computed(() => {
+  if (!editingItem.value || form.value.jenis !== 'individu' || editingItem.value.jenis !== 'individu') return false
+  const satuSatunya = idPegawaiTerpilih.value[0]
+  return satuSatunya != null && editingItem.value.pegawai[0]?.id === satuSatunya && !!editingItem.value.pegawai[0]?.ada_bukti_dukung
+})
+
 async function submitBuat() {
   if (idPegawaiTerpilih.value.length === 0) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih minimal satu pegawai', life: 4000 })
@@ -330,7 +403,7 @@ async function submitBuat() {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Tanggal kejadian wajib diisi', life: 4000 })
     return
   }
-  if (form.value.jenis === 'individu' && !buktiDukungFile.value) {
+  if (form.value.jenis === 'individu' && !buktiDukungFile.value && !canReuseBuktiDukung.value) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Bukti dukung (foto/scan pendukung alasan terpilih) wajib dilampirkan untuk Berita Acara individu', life: 5000 })
     return
   }
@@ -345,7 +418,9 @@ async function submitBuat() {
     fd.append('nomor_surat', form.value.nomor_surat.trim())
     fd.append('alasan', form.value.alasan)
     if (form.value.jenis === 'individu' && buktiDukungFile.value) fd.append('file', buktiDukungFile.value)
-    const { data } = await http.post('/berita-acara', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    const { data } = isEditing.value
+      ? await http.put(`/berita-acara/${encodeURIComponent(editingItem.value.nama_file)}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      : await http.post('/berita-acara', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 7000 })
     buatDialog.value = false
     await loadItems()
@@ -353,7 +428,7 @@ async function submitBuat() {
     const pesan = e.response?.data?.message || (e.message === 'Network Error'
       ? 'Koneksi terputus saat mengirim data (biasanya karena sinyal/koneksi internet tidak stabil saat mengupload berkas). Periksa koneksi internet Anda lalu coba ajukan ulang.'
       : e.message)
-    toast.add({ severity: 'error', summary: 'Gagal membuat', detail: pesan, life: 8000 })
+    toast.add({ severity: 'error', summary: isEditing.value ? 'Gagal menyimpan perubahan' : 'Gagal membuat', detail: pesan, life: 8000 })
   } finally {
     submitting.value = false
   }
@@ -510,13 +585,14 @@ onMounted(() => {
             @click="unduhBuktiDukung(item)"
             title="Unduh Bukti Dukung"
           />
+          <Button icon="pi pi-pencil" size="small" severity="secondary" outlined @click="bukaEditDialog(item)" title="Edit" />
           <Button icon="pi pi-trash" size="small" severity="danger" outlined @click="konfirmasiHapusBatch(item)" title="Hapus" />
         </div>
       </div>
     </div>
 
-    <!-- dialog buat -->
-    <Dialog v-model:visible="buatDialog" modal header="Buat Berita Acara" style="width: 42rem; max-width: 96vw">
+    <!-- dialog buat / edit (satu dialog, dua mode -- lihat editingItem) -->
+    <Dialog v-model:visible="buatDialog" modal :header="isEditing ? 'Edit Berita Acara' : 'Buat Berita Acara'" style="width: 42rem; max-width: 96vw">
       <div class="form-field">
         <label>Jenis</label>
         <div style="display: flex; gap: 1.25rem; margin-top: 0.4rem">
@@ -617,7 +693,7 @@ onMounted(() => {
       </div>
 
       <div class="form-field" v-if="form.jenis === 'individu'">
-        <label>Bukti Dukung (JPG/JPEG/PNG) -- wajib</label>
+        <label>Bukti Dukung (JPG/JPEG/PNG) -- {{ canReuseBuktiDukung ? 'opsional' : 'wajib' }}</label>
         <input ref="buktiDukungFileInput" type="file" accept=".jpg,.jpeg,.png" style="display: none" @change="onBuktiDukungFileChosen" />
         <Button
           :label="buktiDukungFile ? buktiDukungFile.name : 'Pilih Berkas'"
@@ -626,7 +702,10 @@ onMounted(() => {
           outlined
           @click="pickBuktiDukungFile"
         />
-        <small class="text-muted">Foto/scan pendukung alasan terpilih (mis. screenshot error jaringan, foto motor rusak, dsb).</small>
+        <small class="text-muted" v-if="canReuseBuktiDukung">
+          Biarkan kosong untuk tetap memakai bukti dukung yang sudah diupload sebelumnya, atau pilih berkas baru untuk menggantinya.
+        </small>
+        <small class="text-muted" v-else>Foto/scan pendukung alasan terpilih (mis. screenshot error jaringan, foto motor rusak, dsb).</small>
       </div>
 
       <div class="form-grid-2">
@@ -648,7 +727,7 @@ onMounted(() => {
 
       <template #footer>
         <Button label="Batal" severity="secondary" text @click="buatDialog = false" />
-        <Button label="Buat Berita Acara" icon="pi pi-file-edit" :loading="submitting" @click="submitBuat" />
+        <Button :label="isEditing ? 'Simpan Perubahan' : 'Buat Berita Acara'" :icon="isEditing ? 'pi pi-save' : 'pi pi-file-edit'" :loading="submitting" @click="submitBuat" />
       </template>
     </Dialog>
 

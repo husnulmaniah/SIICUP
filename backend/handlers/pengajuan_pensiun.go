@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,12 +99,12 @@ func RegisterPengajuanPensiunRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// anyRole di sini juga TIDAK benar-benar "role apa saja" -- lihat catatan
 	// yang sama di RegisterPerubahanDataRoutes (perubahan_data.go).
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "pegawai", "atasan") }
-	// pegawaiOnly: SEKARANG juga meloloskan role "atasan" -- atasan boleh
-	// mengajukan pensiun sendiri lewat Profil Saya sama seperti pegawai
-	// (permintaan pengguna). canAccessPengajuanPensiun/listPengajuanPensiun
-	// di bawah sudah lebih dulu menangani "pegawai"/"atasan" secara setara,
-	// jadi cukup dibuka di sini saja.
-	pegawaiOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan") }
+	// bisaMengajukan: pegawai/atasan (untuk DIRI SENDIRI) MAUPUN
+	// administrator/admin (untuk pegawai MANAPUN, lewat field "id_pegawai"
+	// -- lihat createPengajuanPensiun) boleh mengirim pengajuan pensiun,
+	// semuanya lewat satu endpoint & satu alur persetujuan "pending" yang
+	// sama (permintaan pengguna).
+	bisaMengajukan := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan", "administrator", "admin") }
 	manage := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 
 	// Pengaturan usia pensiun -- GET dibuka untuk semua role terautentikasi
@@ -115,7 +116,7 @@ func RegisterPengajuanPensiunRoutes(mux *http.ServeMux, db *gorm.DB) {
 
 	mux.Handle("GET /api/pengajuan-pensiun", anyRole(func(w http.ResponseWriter, r *http.Request) { listPengajuanPensiun(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-pensiun/{id}", anyRole(func(w http.ResponseWriter, r *http.Request) { getPengajuanPensiunDetail(w, r, db) }))
-	mux.Handle("POST /api/pengajuan-pensiun", pegawaiOnly(func(w http.ResponseWriter, r *http.Request) { createPengajuanPensiun(w, r, db) }))
+	mux.Handle("POST /api/pengajuan-pensiun", bisaMengajukan(func(w http.ResponseWriter, r *http.Request) { createPengajuanPensiun(w, r, db) }))
 	mux.Handle("DELETE /api/pengajuan-pensiun/{id}", anyRole(func(w http.ResponseWriter, r *http.Request) { batalkanPengajuanPensiun(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-pensiun/{id}/approve", manage(func(w http.ResponseWriter, r *http.Request) { approvePengajuanPensiun(w, r, db) }))
 	mux.Handle("PUT /api/pengajuan-pensiun/{id}/reject", manage(func(w http.ResponseWriter, r *http.Request) { rejectPengajuanPensiun(w, r, db) }))
@@ -179,22 +180,44 @@ func getPengajuanPensiunDetail(w http.ResponseWriter, r *http.Request, db *gorm.
 // Pegawai.TglLahir) harus sudah mencapai usia pensiun standar jabatannya
 // (lihat usiaPensiunPegawai) -- kalau belum, pengajuan ditolak dan pegawai
 // diarahkan mencentang opsi Pensiun Dini kalau memang itu maksudnya.
+//
+// idPegawai: pegawai/atasan SELALU mengajukan untuk DIRI SENDIRI
+// (claims.IDPegawai). administrator/admin (akunnya TIDAK terhubung ke data
+// pegawai manapun) WAJIB memilih pegawai lewat field form "id_pegawai" --
+// permintaan pengguna: administrator/admin bisa mengajukan pensiun atas
+// nama pegawai manapun lewat menu Pengajuan Pensiun, TERPISAH dari alur
+// pegawai/atasan lewat Profil Saya, tapi tetap satu endpoint & satu alur
+// persetujuan (status "pending") yang sama -- beda dari upload SK Pensiun
+// langsung di menu Data Pegawai yang instan tanpa alur persetujuan sama
+// sekali.
 func createPengajuanPensiun(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
-	if claims.IDPegawai == nil {
-		utils.Error(w, http.StatusBadRequest, "akun anda belum terhubung dengan data pegawai")
-		return
-	}
-
-	var existingPending models.PengajuanPensiun
-	if err := db.Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.StatusPending).First(&existingPending).Error; err == nil {
-		utils.Error(w, http.StatusBadRequest, "anda masih memiliki pengajuan pensiun yang sedang menunggu persetujuan")
-		return
-	}
 
 	utils.LimitBody(w, r, 15<<20)
 	if err := r.ParseMultipartForm(15 << 20); err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal membaca data form (maksimal total 15MB)")
+		return
+	}
+
+	var idPegawai uint
+	if claims.RoleName == "administrator" || claims.RoleName == "admin" {
+		v, err := strconv.ParseUint(strings.TrimSpace(r.FormValue("id_pegawai")), 10, 64)
+		if err != nil || v == 0 {
+			utils.Error(w, http.StatusBadRequest, "pilih pegawai yang akan diajukan pensiunnya")
+			return
+		}
+		idPegawai = uint(v)
+	} else {
+		if claims.IDPegawai == nil {
+			utils.Error(w, http.StatusBadRequest, "akun anda belum terhubung dengan data pegawai")
+			return
+		}
+		idPegawai = *claims.IDPegawai
+	}
+
+	var existingPending models.PengajuanPensiun
+	if err := db.Where("id_pegawai = ? AND status = ?", idPegawai, models.StatusPending).First(&existingPending).Error; err == nil {
+		utils.Error(w, http.StatusBadRequest, "pegawai ini masih memiliki pengajuan pensiun yang sedang menunggu persetujuan")
 		return
 	}
 
@@ -206,7 +229,7 @@ func createPengajuanPensiun(w http.ResponseWriter, r *http.Request, db *gorm.DB)
 	}
 
 	var pegawai models.Pegawai
-	if err := db.Preload("Jabatan").First(&pegawai, *claims.IDPegawai).Error; err != nil {
+	if err := db.Preload("Jabatan").First(&pegawai, idPegawai).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "data pegawai tidak ditemukan")
 		return
 	}
@@ -262,7 +285,7 @@ func createPengajuanPensiun(w http.ResponseWriter, r *http.Request, db *gorm.DB)
 	}
 
 	item := models.PengajuanPensiun{
-		IDPegawai:     *claims.IDPegawai,
+		IDPegawai:     idPegawai,
 		IsPensiunDini: isPensiunDini,
 		Alasan:        alasan,
 		SkNamaFile:    fh.Filename,

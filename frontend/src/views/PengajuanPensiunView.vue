@@ -14,6 +14,8 @@ import Tag from 'primevue/tag'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import SelectButton from 'primevue/selectbutton'
+import Select from 'primevue/select'
+import Checkbox from 'primevue/checkbox'
 import Tabs from 'primevue/tabs'
 import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
@@ -225,6 +227,104 @@ async function simpanPengaturan() {
   }
 }
 
+// ============================================================
+// Dialog "Ajukan Pensiun" (BARU, khusus administrator/admin) -- berbeda dari
+// upload SK Pensiun langsung di menu Data Pegawai (instan, tanpa alur
+// persetujuan): ini mengirim pengajuan yang tetap masuk status "Menunggu" di
+// tab sebelah, SAMA seperti pengajuan mandiri pegawai/atasan lewat Profil
+// Saya, supaya tetap ada jejak persetujuan (lihat createPengajuanPensiun di
+// backend/handlers/pengajuan_pensiun.go -- administrator/admin WAJIB mengisi
+// id_pegawai karena akunnya sendiri tidak terhubung ke data pegawai manapun).
+// Pola pencarian pegawai (server-side, dropdown dengan filter) SAMA dengan
+// picker pada menu Berita Acara (lihat BeritaAcaraView.vue).
+// ============================================================
+const PEGAWAI_PAGE_SIZE = 100
+function toPegawaiOption(p) {
+  return { label: `${p.nama} (${p.nip})`, value: p.id }
+}
+const pegawaiPicker = (() => {
+  const options = ref([])
+  const loading = ref(false)
+  async function load(kw = '') {
+    loading.value = true
+    try {
+      const params = { pageSize: PEGAWAI_PAGE_SIZE }
+      const q = (kw || '').trim()
+      if (q) params.q = q
+      const { data } = await http.get('/pegawai', { params })
+      options.value = (Array.isArray(data.data) ? data.data : []).map(toPegawaiOption)
+    } catch {
+      options.value = []
+    } finally {
+      loading.value = false
+    }
+  }
+  let timer = null
+  function onFilter(event) {
+    clearTimeout(timer)
+    timer = setTimeout(() => load(event?.value || ''), 300)
+  }
+  return { options, loading, load, onFilter }
+})()
+
+const ajukanDialog = ref(false)
+const ajukanSubmitting = ref(false)
+const ajukanForm = ref({ id_pegawai: null, is_pensiun_dini: false, alasan: '' })
+const ajukanFile = ref(null)
+const ajukanFileInput = ref(null)
+function pickAjukanFile() {
+  ajukanFileInput.value?.click()
+}
+function onAjukanFileChosen(e) {
+  const file = e.target.files?.[0] || null
+  if (file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    if (!['pdf', 'jpg', 'jpeg', 'png'].includes(ext)) {
+      toast.add({ severity: 'error', summary: 'Format tidak didukung', detail: 'Berkas harus PDF, JPG, atau PNG.', life: 6000 })
+      e.target.value = ''
+      ajukanFile.value = null
+      return
+    }
+  }
+  ajukanFile.value = file
+}
+function bukaAjukanDialog() {
+  ajukanForm.value = { id_pegawai: null, is_pensiun_dini: false, alasan: '' }
+  ajukanFile.value = null
+  if (pegawaiPicker.options.value.length === 0) pegawaiPicker.load()
+  ajukanDialog.value = true
+}
+async function submitAjukan() {
+  if (!ajukanForm.value.id_pegawai) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih pegawai yang akan diajukan pensiunnya', life: 4000 })
+    return
+  }
+  if (ajukanForm.value.is_pensiun_dini && !ajukanForm.value.alasan.trim()) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Alasan wajib diisi untuk pensiun dini', life: 4000 })
+    return
+  }
+  if (!ajukanFile.value) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Berkas SK/usulan pensiun wajib diupload', life: 4000 })
+    return
+  }
+  ajukanSubmitting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('id_pegawai', ajukanForm.value.id_pegawai)
+    fd.append('is_pensiun_dini', ajukanForm.value.is_pensiun_dini ? 'true' : 'false')
+    fd.append('alasan', ajukanForm.value.alasan.trim())
+    fd.append('file', ajukanFile.value)
+    const { data } = await http.post('/pengajuan-pensiun', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+    ajukanDialog.value = false
+    fetchList()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengajukan', detail: e.response?.data?.message || e.message, life: 6000 })
+  } finally {
+    ajukanSubmitting.value = false
+  }
+}
+
 onMounted(() => {
   fetchList()
   loadPengaturan()
@@ -235,7 +335,8 @@ onMounted(() => {
   <div class="page-wrap">
     <div class="page-title">Pengajuan Pensiun</div>
     <p class="page-subtitle">
-      Tinjau & setujui/tolak pengajuan pensiun yang dikirim pegawai. Jika disetujui, status pegawai otomatis berubah jadi
+      Tinjau & setujui/tolak pengajuan pensiun yang dikirim pegawai, atau ajukan sendiri atas nama pegawai manapun lewat
+      tombol "Ajukan Pensiun" di bawah. Jika disetujui, status pegawai otomatis berubah jadi
       "Pensiun" dan akun login pegawai tersebut otomatis dinonaktifkan.
     </p>
 
@@ -247,14 +348,17 @@ onMounted(() => {
       <TabPanels>
         <TabPanel value="pengajuan">
           <div class="card">
-            <SelectButton
-              v-model="statusFilter"
-              :options="statusFilterOptions"
-              optionLabel="label"
-              optionValue="value"
-              class="tab-filter"
-              style="width: 100%; flex-wrap: wrap"
-            />
+            <div class="tab-toolbar">
+              <SelectButton
+                v-model="statusFilter"
+                :options="statusFilterOptions"
+                optionLabel="label"
+                optionValue="value"
+                class="tab-filter"
+                style="flex-wrap: wrap"
+              />
+              <Button label="Ajukan Pensiun" icon="pi pi-briefcase" size="small" @click="bukaAjukanDialog" />
+            </div>
 
             <div class="responsive-table-wrap">
               <DataTable :value="items" :loading="loading" dataKey="id" stripedRows size="small" style="min-width: 640px">
@@ -379,6 +483,47 @@ onMounted(() => {
       </template>
     </Dialog>
 
+    <!-- Dialog "Ajukan Pensiun" (administrator/admin, atas nama pegawai manapun) -->
+    <Dialog v-model:visible="ajukanDialog" modal header="Ajukan Pensiun" :style="{ width: '32rem', maxWidth: '95vw' }">
+      <Message severity="info" :closable="false" style="margin-bottom: 1.25rem">
+        Pengajuan ini tetap masuk status "Menunggu" di tab sebelah, sama seperti pengajuan mandiri pegawai/atasan --
+        berbeda dari upload SK Pensiun langsung di menu Data Pegawai yang instan tanpa alur persetujuan.
+      </Message>
+      <div class="field-label-wrap">
+        <label class="field-label">Pegawai</label>
+        <Select
+          v-model="ajukanForm.id_pegawai"
+          :options="pegawaiPicker.options.value"
+          optionLabel="label"
+          optionValue="value"
+          filter
+          :loading="pegawaiPicker.loading.value"
+          filterPlaceholder="Ketik nama atau NIP pegawai"
+          emptyFilterMessage="Pegawai tidak ditemukan -- coba nama atau NIP yang lain"
+          placeholder="Pilih pegawai"
+          style="width: 100%"
+          @filter="pegawaiPicker.onFilter"
+        />
+      </div>
+      <div class="field-label-wrap" style="display: flex; align-items: center; gap: 0.5rem">
+        <Checkbox v-model="ajukanForm.is_pensiun_dini" binary inputId="chk-ajukan-pensiun-dini" />
+        <label for="chk-ajukan-pensiun-dini" style="font-weight: 600; cursor: pointer">Pensiun Dini</label>
+      </div>
+      <div class="field-label-wrap" v-if="ajukanForm.is_pensiun_dini">
+        <label class="field-label">Alasan Pensiun Dini</label>
+        <Textarea v-model="ajukanForm.alasan" rows="3" style="width: 100%" placeholder="Alasan pensiun dini" />
+      </div>
+      <div class="field-label-wrap">
+        <label class="field-label">Berkas SK/Usulan Pensiun (PDF, JPG, atau PNG)</label>
+        <input ref="ajukanFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onAjukanFileChosen" />
+        <Button :label="ajukanFile ? ajukanFile.name : 'Pilih Berkas'" icon="pi pi-file" severity="secondary" outlined @click="pickAjukanFile" />
+      </div>
+      <template #footer>
+        <Button label="Batal" severity="secondary" outlined @click="ajukanDialog = false" />
+        <Button label="Kirim Pengajuan" icon="pi pi-send" :loading="ajukanSubmitting" @click="submitAjukan" />
+      </template>
+    </Dialog>
+
     <!-- Preview dokumen SK -->
     <Dialog v-model:visible="previewDialog" modal header="Berkas SK / Usulan Pensiun" :style="{ width: '95vw', maxWidth: '62rem' }" @hide="closePreview">
       <div v-if="previewType === 'pdf'" style="width: 100%; height: 75vh">
@@ -400,6 +545,23 @@ onMounted(() => {
   font-size: 0.85rem;
   font-weight: 600;
   margin-bottom: 0.35rem;
+}
+
+.field-label-wrap {
+  margin-bottom: 1.1rem;
+}
+
+.tab-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.tab-toolbar .tab-filter {
+  flex: 1;
+  min-width: 260px;
 }
 
 .pengaturan-grid {

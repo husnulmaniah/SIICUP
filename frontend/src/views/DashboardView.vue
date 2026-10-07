@@ -130,11 +130,13 @@ onMounted(() => {
 
 <template>
   <div class="page-wrap">
-    <div class="dashboard-header">
-      <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="dashboard-logo" />
-      <div>
-        <div class="page-title">Selamat datang, {{ auth.user?.nama }}</div>
-        <p class="page-subtitle">Ringkasan manajemen administrasi dinas utama &mdash; Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara</p>
+    <div class="dashboard-banner">
+      <div class="dashboard-header">
+        <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="dashboard-logo" />
+        <div>
+          <div class="page-title">Selamat datang, {{ auth.user?.nama }}</div>
+          <p class="page-subtitle" style="margin-bottom: 0">Ringkasan manajemen administrasi dinas utama &mdash; Dinas Pendidikan dan Kebudayaan Daerah Kabupaten Morowali Utara</p>
+        </div>
       </div>
     </div>
 
@@ -146,10 +148,22 @@ onMounted(() => {
       <!-- administrator / admin -->
       <template v-if="['administrator', 'admin'].includes(data.role)">
         <div class="stat-grid">
-          <div class="stat-card"><div class="stat-value">{{ data.total_pegawai }}</div><div class="stat-label">Total Pegawai</div></div>
-          <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Pengajuan Menunggu</div></div>
-          <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
-          <div class="stat-card" style="border-color: #ef4444"><div class="stat-value">{{ data.total_ditolak }}</div><div class="stat-label">Ditolak</div></div>
+          <div class="stat-card tile-teal">
+            <div class="stat-icon-badge"><i class="pi pi-users"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_pegawai }}</div><div class="stat-label">Total Pegawai</div></div>
+          </div>
+          <div class="stat-card tile-amber">
+            <div class="stat-icon-badge"><i class="pi pi-clock"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Pengajuan Menunggu</div></div>
+          </div>
+          <div class="stat-card tile-green">
+            <div class="stat-icon-badge"><i class="pi pi-check-circle"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
+          </div>
+          <div class="stat-card tile-red">
+            <div class="stat-icon-badge"><i class="pi pi-times-circle"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_ditolak }}</div><div class="stat-label">Ditolak</div></div>
+          </div>
         </div>
         <div class="card">
           <h3 style="margin-top: 0">Pengajuan Cuti Terbaru</h3>
@@ -171,9 +185,18 @@ onMounted(() => {
       <!-- atasan -->
       <template v-else-if="data.role === 'atasan'">
         <div class="stat-grid">
-          <div class="stat-card"><div class="stat-value">{{ data.total_bawahan }}</div><div class="stat-label">Jumlah Bawahan</div></div>
-          <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Menunggu Persetujuan</div></div>
-          <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
+          <div class="stat-card tile-teal">
+            <div class="stat-icon-badge"><i class="pi pi-sitemap"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_bawahan }}</div><div class="stat-label">Jumlah Bawahan</div></div>
+          </div>
+          <div class="stat-card tile-amber">
+            <div class="stat-icon-badge"><i class="pi pi-clock"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Menunggu Persetujuan</div></div>
+          </div>
+          <div class="stat-card tile-green">
+            <div class="stat-icon-badge"><i class="pi pi-check-circle"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
+          </div>
         </div>
         <div class="card">
           <h3 style="margin-top: 0">Menunggu Persetujuan Anda</h3>
@@ -284,10 +307,22 @@ onMounted(() => {
         </Message>
 
         <div class="stat-grid">
-          <div class="stat-card"><div class="stat-value">{{ data.jatah_tahun_ini }}</div><div class="stat-label">Jatah Cuti Tahun Ini</div></div>
-          <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.terpakai }}</div><div class="stat-label">Terpakai</div></div>
-          <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.sisa }}</div><div class="stat-label">Sisa Cuti</div></div>
-          <div class="stat-card" style="border-color: #0d9488"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Menunggu Persetujuan</div></div>
+          <div class="stat-card tile-teal">
+            <div class="stat-icon-badge"><i class="pi pi-calendar"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.jatah_tahun_ini }}</div><div class="stat-label">Jatah Cuti Tahun Ini</div></div>
+          </div>
+          <div class="stat-card tile-amber">
+            <div class="stat-icon-badge"><i class="pi pi-calendar-minus"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.terpakai }}</div><div class="stat-label">Terpakai</div></div>
+          </div>
+          <div class="stat-card tile-green">
+            <div class="stat-icon-badge"><i class="pi pi-calendar-plus"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.sisa }}</div><div class="stat-label">Sisa Cuti</div></div>
+          </div>
+          <div class="stat-card tile-sky">
+            <div class="stat-icon-badge"><i class="pi pi-clock"></i></div>
+            <div class="stat-body"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Menunggu Persetujuan</div></div>
+          </div>
         </div>
 
         <div v-if="data.statistik_absensi" class="card">
@@ -296,21 +331,41 @@ onMounted(() => {
             Dari {{ data.statistik_absensi.total_hari_kerja }} hari kerja bulan ini (Sabtu-Minggu untuk pegawai dinas, atau hanya Minggu untuk pegawai sekolah, & tanggal merah tidak dihitung)
           </p>
           <div class="stat-grid stat-grid-absensi">
-            <div class="stat-card" style="border-color: #22c55e"><div class="stat-value">{{ data.statistik_absensi.hadir }}</div><div class="stat-label">Hadir</div></div>
-            <div class="stat-card" style="border-color: #f97316"><div class="stat-value">{{ data.statistik_absensi.sakit }}</div><div class="stat-label">Sakit</div></div>
-            <div class="stat-card" style="border-color: #f59e0b"><div class="stat-value">{{ data.statistik_absensi.izin }}</div><div class="stat-label">Izin</div></div>
-            <div class="stat-card" style="border-color: #0ea5e9"><div class="stat-value">{{ data.statistik_absensi.cuti }}</div><div class="stat-label">Cuti</div></div>
-            <div class="stat-card" style="border-color: #a855f7"><div class="stat-value">{{ data.statistik_absensi.cuti_melahirkan }}</div><div class="stat-label">Cuti Melahirkan</div></div>
-            <div class="stat-card" style="border-color: #d97706"><div class="stat-value">{{ data.statistik_absensi.tidak_absen_pulang }}</div><div class="stat-label">Hadir tapi Tidak Absen Pulang</div></div>
-            <div class="stat-card" style="border-color: #ef4444"><div class="stat-value">{{ data.statistik_absensi.tidak_melakukan_absensi }}</div><div class="stat-label">Tidak Melakukan Absensi</div></div>
+            <div class="stat-card tile-green">
+              <div class="stat-icon-badge"><i class="pi pi-check"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.statistik_absensi.hadir }}</div><div class="stat-label">Hadir</div></div>
+            </div>
+            <div class="stat-card tile-orange">
+              <div class="stat-icon-badge"><i class="pi pi-heart"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.statistik_absensi.sakit }}</div><div class="stat-label">Sakit</div></div>
+            </div>
+            <div class="stat-card tile-amber">
+              <div class="stat-icon-badge"><i class="pi pi-info-circle"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.statistik_absensi.izin }}</div><div class="stat-label">Izin</div></div>
+            </div>
+            <div class="stat-card tile-sky">
+              <div class="stat-icon-badge"><i class="pi pi-calendar"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.statistik_absensi.cuti }}</div><div class="stat-label">Cuti</div></div>
+            </div>
+            <div class="stat-card tile-purple">
+              <div class="stat-icon-badge"><i class="pi pi-heart-fill"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.statistik_absensi.cuti_melahirkan }}</div><div class="stat-label">Cuti Melahirkan</div></div>
+            </div>
+            <div class="stat-card tile-slate">
+              <div class="stat-icon-badge"><i class="pi pi-exclamation-triangle"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.statistik_absensi.tidak_absen_pulang }}</div><div class="stat-label">Hadir tapi Tidak Absen Pulang</div></div>
+            </div>
+            <div class="stat-card tile-red">
+              <div class="stat-icon-badge"><i class="pi pi-ban"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.statistik_absensi.tidak_melakukan_absensi }}</div><div class="stat-label">Tidak Melakukan Absensi</div></div>
+            </div>
             <div
               v-for="(jumlah, kode) in data.statistik_absensi.lainnya || {}"
               :key="kode"
-              class="stat-card"
-              style="border-color: #64748b"
+              class="stat-card tile-slate"
             >
-              <div class="stat-value">{{ jumlah }}</div>
-              <div class="stat-label">{{ kode }}</div>
+              <div class="stat-icon-badge"><i class="pi pi-tag"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ jumlah }}</div><div class="stat-label">{{ kode }}</div></div>
             </div>
           </div>
         </div>
@@ -336,11 +391,30 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* ============================================================
+   Tampilan dashboard "lebih soft, elegan & menarik" (permintaan pengguna):
+   kartu statistik diganti dari aksen garis kiri warna tegas di atas latar
+   putih polos, jadi latar pastel lembut senada + lencana ikon bundar +
+   angka besar dalam warna aksen yang lebih kalem -- pola "soft stat tile"
+   yang umum dipakai dashboard modern, sekaligus tetap mempertahankan kode
+   warna semantik yang sama (hijau = disetujui/hadir, kuning = menunggu,
+   merah = ditolak/kritis, dst.) supaya artinya tidak berubah, cuma lebih
+   enak dilihat. SEMUA perubahan di-scoped ke komponen ini saja (lihat
+   atribut data-v- yang disisipkan Vue) -- halaman lain yang juga memakai
+   class global .stat-card/.card (lihat style.css) TIDAK ikut terdampak.
+   ============================================================ */
+.dashboard-banner {
+  background: linear-gradient(135deg, #f0fdfa 0%, #ffffff 65%);
+  border-radius: 20px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 10px 24px -14px rgba(15, 23, 42, 0.12);
+}
+
 .dashboard-header {
   display: flex;
   align-items: center;
   gap: 1rem;
-  margin-bottom: 0.5rem;
 }
 
 .dashboard-logo {
@@ -350,9 +424,95 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
+  .dashboard-banner {
+    padding: 1rem;
+  }
   .dashboard-logo {
     height: 42px;
   }
+}
+
+/* Kartu statistik: latar pastel (var --tile-bg dari salah satu modifier
+   .tile-* di bawah) menggantikan latar putih + garis kiri tegas bawaan
+   .stat-card (style.css) -- override di sini otomatis lebih spesifik
+   karena Vue menambahkan atribut data-v- pada selector scoped, tanpa perlu
+   !important. */
+.stat-card {
+  border-left: none;
+  background: var(--tile-bg, var(--p-content-background, #fff));
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 4px 14px -8px rgba(15, 23, 42, 0.08);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.stat-icon-badge {
+  width: 2.4rem;
+  height: 2.4rem;
+  min-width: 2.4rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tile-icon-bg, rgba(13, 148, 136, 0.12));
+  color: var(--tile-accent, #0f766e);
+  font-size: 1.1rem;
+}
+
+.stat-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stat-card .stat-value {
+  color: var(--tile-accent, inherit);
+}
+
+/* palet pastel lembut per makna semantik (dipakai via class tile-* pada
+   markup) -- latar (--tile-bg) & lencana ikon (--tile-icon-bg) sengaja
+   dibuat jauh lebih muda/lembut daripada warna aksen teks (--tile-accent)
+   supaya kontras angka & label tetap enak dibaca, bukan sekadar warna
+   terang di atas warna terang. */
+.tile-teal {
+  --tile-bg: #f0fdfa;
+  --tile-accent: #0f766e;
+  --tile-icon-bg: rgba(15, 118, 110, 0.12);
+}
+.tile-amber {
+  --tile-bg: #fffbeb;
+  --tile-accent: #b45309;
+  --tile-icon-bg: rgba(180, 83, 9, 0.12);
+}
+.tile-green {
+  --tile-bg: #ecfdf5;
+  --tile-accent: #15803d;
+  --tile-icon-bg: rgba(21, 128, 61, 0.12);
+}
+.tile-red {
+  --tile-bg: #fef2f2;
+  --tile-accent: #b91c1c;
+  --tile-icon-bg: rgba(185, 28, 28, 0.12);
+}
+.tile-sky {
+  --tile-bg: #eff6ff;
+  --tile-accent: #0369a1;
+  --tile-icon-bg: rgba(3, 105, 161, 0.12);
+}
+.tile-purple {
+  --tile-bg: #faf5ff;
+  --tile-accent: #7e22ce;
+  --tile-icon-bg: rgba(126, 34, 206, 0.12);
+}
+.tile-orange {
+  --tile-bg: #fff7ed;
+  --tile-accent: #c2410c;
+  --tile-icon-bg: rgba(194, 65, 12, 0.12);
+}
+.tile-slate {
+  --tile-bg: #f8fafc;
+  --tile-accent: #475569;
+  --tile-icon-bg: rgba(71, 85, 105, 0.12);
 }
 
 .stat-grid-absensi {
@@ -361,6 +521,13 @@ onMounted(() => {
 }
 .stat-grid-absensi .stat-card {
   padding: 0.85rem 1rem;
+}
+.stat-grid-absensi .stat-icon-badge {
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  font-size: 0.95rem;
+  border-radius: 10px;
 }
 .stat-grid-absensi .stat-value {
   font-size: 1.4rem;
