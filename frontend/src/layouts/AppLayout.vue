@@ -343,6 +343,7 @@ const menuLainnyaAktif = computed(
         <div class="sidebar-brand-text">
           <span class="sidebar-brand-title">SIMADU</span>
           <span class="sidebar-brand-subtitle">Sistem Informasi Manajemen Administrasi Dinas Utama</span>
+          <span class="sidebar-brand-instansi">Dinas Pendidikan dan Kebudayaan Daerah</span>
         </div>
       </div>
       <nav class="sidebar-nav">
@@ -397,6 +398,7 @@ const menuLainnyaAktif = computed(
           <div class="topbar-brand-text">
             <span class="topbar-brand-title">SIMADU</span>
             <span class="topbar-brand-subtitle">Sistem Informasi Manajemen Administrasi Dinas Utama</span>
+            <span class="topbar-brand-instansi">Dinas Pendidikan dan Kebudayaan Daerah</span>
           </div>
         </div>
         <div class="topbar-title">{{ roleLabel }}</div>
@@ -504,11 +506,18 @@ const menuLainnyaAktif = computed(
 
 .sidebar {
   width: 260px;
-  /* gradien tipis (bukan warna navy flat) -- permintaan pengguna "tampilan
-     lebih modern": memberi kesan kedalaman tanpa mengubah identitas warna
-     gelap sidebar yang sudah ada. */
-  background: linear-gradient(195deg, #11293d 0%, #0c1f30 100%);
-  color: #e5e7eb;
+  /* Permintaan pengguna "lebih soft dan menarik": sidebar diganti dari tema
+     gelap (navy) jadi latar TERANG lembut (gradien putih -> teal sangat
+     muda, SAMA palet pastel teal yang sudah dipakai di .dashboard-banner
+     pada DashboardView.vue) -- gaya dashboard SaaS modern, tetap memakai
+     warna identitas teal aplikasi untuk aksennya (lihat .nav-item.active).
+     Garis & bayangan tipis di sisi kanan menggantikan kontras gelap/terang
+     yang dulu otomatis didapat dari warna navy, supaya sidebar tetap
+     terlihat sebagai panel terpisah dari konten di sampingnya. */
+  background: linear-gradient(195deg, #ffffff 0%, #f0fdfa 100%);
+  color: #334155;
+  border-right: 1px solid #e2e8f0;
+  box-shadow: 1px 0 6px rgba(15, 23, 42, 0.04);
   position: fixed;
   top: 0;
   bottom: 0;
@@ -526,8 +535,8 @@ const menuLainnyaAktif = computed(
   align-items: center;
   gap: 0.6rem;
   padding: 1.15rem 1.25rem;
-  color: #fff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #0f172a;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .sidebar-logo {
@@ -548,14 +557,28 @@ const menuLainnyaAktif = computed(
   font-weight: 700;
   font-size: 1.02rem;
   line-height: 1.2;
+  color: #0f766e;
 }
 
 .sidebar-brand-subtitle {
   font-size: 0.62rem;
   font-weight: 400;
-  color: #94a3b8;
+  color: #64748b;
   line-height: 1.25;
   margin-top: 0.15rem;
+}
+
+/* sidebar-brand-instansi: baris ke-3 "Dinas Pendidikan dan Kebudayaan
+   Daerah" -- permintaan pengguna menambahkan nama instansi pemilik
+   aplikasi di bawah nama & kepanjangan SIMADU. Sedikit lebih kecil &
+   pudar dari subtitle supaya tetap jelas urutan hierarkinya (judul ->
+   kepanjangan -> instansi), bukan bersaing jadi sama menonjol. */
+.sidebar-brand-instansi {
+  font-size: 0.6rem;
+  font-weight: 500;
+  color: #94a3b8;
+  line-height: 1.25;
+  margin-top: 0.2rem;
 }
 
 .sidebar-nav {
@@ -567,7 +590,7 @@ const menuLainnyaAktif = computed(
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b7280;
+  color: #94a3b8;
   padding: 1rem 0.6rem 0.35rem;
   font-weight: 600;
 }
@@ -586,7 +609,7 @@ const menuLainnyaAktif = computed(
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #9ca3af;
+  color: #64748b;
   padding: 0.75rem 0.6rem 0.75rem 0.7rem;
   font-weight: 600;
   border-radius: 8px;
@@ -594,8 +617,8 @@ const menuLainnyaAktif = computed(
 }
 
 .nav-section-dropdown:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: rgba(13, 148, 136, 0.08);
+  color: #0f766e;
 }
 
 .nav-dropdown-chevron {
@@ -620,25 +643,27 @@ const menuLainnyaAktif = computed(
   padding: 0.6rem 0.7rem;
   border-radius: 10px;
   cursor: pointer;
-  color: #d1d5db;
+  color: #475569;
   font-size: 0.89rem;
   margin-bottom: 0.1rem;
   transition: background-color .15s ease, color .15s ease, transform .15s ease;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: #fff;
+  background: rgba(13, 148, 136, 0.08);
+  color: #0f766e;
   transform: translateX(2px);
 }
 
 /* menu aktif: gradien teal + bayangan tipis warna teal (bukan solid flat)
-   supaya terasa lebih modern/"mengangkat" -- tetap kontras jelas dengan
-   latar sidebar yang gelap. */
+   supaya terasa lebih modern/"mengangkat" -- warna gradien teal yang SAMA
+   dipertahankan supaya identitas aksen aplikasi tidak berubah, hanya
+   latar sidebar di sekitarnya yang sekarang terang/lembut, jadi pill aktif
+   ini tetap kontras jelas & jadi penanda posisi menu yang paling menonjol. */
 .nav-item.active {
   background: linear-gradient(135deg, #14b8a6, #0d9488);
   color: #fff;
-  box-shadow: 0 4px 10px -2px rgba(13, 148, 136, 0.5);
+  box-shadow: 0 4px 10px -2px rgba(13, 148, 136, 0.35);
 }
 
 .nav-item.active:hover {
@@ -703,6 +728,23 @@ const menuLainnyaAktif = computed(
   color: #64748b;
   line-height: 1.2;
   margin-top: 0.1rem;
+}
+
+/* topbar-brand-instansi: SAMA tujuan dengan .sidebar-brand-instansi (nama
+   instansi "Dinas Pendidikan dan Kebudayaan Daerah") tapi khusus versi HP
+   (topbar-brand hanya tampil di layar <=900px, lihat media query di
+   bawah) -- dipotong satu baris (ellipsis) supaya tidak menambah tinggi
+   topbar yang memang dibuat ringkas di HP.  */
+.topbar-brand-instansi {
+  font-size: 0.5rem;
+  font-weight: 400;
+  color: #94a3b8;
+  line-height: 1.15;
+  margin-top: 0.05rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
 }
 
 .topbar-title {
