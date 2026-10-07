@@ -35,6 +35,11 @@ async function submit() {
 
 <template>
   <div class="login-page">
+    <!-- dua lingkaran blur dekoratif -- permintaan pengguna "tampilan lebih
+         modern": murni hiasan CSS (tanpa gambar), aman diabaikan pembaca
+         layar (aria-hidden) dan tidak mengubah apa pun secara fungsional. -->
+    <div class="login-decor login-decor-1" aria-hidden="true"></div>
+    <div class="login-decor login-decor-2" aria-hidden="true"></div>
     <div class="login-card">
       <div class="login-brand">
         <img src="/logo-morowali-utara.png" alt="Logo Kabupaten Morowali Utara" class="login-logo" />
@@ -75,15 +80,62 @@ async function submit() {
   justify-content: center;
   background: linear-gradient(135deg, #0d3b52 0%, #0d9488 55%, #5eead4 100%);
   padding: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+/* lingkaran blur besar di pojok -- hanya dekorasi, memberi kesan kedalaman
+   pada gradien latar yang sebelumnya polos. */
+.login-decor {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(4px);
+  pointer-events: none;
+}
+
+.login-decor-1 {
+  width: 420px;
+  height: 420px;
+  top: -140px;
+  left: -140px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 70%);
+}
+
+.login-decor-2 {
+  width: 520px;
+  height: 520px;
+  bottom: -220px;
+  right: -180px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.12), transparent 70%);
 }
 
 .login-card {
+  position: relative;
+  z-index: 1;
   background: #fff;
-  border-radius: 16px;
+  border-radius: 20px;
   padding: 2.25rem 2rem;
   width: 100%;
   max-width: 380px;
-  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.25);
+  animation: login-card-in 0.35s ease both;
+}
+
+@keyframes login-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-card {
+    animation: none;
+  }
 }
 
 .login-brand {

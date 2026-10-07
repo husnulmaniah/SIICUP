@@ -496,7 +496,10 @@ const menuLainnyaAktif = computed(
 
 .sidebar {
   width: 260px;
-  background: #0f2436;
+  /* gradien tipis (bukan warna navy flat) -- permintaan pengguna "tampilan
+     lebih modern": memberi kesan kedalaman tanpa mengubah identitas warna
+     gelap sidebar yang sudah ada. */
+  background: linear-gradient(195deg, #11293d 0%, #0c1f30 100%);
   color: #e5e7eb;
   position: fixed;
   top: 0;
@@ -607,21 +610,31 @@ const menuLainnyaAktif = computed(
   align-items: center;
   gap: 0.65rem;
   padding: 0.6rem 0.7rem;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   color: #d1d5db;
   font-size: 0.89rem;
   margin-bottom: 0.1rem;
+  transition: background-color .15s ease, color .15s ease, transform .15s ease;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.07);
   color: #fff;
+  transform: translateX(2px);
 }
 
+/* menu aktif: gradien teal + bayangan tipis warna teal (bukan solid flat)
+   supaya terasa lebih modern/"mengangkat" -- tetap kontras jelas dengan
+   latar sidebar yang gelap. */
 .nav-item.active {
-  background: #0d9488;
+  background: linear-gradient(135deg, #14b8a6, #0d9488);
   color: #fff;
+  box-shadow: 0 4px 10px -2px rgba(13, 148, 136, 0.5);
+}
+
+.nav-item.active:hover {
+  transform: none;
 }
 
 .main-area {
@@ -634,8 +647,10 @@ const menuLainnyaAktif = computed(
 
 .topbar {
   min-height: 60px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
   border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -705,7 +720,8 @@ const menuLainnyaAktif = computed(
   gap: 0.5rem;
   cursor: pointer;
   padding: 0.3rem 0.5rem;
-  border-radius: 8px;
+  border-radius: 999px;
+  transition: background-color .15s ease;
 }
 
 .topbar-user:hover {
@@ -734,10 +750,12 @@ const menuLainnyaAktif = computed(
   cursor: pointer;
   color: #4b5563;
   font-size: 1.05rem;
+  transition: background-color .15s ease, color .15s ease;
 }
 
 .notif-bell:hover {
   background: #f3f4f6;
+  color: #0d9488;
 }
 
 .notif-bell :deep(.notif-badge) {
@@ -791,6 +809,7 @@ const menuLainnyaAktif = computed(
   padding: 0.55rem 0.5rem;
   border-radius: 8px;
   cursor: pointer;
+  transition: background-color .15s ease;
 }
 
 .notif-item:hover {
@@ -844,6 +863,7 @@ const menuLainnyaAktif = computed(
 }
 
 .bottom-nav-item {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -858,10 +878,12 @@ const menuLainnyaAktif = computed(
   line-height: 1.1;
   text-align: center;
   -webkit-tap-highlight-color: transparent;
+  transition: color .15s ease;
 }
 
 .bottom-nav-item i {
   font-size: 1.15rem;
+  transition: transform .15s ease;
 }
 
 .bottom-nav-item span {
@@ -874,6 +896,22 @@ const menuLainnyaAktif = computed(
 .bottom-nav-item.active {
   color: #0d9488;
   font-weight: 600;
+}
+
+.bottom-nav-item.active i {
+  transform: translateY(-1px);
+}
+
+/* titik kecil di atas ikon menu aktif -- penanda halus ala aplikasi
+   mobile modern, SELAIN perubahan warna supaya lebih kelihatan sekilas. */
+.bottom-nav-item.active::before {
+  content: '';
+  position: absolute;
+  top: 0.2rem;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #0d9488;
 }
 
 /* lembar "Lainnya" yang muncul dari bawah layar */
@@ -943,6 +981,11 @@ const menuLainnyaAktif = computed(
   color: #374151;
   font-size: 0.92rem;
   cursor: pointer;
+  transition: background-color .15s ease;
+}
+
+.more-item:hover {
+  background: #f8fafc;
 }
 
 .more-item i {
