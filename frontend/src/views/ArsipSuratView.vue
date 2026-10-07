@@ -13,6 +13,11 @@ import Tag from 'primevue/tag'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Textarea from 'primevue/textarea'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
+import TabPanels from 'primevue/tabpanels'
+import TabPanel from 'primevue/tabpanel'
 
 // ArsipSuratView -- menu "Arsip Surat" (pegawai/atasan): daftar surat
 // rekomendasi perpanjangan kontrak, bisa dilihat/diunduh sebagai PDF kapan
@@ -303,106 +308,171 @@ onMounted(loadBaList)
 <template>
   <div class="page-wrap">
     <div class="page-title">Arsip Surat</div>
-    <p class="page-subtitle" v-if="authStore.isAtasan">
-      Surat rekomendasi bawahan langsung anda. Khusus surat pegawai Sekolah/Puskesmas yang masih "Menunggu
-      Persetujuan", klik "Setujui" supaya tanda tangan QR otomatis anda muncul di surat itu -- sebelum disetujui,
-      surat tetap bisa dilihat/diunduh pegawai, hanya tanda tangannya masih kosong.
-    </p>
-    <p class="page-subtitle" v-else>
-      Surat rekomendasi yang dikirim administrator untuk anda, beserta Lampiran 1 (surat permohonan perpanjangan
-      kontrak yang anda ajukan sendiri ke Bupati) -- dua berkas sekaligus untuk setiap pengiriman. Klik "Lihat" untuk
-      membuka langsung, atau ikon unduh untuk menyimpan sebagai PDF.
-    </p>
 
-    <div v-if="loading" style="display: flex; justify-content: center; padding: 3rem">
-      <ProgressSpinner style="width: 42px; height: 42px" />
-    </div>
-
-    <Message v-else-if="!items.length" severity="info" :closable="false">
-      {{ authStore.isAtasan ? 'Belum ada surat rekomendasi bawahan anda.' : 'Belum ada surat rekomendasi yang dikirim untuk anda.' }}
-    </Message>
-
-    <div v-else class="arsip-grid">
-      <div v-for="item in items" :key="item.id" class="arsip-card">
-        <div class="arsip-card-icon"><i class="pi pi-file-pdf"></i></div>
-        <div class="arsip-card-body">
-          <div class="arsip-card-title" :title="item.judul">{{ item.judul }}</div>
-          <div v-if="authStore.isAtasan" class="arsip-card-pegawai">{{ item.nama_pegawai }}</div>
-          <div class="arsip-card-nomor">{{ item.nomor_surat }}</div>
-          <div class="arsip-card-meta">{{ formatTanggal(item.tanggal_surat) }}</div>
-          <Tag
-            v-if="item.is_sekolah"
-            :value="item.status_approval === 'pending' ? (authStore.isAtasan ? 'Menunggu Persetujuan' : 'Menunggu Persetujuan Kepala Sekolah') : 'Disetujui'"
-            :severity="item.status_approval === 'pending' ? 'warn' : 'success'"
-            class="arsip-card-status"
-          />
-        </div>
-        <div class="arsip-card-actions">
-          <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
-          <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh Surat Rekomendasi" />
-        </div>
-        <div v-if="authStore.isAtasan && item.is_sekolah && item.status_approval === 'pending'" class="arsip-card-approve">
-          <Button
-            label="Setujui"
-            icon="pi pi-check"
-            size="small"
-            severity="success"
-            :loading="approving === item.id"
-            @click="confirmApprove(item)"
-          />
-        </div>
-        <div v-if="!authStore.isAtasan" class="arsip-card-lampiran">
-          <span class="arsip-card-lampiran-label">Lampiran 1 (Permohonan):</span>
-          <Button icon="pi pi-eye" size="small" severity="secondary" text @click="lihatLampiran1(item)" title="Lihat Lampiran 1" />
-          <Button icon="pi pi-download" size="small" severity="secondary" text @click="unduhLampiran1(item)" title="Unduh Lampiran 1" />
-        </div>
-      </div>
-    </div>
-
-    <!-- ================= Pengajuan Berita Acara mandiri bawahan (khusus atasan) ================= -->
+    <!-- Khusus akun atasan: "Arsip Surat" & "Pengajuan Berita Acara Bawahan"
+         digabung jadi 2 tab (permintaan pengguna) -- sebelumnya dua section
+         ditumpuk berurutan di halaman yang sama. Nama tab dilengkapi ikon
+         SVG inline: kotak arsip untuk "Arsip Surat", dokumen+pena untuk
+         "Pengajuan Berita Acara Bawahan" -- pakai currentColor supaya warna
+         ikon otomatis ikut teal saat tab aktif & abu-abu saat tidak aktif.
+         Akun pegawai biasa cuma punya 1 section (Arsip Surat) jadi TETAP
+         ditampilkan langsung tanpa tab. -->
     <template v-if="authStore.isAtasan">
-      <h3 style="margin-top: 2rem">Pengajuan Berita Acara Bawahan</h3>
+      <Tabs value="arsip">
+        <TabList>
+          <Tab value="arsip">
+            <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="4" rx="1" />
+              <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+              <path d="M10 12h4" />
+            </svg>
+            <span>Arsip Surat</span>
+          </Tab>
+          <Tab value="ba">
+            <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" />
+              <path d="M13 3l5 5" />
+              <path d="M13 3v5h5" />
+              <path d="M9 13h3" />
+              <path d="M9 17h2.5" />
+              <path d="M15.5 14.5l3 3L16 20l-3-1 .5-2.5z" />
+            </svg>
+            <span>Pengajuan Berita Acara Bawahan</span>
+          </Tab>
+        </TabList>
+        <TabPanels>
+          <TabPanel value="arsip">
+            <p class="page-subtitle">
+              Surat rekomendasi bawahan langsung anda. Khusus surat pegawai Sekolah/Puskesmas yang masih "Menunggu
+              Persetujuan", klik "Setujui" supaya tanda tangan QR otomatis anda muncul di surat itu -- sebelum
+              disetujui, surat tetap bisa dilihat/diunduh pegawai, hanya tanda tangannya masih kosong.
+            </p>
+
+            <div v-if="loading" style="display: flex; justify-content: center; padding: 3rem">
+              <ProgressSpinner style="width: 42px; height: 42px" />
+            </div>
+
+            <Message v-else-if="!items.length" severity="info" :closable="false">Belum ada surat rekomendasi bawahan anda.</Message>
+
+            <div v-else class="arsip-grid">
+              <div v-for="item in items" :key="item.id" class="arsip-card">
+                <div class="arsip-card-icon"><i class="pi pi-file-pdf"></i></div>
+                <div class="arsip-card-body">
+                  <div class="arsip-card-title" :title="item.judul">{{ item.judul }}</div>
+                  <div class="arsip-card-pegawai">{{ item.nama_pegawai }}</div>
+                  <div class="arsip-card-nomor">{{ item.nomor_surat }}</div>
+                  <div class="arsip-card-meta">{{ formatTanggal(item.tanggal_surat) }}</div>
+                  <Tag
+                    v-if="item.is_sekolah"
+                    :value="item.status_approval === 'pending' ? 'Menunggu Persetujuan' : 'Disetujui'"
+                    :severity="item.status_approval === 'pending' ? 'warn' : 'success'"
+                    class="arsip-card-status"
+                  />
+                </div>
+                <div class="arsip-card-actions">
+                  <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
+                  <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh Surat Rekomendasi" />
+                </div>
+                <div v-if="item.is_sekolah && item.status_approval === 'pending'" class="arsip-card-approve">
+                  <Button
+                    label="Setujui"
+                    icon="pi pi-check"
+                    size="small"
+                    severity="success"
+                    :loading="approving === item.id"
+                    @click="confirmApprove(item)"
+                  />
+                </div>
+              </div>
+            </div>
+          </TabPanel>
+
+          <TabPanel value="ba">
+            <p class="page-subtitle">
+              Pengajuan Berita Acara mandiri bawahan Anda yang bertugas di sekolah. Setujui untuk meneruskan ke
+              administrator/admin (persetujuan tahap akhir), atau kembalikan untuk direvisi (wajib isi catatan).
+            </p>
+            <div v-if="loadingBa" style="display: flex; justify-content: center; padding: 2rem">
+              <ProgressSpinner style="width: 36px; height: 36px" />
+            </div>
+            <Message v-else-if="!baList.length" severity="info" :closable="false">Belum ada pengajuan Berita Acara dari bawahan Anda.</Message>
+            <DataTable v-else :value="baList" size="small" stripedRows responsiveLayout="scroll">
+              <Column header="Pegawai">
+                <template #body="{ data }">{{ data.pegawai?.nama }}</template>
+              </Column>
+              <Column header="Tanggal Kejadian">
+                <template #body="{ data }">{{ formatTanggalBa(data.tanggal_kejadian) }}</template>
+              </Column>
+              <Column field="alasan" header="Alasan" />
+              <Column header="Status">
+                <template #body="{ data }">
+                  <Tag :severity="statusBaSeverity(data.status)" :value="statusBaLabel(data.status)" />
+                </template>
+              </Column>
+              <Column header="Aksi">
+                <template #body="{ data }">
+                  <Button icon="pi pi-eye" size="small" text rounded title="Lihat PDF" @click="lihatBa(data)" />
+                  <Button icon="pi pi-download" size="small" text rounded title="Unduh PDF" @click="unduhBa(data)" />
+                  <template v-if="data.status === 'menunggu_atasan'">
+                    <Button
+                      icon="pi pi-check"
+                      size="small"
+                      text
+                      rounded
+                      severity="success"
+                      title="Setujui"
+                      :loading="approvingBa === data.id"
+                      @click="confirmApproveBa(data)"
+                    />
+                    <Button icon="pi pi-undo" size="small" text rounded severity="danger" title="Kembalikan untuk direvisi" @click="bukaKembalikanBa(data)" />
+                  </template>
+                </template>
+              </Column>
+            </DataTable>
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
+    </template>
+
+    <!-- Akun pegawai biasa: hanya ada 1 section, tidak perlu tab -->
+    <template v-else>
       <p class="page-subtitle">
-        Pengajuan Berita Acara mandiri bawahan Anda yang bertugas di sekolah. Setujui untuk meneruskan ke
-        administrator/admin (persetujuan tahap akhir), atau kembalikan untuk direvisi (wajib isi catatan).
+        Surat rekomendasi yang dikirim administrator untuk anda, beserta Lampiran 1 (surat permohonan perpanjangan
+        kontrak yang anda ajukan sendiri ke Bupati) -- dua berkas sekaligus untuk setiap pengiriman. Klik "Lihat" untuk
+        membuka langsung, atau ikon unduh untuk menyimpan sebagai PDF.
       </p>
-      <div v-if="loadingBa" style="display: flex; justify-content: center; padding: 2rem">
-        <ProgressSpinner style="width: 36px; height: 36px" />
+
+      <div v-if="loading" style="display: flex; justify-content: center; padding: 3rem">
+        <ProgressSpinner style="width: 42px; height: 42px" />
       </div>
-      <Message v-else-if="!baList.length" severity="info" :closable="false">Belum ada pengajuan Berita Acara dari bawahan Anda.</Message>
-      <DataTable v-else :value="baList" size="small" stripedRows responsiveLayout="scroll">
-        <Column header="Pegawai">
-          <template #body="{ data }">{{ data.pegawai?.nama }}</template>
-        </Column>
-        <Column header="Tanggal Kejadian">
-          <template #body="{ data }">{{ formatTanggalBa(data.tanggal_kejadian) }}</template>
-        </Column>
-        <Column field="alasan" header="Alasan" />
-        <Column header="Status">
-          <template #body="{ data }">
-            <Tag :severity="statusBaSeverity(data.status)" :value="statusBaLabel(data.status)" />
-          </template>
-        </Column>
-        <Column header="Aksi">
-          <template #body="{ data }">
-            <Button icon="pi pi-eye" size="small" text rounded title="Lihat PDF" @click="lihatBa(data)" />
-            <Button icon="pi pi-download" size="small" text rounded title="Unduh PDF" @click="unduhBa(data)" />
-            <template v-if="data.status === 'menunggu_atasan'">
-              <Button
-                icon="pi pi-check"
-                size="small"
-                text
-                rounded
-                severity="success"
-                title="Setujui"
-                :loading="approvingBa === data.id"
-                @click="confirmApproveBa(data)"
-              />
-              <Button icon="pi pi-undo" size="small" text rounded severity="danger" title="Kembalikan untuk direvisi" @click="bukaKembalikanBa(data)" />
-            </template>
-          </template>
-        </Column>
-      </DataTable>
+
+      <Message v-else-if="!items.length" severity="info" :closable="false">Belum ada surat rekomendasi yang dikirim untuk anda.</Message>
+
+      <div v-else class="arsip-grid">
+        <div v-for="item in items" :key="item.id" class="arsip-card">
+          <div class="arsip-card-icon"><i class="pi pi-file-pdf"></i></div>
+          <div class="arsip-card-body">
+            <div class="arsip-card-title" :title="item.judul">{{ item.judul }}</div>
+            <div class="arsip-card-nomor">{{ item.nomor_surat }}</div>
+            <div class="arsip-card-meta">{{ formatTanggal(item.tanggal_surat) }}</div>
+            <Tag
+              v-if="item.is_sekolah"
+              :value="item.status_approval === 'pending' ? 'Menunggu Persetujuan Kepala Sekolah' : 'Disetujui'"
+              :severity="item.status_approval === 'pending' ? 'warn' : 'success'"
+              class="arsip-card-status"
+            />
+          </div>
+          <div class="arsip-card-actions">
+            <Button label="Lihat" icon="pi pi-eye" size="small" @click="lihatSurat(item)" />
+            <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhSurat(item)" title="Unduh Surat Rekomendasi" />
+          </div>
+          <div class="arsip-card-lampiran">
+            <span class="arsip-card-lampiran-label">Lampiran 1 (Permohonan):</span>
+            <Button icon="pi pi-eye" size="small" severity="secondary" text @click="lihatLampiran1(item)" title="Lihat Lampiran 1" />
+            <Button icon="pi pi-download" size="small" severity="secondary" text @click="unduhLampiran1(item)" title="Unduh Lampiran 1" />
+          </div>
+        </div>
+      </div>
     </template>
 
     <Dialog v-model:visible="previewDialog" modal :header="previewTitle" style="width: 90vw; max-width: 900px" @hide="tutupPreview">
@@ -433,6 +503,14 @@ onMounted(loadBaList)
 </template>
 
 <style scoped>
+.tab-icon-svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin-right: 0.45rem;
+  vertical-align: -2px;
+}
+
 .arsip-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
