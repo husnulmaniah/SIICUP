@@ -186,6 +186,24 @@ async function loadJenisSuratOptions() {
   }
 }
 
+// jenisSuratOptionsKolektifSelf: SAMA seperti jenisSuratOptions, TAPI sengaja
+// membuang opsi "Berita Acara" -- khusus pegawai bertugas di sekolah SUDAH
+// ada form "Ajukan Berita Acara" tersendiri (lihat pengajuanBaForm di
+// bawah) yang WAJIB lewat persetujuan atasan/Kepala Sekolah dulu (nomor
+// surat otomatis dibuat di tahap itu) DAN wajib melampirkan bukti dukung --
+// kalau "Berita Acara" tetap muncul di dropdown Jenis Surat pada form
+// "Ajukan Surat Kolektif" mandiri ini, pegawai bisa melewati KEDUA
+// persyaratan itu (cukup sekali persetujuan admin/admin verifikasi, tanpa
+// bukti dukung, tanpa nomor otomatis) walau hasil akhirnya tetap tercatat
+// sebagai Berita Acara (DD) di Rekap Absen -- dipakai untuk dropdown Jenis
+// Surat form "Ajukan Surat Kolektif" & dialog edit/ajukan ulangnya, BUKAN
+// untuk fitur lain yang masih memakai jenisSuratOptions polos (mis. menu
+// admin Input Surat Kolektif, yang diinput admin sendiri secara langsung,
+// bukan diajukan mandiri oleh pegawai).
+const jenisSuratOptionsKolektifSelf = computed(() =>
+  jenisSuratOptions.value.filter((it) => it.value !== 'berita_acara')
+)
+
 const pengajuanSayaList = ref([])
 async function loadPengajuanSaya() {
   try {
@@ -315,6 +333,23 @@ const editPengajuanForm = ref({ tanggal: [], jenis: null, keterangan: '' })
 const editPengajuanFile = ref(null)
 const editPengajuanFileInput = ref(null)
 const submittingEditPengajuan = ref(false)
+
+// jenisSuratOptionsEditPengajuan: SAMA dasarnya dengan
+// jenisSuratOptionsKolektifSelf (buang "Berita Acara", lihat komentar di
+// sana), TAPI dipakai KHUSUS dialog edit & ajukan ulang ini (bukaEditPengajuan)
+// -- kalau pengajuan yang SEDANG diedit kebetulan pengajuan LAMA yang
+// jenisnya memang sudah "berita_acara" (dibuat sebelum opsi ini dihapus dari
+// form "Ajukan Surat Kolektif"), opsi itu TETAP dimunculkan supaya pilihan
+// Select tidak kosong/tidak valid -- pegawai masih bisa mengajukan ulang
+// persis seperti semula, tapi TIDAK bisa memilihnya untuk pengajuan baru.
+const jenisSuratOptionsEditPengajuan = computed(() => {
+  const base = jenisSuratOptionsKolektifSelf.value
+  if (editPengajuanItem.value?.jenis === 'berita_acara' && !base.some((it) => it.value === 'berita_acara')) {
+    const lama = jenisSuratOptions.value.find((it) => it.value === 'berita_acara')
+    if (lama) return [...base, lama]
+  }
+  return base
+})
 
 // Sama seperti kolektifSelfKeteranganPilihan/Lainnya di atas -- lihat
 // composables/keteranganSurat.js. bukaEditPengajuan menentukan pilihan awal
@@ -1460,13 +1495,14 @@ async function downloadDokumen(item) {
             <label>Jenis Surat</label>
             <Select
               v-model="kolektifSelfForm.jenis"
-              :options="jenisSuratOptions"
+              :options="jenisSuratOptionsKolektifSelf"
               optionLabel="label"
               optionValue="value"
               placeholder="Pilih jenis surat"
               filter
               style="width: 100%"
             />
+            <small class="text-muted">Untuk Berita Acara, gunakan form "Ajukan Berita Acara" di bawah.</small>
           </div>
           <div class="field">
             <label>Berkas (PDF/JPG/PNG)</label>
@@ -1763,7 +1799,7 @@ async function downloadDokumen(item) {
         <label>Jenis Surat</label>
         <Select
           v-model="editPengajuanForm.jenis"
-          :options="jenisSuratOptions"
+          :options="jenisSuratOptionsEditPengajuan"
           optionLabel="label"
           optionValue="value"
           placeholder="Pilih jenis surat"
