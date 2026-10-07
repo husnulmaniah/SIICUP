@@ -18,6 +18,11 @@ import Checkbox from 'primevue/checkbox'
 import MultiSelect from 'primevue/multiselect'
 import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
+import TabPanels from 'primevue/tabpanels'
+import TabPanel from 'primevue/tabpanel'
 
 const toast = useToast()
 
@@ -1482,10 +1487,35 @@ async function downloadDokumen(item) {
       </div>
 
       <div v-if="isSekolahSaya" class="section">
-        <div class="surat-form-title">
-          <span class="surat-form-icon"><i class="pi pi-send" aria-hidden="true"></i></span>
-          <h3>Ajukan Surat Kolektif</h3>
-        </div>
+        <!-- Digabung jadi 2 tab (permintaan pengguna) -- sebelumnya dua form
+             "Ajukan Surat Kolektif" & "Ajukan Berita Acara" ditumpuk berurutan
+             di halaman yang sama (membuat halaman panjang ke bawah). Nama tab
+             dilengkapi ikon SVG inline (bukan font pi-icon) sesuai permintaan;
+             pakai currentColor supaya warnanya otomatis ikut teal saat tab
+             aktif & abu-abu saat tidak aktif (mengikuti style Tab bawaan tema). -->
+        <Tabs value="kolektif">
+          <TabList>
+            <Tab value="kolektif">
+              <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 11.5L20 4l-6.5 17-3-7-7-2.5Z" />
+                <path d="M13.5 13.5L20 4" />
+              </svg>
+              <span>Ajukan Surat Kolektif</span>
+            </Tab>
+            <Tab value="berita-acara">
+              <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" />
+                <path d="M13 3l5 5" />
+                <path d="M13 3v5h5" />
+                <path d="M9 13h3" />
+                <path d="M9 17h2.5" />
+                <path d="M15.5 14.5l3 3L16 20l-3-1 .5-2.5z" />
+              </svg>
+              <span>Ajukan Berita Acara</span>
+            </Tab>
+          </TabList>
+          <TabPanels>
+      <TabPanel value="kolektif">
         <Message severity="info" :closable="false">
           Khusus pegawai bertugas di sekolah: ajukan surat (Surat Tugas/Berita Acara/Surat Izin/SKS/dst) untuk
           beberapa tanggal sekaligus -- boleh tanggal yang sudah terlewat (belum ada absen) MAUPUN tanggal ke
@@ -1519,7 +1549,7 @@ async function downloadDokumen(item) {
                 filter
                 style="width: 100%"
               />
-              <small class="text-muted">Untuk Berita Acara, gunakan form "Ajukan Berita Acara" di bawah.</small>
+              <small class="text-muted">Untuk Berita Acara, gunakan tab "Ajukan Berita Acara" di atas.</small>
             </div>
             <div class="field">
               <label>Berkas (PDF/JPG/PNG)</label>
@@ -1588,13 +1618,9 @@ async function downloadDokumen(item) {
             </Column>
           </DataTable>
         </div>
-      </div>
+      </TabPanel>
 
-      <div v-if="isSekolahSaya" class="section">
-        <div class="surat-form-title">
-          <span class="surat-form-icon"><i class="pi pi-file-edit" aria-hidden="true"></i></span>
-          <h3>Ajukan Berita Acara</h3>
-        </div>
+      <TabPanel value="berita-acara">
         <Message severity="info" :closable="false">
           Khusus pegawai bertugas di sekolah: ajukan Berita Acara untuk SATU tanggal absen yang kosong (tidak dapat
           absen online). "Yang Mengetahui" otomatis diisi atasan langsung Anda -- PDF Berita Acara resminya dibuat
@@ -1686,6 +1712,9 @@ async function downloadDokumen(item) {
             </Column>
           </DataTable>
         </div>
+      </TabPanel>
+          </TabPanels>
+        </Tabs>
       </div>
 
       <div v-if="dokumenList.length" class="section">
@@ -2117,26 +2146,13 @@ async function downloadDokumen(item) {
   margin-bottom: 0.3rem;
   color: #374151;
 }
-/* ---------- form "Ajukan Surat Kolektif" & "Ajukan Berita Acara" ---------- */
-.surat-form-title {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-.surat-form-title h3 {
-  margin: 0;
-}
-.surat-form-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
+/* ---------- tab "Ajukan Surat Kolektif" & "Ajukan Berita Acara" ---------- */
+.tab-icon-svg {
+  width: 1rem;
+  height: 1rem;
   flex-shrink: 0;
-  border-radius: 50%;
-  background: #ccfbf1;
-  color: #0d9488;
-  font-size: 1rem;
+  margin-right: 0.45rem;
+  vertical-align: -2px;
 }
 .surat-form-card {
   position: relative;
