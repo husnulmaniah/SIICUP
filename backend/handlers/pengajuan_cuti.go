@@ -26,9 +26,23 @@ var pengajuanPreloads = []string{"Pegawai", "Pegawai.UnitKerja", "JenisCuti", "P
 // preloadPengajuan applies the standard set of relation preloads for
 // PengajuanCuti, including the Dokumen relation with its (potentially large)
 // bytea "file" column omitted -- the actual bytes are only fetched by the
-// dedicated download endpoint below.
+// dedicated download endpoint below. "Pegawai" sendiri juga di-Omit dari
+// dokumenFileFields-nya (SK, foto, ttd) -- dipakai oleh listPengajuan (menu
+// utama Pengajuan Cuti, tabel paling sering dimuat) & ResyncActivePengajuanDays
+// (jalan untuk SEMUA pengajuan aktif setiap kali tanggal merah diubah), jadi
+// tanpa Omit ini setiap baris menarik berkas SK/foto/ttd yang tidak pernah
+// dipakai di sini.
 func preloadPengajuan(query *gorm.DB) *gorm.DB {
+	omitDokumen := func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }
 	for _, p := range pengajuanPreloads {
+		// "Pegawai" dan "AtasanApprove" KEDUANYA bertipe *models.Pegawai (lihat
+		// models.go) jadi keduanya perlu di-Omit dari dokumenFileFields-nya --
+		// AtasanApprove sempat terlewat sebelumnya karena bukan field bernama
+		// "Pegawai", padahal membawa kolom berkas (SK/foto/ttd) yang sama.
+		if p == "Pegawai" || p == "AtasanApprove" {
+			query = query.Preload(p, omitDokumen)
+			continue
+		}
 		query = query.Preload(p)
 	}
 	return query.Preload("Dokumen", func(d *gorm.DB) *gorm.DB { return d.Omit("file") })
@@ -1237,11 +1251,7 @@ func pengajuanExcelColumns(db *gorm.DB) []utils.ExcelColumn {
 
 func exportPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var items []models.PengajuanCuti
-	query := db
-	for _, p := range pengajuanPreloads {
-		query = query.Preload(p)
-	}
-	query.Order("created_at desc").Find(&items)
+	preloadPengajuan(db).Order("created_at desc").Find(&items)
 	f, err := utils.ExportData(items, pengajuanExcelColumns(db))
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, err.Error())

@@ -104,7 +104,7 @@ func listUsers(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	search := strings.TrimSpace(q.Get("q"))
 
-	query := db.Model(&models.User{}).Preload("Role").Preload("Pegawai")
+	query := db.Model(&models.User{}).Preload("Role").Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) })
 	countQuery := db.Model(&models.User{})
 	if search != "" {
 		cond := "username ILIKE ? OR nama ILIKE ?"
@@ -125,7 +125,7 @@ func listUsers(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 func getUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	id := r.PathValue("id")
 	var user models.User
-	if err := db.Preload("Role").Preload("Pegawai").First(&user, "id = ?", id).Error; err != nil {
+	if err := db.Preload("Role").Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).First(&user, "id = ?", id).Error; err != nil {
 		utils.Error(w, http.StatusNotFound, "user tidak ditemukan")
 		return
 	}
@@ -169,7 +169,7 @@ func createUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "gagal menyimpan user (username mungkin sudah dipakai): "+err.Error())
 		return
 	}
-	db.Preload("Role").Preload("Pegawai").First(&user, user.ID)
+	db.Preload("Role").Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).First(&user, user.ID)
 	utils.Created(w, "user berhasil dibuat", user)
 }
 
@@ -210,7 +210,7 @@ func updateUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "gagal memperbarui user: "+err.Error())
 		return
 	}
-	db.Preload("Role").Preload("Pegawai").First(&existing, "id = ?", id)
+	db.Preload("Role").Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).First(&existing, "id = ?", id)
 	utils.Success(w, "user berhasil diperbarui", existing)
 }
 
@@ -225,7 +225,7 @@ func deleteUser(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 func exportUsers(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var items []models.User
-	db.Preload("Role").Preload("Pegawai").Order("id asc").Find(&items)
+	db.Preload("Role").Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).Order("id asc").Find(&items)
 	f, err := utils.ExportData(items, userExcelColumns(db))
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, err.Error())

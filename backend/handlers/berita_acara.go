@@ -340,6 +340,7 @@ func listBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var rows []models.AbsensiDokumen
 	err := db.Omit("file", "bukti_dukung_file").
 		Where("jenis = ? AND diinput_langsung_menu_berita_acara = ?", models.AbsensiDokumenBeritaAcara, true).
+		Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).
 		Preload("Pegawai.UnitKerja").Preload("Pegawai.Jabatan").
 		Order("created_at desc").
 		Find(&rows).Error
@@ -735,7 +736,7 @@ func updateBeritaAcara(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	var existingRows []models.AbsensiDokumen
-	if err := db.Preload("Pegawai").
+	if err := db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).
 		Where("nama_file = ? AND jenis = ? AND diinput_langsung_menu_berita_acara = ?",
 			namaFile, models.AbsensiDokumenBeritaAcara, true).
 		Find(&existingRows).Error; err != nil || len(existingRows) == 0 {

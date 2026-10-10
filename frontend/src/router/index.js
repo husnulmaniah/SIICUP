@@ -23,6 +23,7 @@ import SuratRekomendasiView from '../views/SuratRekomendasiView.vue'
 import BeritaAcaraView from '../views/BeritaAcaraView.vue'
 import ArsipSuratView from '../views/ArsipSuratView.vue'
 import KopSuratSekolahView from '../views/KopSuratSekolahView.vue'
+import PetaJabatanView from '../views/PetaJabatanView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
@@ -88,6 +89,14 @@ const routes = [
       // pengecekan tambahan requireKopSuratAccess di beforeEach karena
       // meta.roles saja tidak bisa membedakan atasan sekolah vs. dinas.
       { path: 'kop-surat-sekolah', name: 'kop-surat-sekolah', component: KopSuratSekolahView, meta: { roles: ['atasan'], requireKopSuratAccess: true } },
+      // Peta Jabatan (Sekolah): administrator/admin boleh melihat & mengelola
+      // sekolah manapun (dropdown pemilih sekolah); atasan (Kepala Sekolah)
+      // boleh mengelola sekolahnya sendiri & mengajukan kenaikan pangkat
+      // sendiri; pegawai hanya melihat & mengajukan kenaikan pangkat sendiri
+      // -- lihat backend/handlers/peta_jabatan*.go untuk detail pembatasan
+      // per role (sama pola dengan Profil Saya/KP4, atasan & pegawai berbagi
+      // halaman yang sama).
+      { path: 'peta-jabatan', name: 'peta-jabatan', component: PetaJabatanView, meta: { roles: ['administrator', 'admin', 'atasan', 'pegawai'] } },
     ],
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true } },

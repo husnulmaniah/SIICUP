@@ -136,7 +136,7 @@ func canAccessPengajuanPensiun(claims *utils.Claims, item models.PengajuanPensiu
 
 func listPengajuanPensiun(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
-	query := db.Model(&models.PengajuanPensiun{}).Preload("Pegawai")
+	query := db.Model(&models.PengajuanPensiun{}).Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) })
 
 	switch claims.RoleName {
 	case "pegawai", "atasan":

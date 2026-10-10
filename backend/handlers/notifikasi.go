@@ -43,18 +43,20 @@ type notifikasiItem struct {
 const maxNotifikasiItems = 15
 
 func pendingNotifikasi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	omitDokumen := func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }
+
 	var cuti []models.PengajuanCuti
-	db.Preload("Pegawai").Preload("JenisCuti").
+	db.Preload("Pegawai", omitDokumen).Preload("JenisCuti").
 		Where("status = ?", models.StatusPending).
 		Order("created_at desc").Limit(maxNotifikasiItems).Find(&cuti)
 
 	var perubahan []models.PerubahanDataPegawai
-	db.Preload("Pegawai").
+	db.Preload("Pegawai", omitDokumen).
 		Where("status = ?", models.StatusPending).
 		Order("created_at desc").Limit(maxNotifikasiItems).Find(&perubahan)
 
 	var pensiun []models.PengajuanPensiun
-	db.Preload("Pegawai").
+	db.Preload("Pegawai", omitDokumen).
 		Where("status = ?", models.StatusPending).
 		Order("created_at desc").Limit(maxNotifikasiItems).Find(&pensiun)
 

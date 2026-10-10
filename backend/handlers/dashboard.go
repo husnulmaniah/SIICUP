@@ -31,7 +31,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		db.Model(&models.PengajuanCuti{}).Where("status = ?", models.StatusDitolak).Count(&totalDitolak)
 
 		var recent []models.PengajuanCuti
-		db.Preload("Pegawai").Preload("JenisCuti").Order("created_at desc").Limit(8).Find(&recent)
+		db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).Preload("JenisCuti").Order("created_at desc").Limit(8).Find(&recent)
 
 		utils.Success(w, "ok", map[string]interface{}{
 			"role":              claims.RoleName,
@@ -54,7 +54,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		db.Model(&models.PengajuanCuti{}).Where(sub, *claims.IDPegawai).Where("status = ?", models.StatusDisetuju).Count(&totalDisetujui)
 
 		var menunggu []models.PengajuanCuti
-		db.Preload("Pegawai").Preload("JenisCuti").Where(sub, *claims.IDPegawai).
+		db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).Preload("JenisCuti").Where(sub, *claims.IDPegawai).
 			Where("status = ?", models.StatusPending).Order("created_at asc").Limit(10).Find(&menunggu)
 
 		utils.Success(w, "ok", map[string]interface{}{

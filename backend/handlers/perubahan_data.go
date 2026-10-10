@@ -160,7 +160,7 @@ func canAccessPerubahanData(claims *utils.Claims, item models.PerubahanDataPegaw
 
 func listPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
-	query := db.Model(&models.PerubahanDataPegawai{}).Preload("Pegawai")
+	query := db.Model(&models.PerubahanDataPegawai{}).Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) })
 
 	switch claims.RoleName {
 	case "pegawai", "atasan":

@@ -25,6 +25,12 @@ func Migrate(db *gorm.DB) {
 		&models.JenisCuti{},
 		&models.PolaHariKerja{},
 		&models.TglMerah{},
+		// SubJabatan dimigrasikan SEBELUM Pegawai -- Pegawai.SubJabatan
+		// (lihat models.go) butuh tabel "sub_jabatan" SUDAH ADA supaya GORM
+		// bisa memasang foreign key-nya saat AutoMigrate Pegawai di bawah
+		// (SubJabatan sendiri hanya butuh UnitKerja & Jabatan yang sudah
+		// dimigrasikan lebih dulu di atas, jadi aman diletakkan di sini).
+		&models.SubJabatan{},
 		&models.Pegawai{},
 		&models.User{},
 		&models.JatahCuti{},
@@ -50,6 +56,11 @@ func Migrate(db *gorm.DB) {
 		&models.PengaturanKp4{},
 		&models.SuratRekomendasi{},
 		&models.PengajuanBeritaAcara{},
+		// Peta Jabatan Sekolah -- lihat komentar lengkap di models.go
+		// (bagian "PETA JABATAN -- SEKOLAH") & handlers/peta_jabatan*.go.
+		&models.FormasiJabatan{},
+		&models.PengajuanKenaikanPangkat{},
+		&models.PerubahanJabatanPegawai{},
 	)
 	if err != nil {
 		log.Fatalf("gagal migrasi database: %v", err)

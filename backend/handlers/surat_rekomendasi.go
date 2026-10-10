@@ -927,7 +927,7 @@ func suratRekomendasiPreload(db *gorm.DB) *gorm.DB {
 		Preload("Pegawai.PangkatGol.Pangkat").Preload("Pegawai.PangkatGol.Gol").
 		Preload("Pegawai.Atasan").Preload("Pegawai.Atasan.Jabatan").Preload("Pegawai.Atasan.UnitKerja").
 		Preload("Pegawai.Atasan.PangkatGol.Pangkat").Preload("Pegawai.Atasan.PangkatGol.Gol").
-		Preload("AtasanApprove")
+		Preload("AtasanApprove", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) })
 }
 
 func canManageSuratRekomendasi(claims *utils.Claims) bool {
@@ -1453,7 +1453,7 @@ func updateTampilSuratRekomendasi(w http.ResponseWriter, r *http.Request, db *go
 // untuk menyetujui).
 func sembunyikanSemuaLampiran3(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var rows []models.SuratRekomendasi
-	if err := db.Preload("Pegawai").Preload("Pegawai.UnitKerja").
+	if err := db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).Preload("Pegawai.UnitKerja").
 		Where("tampil_ke_pegawai = ?", true).Find(&rows).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data surat rekomendasi")
 		return

@@ -114,6 +114,10 @@ const navSections = computed(() => {
         { label: 'Absen', icon: 'pi pi-camera', to: '/absen' },
         { label: 'Profil Saya', icon: 'pi pi-user-edit', to: '/profil-saya' },
         { label: 'KP4', icon: 'pi pi-users', to: '/kp4' },
+        // Peta Jabatan: pegawai sekolah bisa melihat formasi jabatan
+        // sekolahnya & mengajukan kenaikan pangkat sendiri (permintaan
+        // pengguna -- lihat views/PetaJabatanView.vue).
+        { label: 'Peta Jabatan', icon: 'pi pi-sitemap', to: '/peta-jabatan' },
       ],
     })
   } else if (auth.isAtasan) {
@@ -134,6 +138,11 @@ const navSections = computed(() => {
     }
     items.push({ label: 'Profil Saya', icon: 'pi pi-user-edit', to: '/profil-saya' })
     items.push({ label: 'KP4', icon: 'pi pi-users', to: '/kp4' })
+    // Peta Jabatan: atasan (Kepala Sekolah) mengelola formasi jabatan
+    // sekolahnya sendiri (K, pecahan sub-jabatan, penempatan pegawai) &
+    // menyetujui/mengajukan kenaikan pangkat -- lihat
+    // views/PetaJabatanView.vue.
+    items.push({ label: 'Peta Jabatan', icon: 'pi pi-sitemap', to: '/peta-jabatan' })
     sections.push({ header: null, items })
   }
 
@@ -192,6 +201,12 @@ const navSections = computed(() => {
         { label: 'Perubahan Data Pegawai', icon: 'pi pi-user-edit', to: '/perubahan-data' },
         { label: 'Pengajuan Pensiun', icon: 'pi pi-briefcase', to: '/pengajuan-pensiun' },
         { label: 'Penerima TPP', icon: 'pi pi-money-bill', to: '/penerima-tpp' },
+        // Peta Jabatan: administrator/admin melihat & mengelola formasi
+        // jabatan sekolah manapun + persetujuan tahap akhir (mewakili
+        // Kepala Dinas) untuk kenaikan pangkat & perubahan jabatan --
+        // permintaan pengguna ("tambahkan menu peta jabatan pada dropdown
+        // administrasi kepegawaian"), lihat views/PetaJabatanView.vue.
+        { label: 'Peta Jabatan', icon: 'pi pi-sitemap', to: '/peta-jabatan' },
       ],
     })
     // Surat Dinas: dropdown berisi Template Surat (dipindah dari menu

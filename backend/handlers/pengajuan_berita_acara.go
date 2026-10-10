@@ -109,12 +109,20 @@ func toPengajuanBeritaAcaraOut(item models.PengajuanBeritaAcara) pengajuanBerita
 	return out
 }
 
+// pengajuanBeritaAcaraPreload: Preload("Pegawai", ...Omit(dokumenFileFields...))
+// DAN Preload("Pegawai.Atasan", ...Omit(dokumenFileFields...)) -- dipakai di 3
+// endpoint daftar (listPengajuanBeritaAcara*), jadi TANPA Omit ini setiap
+// baris menarik DUA baris Pegawai penuh (pegawai sendiri + atasannya)
+// berikut kolom berkasnya (SK, foto, ttd) yang tidak pernah dipakai di sini
+// -- berat kalau daftarnya banyak.
 func pengajuanBeritaAcaraPreload(db *gorm.DB) *gorm.DB {
+	omitDokumen := func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }
 	return db.Omit("file", "bukti_dukung_file").
+		Preload("Pegawai", omitDokumen).
 		Preload("Pegawai.Jabatan").Preload("Pegawai.UnitKerja").Preload("Pegawai.PangkatGol.Pangkat").Preload("Pegawai.PangkatGol.Gol").
-		Preload("Pegawai.Atasan").Preload("Pegawai.Atasan.Jabatan").Preload("Pegawai.Atasan.UnitKerja").
+		Preload("Pegawai.Atasan", omitDokumen).Preload("Pegawai.Atasan.Jabatan").Preload("Pegawai.Atasan.UnitKerja").
 		Preload("Pegawai.Atasan.PangkatGol.Pangkat").Preload("Pegawai.Atasan.PangkatGol.Gol").
-		Preload("AtasanApprove").Preload("AdminApprove")
+		Preload("AtasanApprove", omitDokumen).Preload("AdminApprove")
 }
 
 // canApproveFinalPengajuanBeritaAcara: tahap akhir boleh disetujui/

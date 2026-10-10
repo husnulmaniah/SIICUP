@@ -438,6 +438,19 @@ type Pegawai struct {
 	Atasan                         *Pegawai   `json:"atasan,omitempty" gorm:"foreignKey:IDAtasan;references:ID"`
 	Email                          string     `json:"email" gorm:"size:100"`
 
+	// IDSubJabatan: pecahan KHUSUS dari Jabatan pegawai ini pada sekolahnya
+	// sendiri (mis. Jabatan "Guru Ahli Pertama" dipecah atasan jadi "Guru
+	// Kelas"/"Guru Agama"/dst, lihat models.SubJabatan & menu Peta Jabatan) --
+	// SEPENUHNYA opsional, boleh NULL kalau sekolah pegawai ini belum
+	// mengatur pecahan apa pun untuk Jabatan-nya (nilai "B" tetap terhitung
+	// penuh pada baris Jabatan induknya, lihat hitungPetaJabatanSekolah di
+	// handlers/peta_jabatan.go). TIDAK ikut dihapus/diubah otomatis kalau
+	// administrator menghapus pecahan SubJabatan terkait -- cukup jadi
+	// "yatim" (ditangani sebagai NULL oleh query peta jabatan) supaya
+	// penghapusan pecahan tidak pernah gagal/terkunci oleh FK pegawai lama.
+	IDSubJabatan *uint       `json:"id_sub_jabatan" gorm:"column:id_sub_jabatan"`
+	SubJabatan   *SubJabatan `json:"sub_jabatan,omitempty" gorm:"foreignKey:IDSubJabatan;references:ID"`
+
 	// Dokumen kepegawaian (disimpan langsung di database sebagai bytea agar
 	// tidak hilang saat container backend di-redeploy/restart).
 	SkTerakhirNama string `json:"sk_terakhir_nama" gorm:"column:sk_terakhir_nama;size:255"`
@@ -1582,3 +1595,198 @@ type PengaturanAbsensi struct {
 }
 
 func (PengaturanAbsensi) TableName() string { return "pengaturan_absensi" }
+
+// ============================================================
+// PETA JABATAN -- SEKOLAH (position/formation map per sekolah)
+// ============================================================
+//
+// Lihat handlers/peta_jabatan.go, handlers/peta_jabatan_kenaikan_pangkat.go,
+// handlers/peta_jabatan_perubahan.go, handlers/peta_jabatan_pdf.go.
+//
+// Ringkasan alur (permintaan pengguna):
+//  1. Peta Jabatan menghitung per sekolah (UnitKerja): untuk setiap Jabatan,
+//     "B" (Bezetting = jumlah pegawai SAAT INI) dibanding "K" (Kebutuhan =
+//     formasi yang dibutuhkan, diatur manual). Kolom "+/-" = B - K.
+//  2. Atasan (Kepala Sekolah) BOLEH memecah satu Jabatan jadi beberapa
+//     SubJabatan khusus sekolahnya sendiri (mis. "Guru Ahli Pertama" -> "Guru
+//     Kelas"/"Guru Agama"/dst, lihat SubJabatan) -- bebas ditambah/dihapus
+//     kapan saja lewat dialog "Kelola Sub-Jabatan".
+//  3. Pegawai yang sudah lulus UKOM mengajukan Kenaikan Pangkat (Jabatan asal
+//     -> Jabatan tujuan, lampiran bukti UKOM) lewat PengajuanKenaikanPangkat.
+//     Begitu ATASAN menyetujui, K pada Jabatan/SubJabatan TUJUAN otomatis
+//     bertambah 1 (FormasiJabatan) -- Jabatan ASAL belum berubah sama sekali.
+//     Begitu ADMINISTRATOR (mewakili Kepala Dinas) menyetujui tahap akhir,
+//     dokumen final (QR tanda tangan Kepala Sekolah & Kepala Dinas) siap
+//     dicetak, DAN baris PerubahanJabatanPegawai otomatis dibuat sebagai
+//     peringatan di akun pegawai.
+//  4. Pegawai WAJIB menyelesaikan PerubahanJabatanPegawai (upload SK jabatan/
+//     pangkat barunya). Begitu ADMINISTRATOR menyetujuinya, Pegawai.IDJabatan/
+//     IDSubJabatan/IDPangkatGol BARU-lah diterapkan -- titik inilah "B" pada
+//     Jabatan tujuan bertambah & Jabatan asal berkurang (karena B selalu
+//     dihitung langsung dari data pegawai saat ini, TIDAK disimpan terpisah).
+//
+// "Peta Jabatan Dinas" (untuk pegawai bertempat tugas Dinas/Kantor) BELUM
+// dikerjakan (menyusul, lihat permintaan pengguna) -- tab-nya sengaja
+// ditampilkan nonaktif ("Segera Hadir") di frontend untuk saat ini.
+
+// SubJabatan: pecahan KHUSUS sebuah Jabatan pada SATU sekolah (UnitKerja)
+// tertentu -- ditambah/dihapus bebas oleh atasan (Kepala Sekolah)/
+// administrator lewat dialog "Kelola Sub-Jabatan" pada menu Peta Jabatan.
+// Sekolah lain yang punya Jabatan induk yang sama TIDAK ikut terpengaruh --
+// pecahan ini murni milik (IDUnitKerja, IDJabatan) itu sendiri.
+type SubJabatan struct {
+	ID          uint       `json:"id" gorm:"primaryKey"`
+	IDUnitKerja uint       `json:"id_unit_kerja" gorm:"column:id_unit_kerja;not null;uniqueIndex:idx_sub_jabatan_unik,priority:1"`
+	UnitKerja   *UnitKerja `json:"unit_kerja,omitempty" gorm:"foreignKey:IDUnitKerja;references:ID"`
+	IDJabatan   uint       `json:"id_jabatan" gorm:"column:id_jabatan;not null;uniqueIndex:idx_sub_jabatan_unik,priority:2"`
+	Jabatan     *Jabatan   `json:"jabatan,omitempty" gorm:"foreignKey:IDJabatan;references:ID"`
+	Nama        string     `json:"nama" gorm:"size:100;not null;uniqueIndex:idx_sub_jabatan_unik,priority:3"`
+	Urutan      int        `json:"urutan" gorm:"column:urutan;default:0"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (SubJabatan) TableName() string { return "sub_jabatan" }
+
+// FormasiJabatan: nilai "K" (Kebutuhan) yang bisa diatur MANUAL per Jabatan
+// pada satu sekolah -- kalau Jabatan itu sudah dipecah jadi beberapa
+// SubJabatan (lihat di atas), K diatur PER SubJabatan (IDSubJabatan terisi)
+// alih-alih langsung pada Jabatan induknya (dalam kasus ini TIDAK ada baris
+// dengan IDSubJabatan NULL untuk Jabatan tersebut -- "K" Jabatan induk pada
+// tampilan tabel murni hasil SUM seluruh SubJabatan-nya). "B" (Bezetting)
+// SENGAJA TIDAK disimpan di sini sama sekali -- selalu DIHITUNG LANGSUNG
+// dari tabel pegawai (lihat hitungPetaJabatanSekolah) supaya tidak pernah
+// perlu disinkronkan manual & selalu akurat.
+type FormasiJabatan struct {
+	ID           uint        `json:"id" gorm:"primaryKey"`
+	IDUnitKerja  uint        `json:"id_unit_kerja" gorm:"column:id_unit_kerja;not null;uniqueIndex:idx_formasi_jabatan_unik,priority:1"`
+	UnitKerja    *UnitKerja  `json:"unit_kerja,omitempty" gorm:"foreignKey:IDUnitKerja;references:ID"`
+	IDJabatan    uint        `json:"id_jabatan" gorm:"column:id_jabatan;not null;uniqueIndex:idx_formasi_jabatan_unik,priority:2"`
+	Jabatan      *Jabatan    `json:"jabatan,omitempty" gorm:"foreignKey:IDJabatan;references:ID"`
+	IDSubJabatan *uint       `json:"id_sub_jabatan" gorm:"column:id_sub_jabatan;uniqueIndex:idx_formasi_jabatan_unik,priority:3"`
+	SubJabatan   *SubJabatan `json:"sub_jabatan,omitempty" gorm:"foreignKey:IDSubJabatan;references:ID"`
+	Kebutuhan    int         `json:"kebutuhan" gorm:"column:kebutuhan;not null;default:0"`
+	UpdatedAt    time.Time   `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (FormasiJabatan) TableName() string { return "formasi_jabatan" }
+
+// Status PengajuanKenaikanPangkat -- dua tahap approval (atasan lalu
+// administrator/Kepala Dinas), sama pola dengan PengajuanBeritaAcara.
+const (
+	KenaikanPangkatMenungguAtasan = "menunggu_atasan"
+	KenaikanPangkatMenungguAdmin  = "menunggu_admin"
+	KenaikanPangkatDisetujui      = "disetujui"
+	KenaikanPangkatDitolakAtasan  = "ditolak_atasan"
+	KenaikanPangkatDitolakAdmin   = "ditolak_admin"
+)
+
+// PengajuanKenaikanPangkat: pengajuan kenaikan pangkat pegawai sekolah
+// (mis. Guru Ahli Pertama -> Guru Ahli Muda) setelah lulus UKOM (bukti
+// terlampir, UkomFile). Begitu ATASAN (Kepala Sekolah) menyetujui (status
+// -> menunggu_admin), K pada Jabatan/SubJabatan TUJUAN otomatis bertambah 1
+// (lihat setujuiKenaikanPangkatAtasan di
+// handlers/peta_jabatan_kenaikan_pangkat.go) -- Jabatan/SubJabatan ASAL
+// TIDAK berubah sama sekali di tahap ini, "B" pegawai itu sendiri juga
+// belum berubah (masih terhitung di jabatan lama sampai
+// PerubahanJabatanPegawai-nya disetujui terpisah, lihat di bawah). Begitu
+// administrator (mewakili Kepala Dinas) menyetujui tahap akhir (status ->
+// disetujui), dokumen final (ber-QR tanda tangan Kepala Sekolah & Kepala
+// Dinas, lihat handlers/peta_jabatan_pdf.go) siap dicetak, DAN baris
+// PerubahanJabatanPegawai otomatis dibuat supaya muncul peringatan pada
+// akun pegawai untuk upload SK terbaru.
+type PengajuanKenaikanPangkat struct {
+	ID          uint       `json:"id" gorm:"primaryKey"`
+	IDPegawai   uint       `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai     *Pegawai   `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	IDUnitKerja uint       `json:"id_unit_kerja" gorm:"column:id_unit_kerja;not null"`
+	UnitKerja   *UnitKerja `json:"unit_kerja,omitempty" gorm:"foreignKey:IDUnitKerja;references:ID"`
+
+	IDJabatanAsal    uint        `json:"id_jabatan_asal" gorm:"column:id_jabatan_asal;not null"`
+	JabatanAsal      *Jabatan    `json:"jabatan_asal,omitempty" gorm:"foreignKey:IDJabatanAsal;references:ID"`
+	IDSubJabatanAsal *uint       `json:"id_sub_jabatan_asal" gorm:"column:id_sub_jabatan_asal"`
+	SubJabatanAsal   *SubJabatan `json:"sub_jabatan_asal,omitempty" gorm:"foreignKey:IDSubJabatanAsal;references:ID"`
+
+	IDJabatanTujuan    uint        `json:"id_jabatan_tujuan" gorm:"column:id_jabatan_tujuan;not null"`
+	JabatanTujuan      *Jabatan    `json:"jabatan_tujuan,omitempty" gorm:"foreignKey:IDJabatanTujuan;references:ID"`
+	IDSubJabatanTujuan *uint       `json:"id_sub_jabatan_tujuan" gorm:"column:id_sub_jabatan_tujuan"`
+	SubJabatanTujuan   *SubJabatan `json:"sub_jabatan_tujuan,omitempty" gorm:"foreignKey:IDSubJabatanTujuan;references:ID"`
+
+	UkomNamaFile string `json:"ukom_nama_file" gorm:"column:ukom_nama_file;size:255"`
+	UkomFile     []byte `json:"-" gorm:"column:ukom_file;type:bytea"`
+
+	Alasan string `json:"alasan" gorm:"column:alasan;size:255"`
+	Status string `json:"status" gorm:"size:20;not null;default:menunggu_atasan"`
+
+	IDAtasanApprove  *uint      `json:"id_atasan_approve" gorm:"column:id_atasan_approve"`
+	AtasanApprove    *Pegawai   `json:"atasan_approve,omitempty" gorm:"foreignKey:IDAtasanApprove;references:ID"`
+	CatatanAtasan    string     `json:"catatan_atasan" gorm:"column:catatan_atasan;size:255"`
+	TglAtasanApprove *time.Time `json:"tgl_atasan_approve" gorm:"column:tgl_atasan_approve"`
+
+	IDAdminApprove  *uint      `json:"id_admin_approve" gorm:"column:id_admin_approve"`
+	AdminApprove    *User      `json:"admin_approve,omitempty" gorm:"foreignKey:IDAdminApprove;references:ID"`
+	CatatanAdmin    string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
+	TglAdminApprove *time.Time `json:"tgl_admin_approve" gorm:"column:tgl_admin_approve"`
+
+	// NomorSurat/File: nomor surat & PDF dokumen Peta Jabatan final hasil
+	// kenaikan pangkat ini (kop sekolah + garis komando + tabel B/K/+- +
+	// QR tanda tangan) -- digenerate ulang setiap kali status berubah
+	// (sama pola dengan PengajuanBeritaAcara.File), bukan hanya sekali.
+	NomorSurat *string `json:"nomor_surat" gorm:"column:nomor_surat;size:100"`
+	File       []byte  `json:"-" gorm:"column:file;type:bytea"`
+
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (PengajuanKenaikanPangkat) TableName() string { return "pengajuan_kenaikan_pangkat" }
+
+// Status PerubahanJabatanPegawai.
+const (
+	PerubahanJabatanMenungguUpload = "menunggu_upload"
+	PerubahanJabatanMenungguAdmin  = "menunggu_admin"
+	PerubahanJabatanDisetujui      = "disetujui"
+	PerubahanJabatanDitolak        = "ditolak"
+)
+
+// PerubahanJabatanPegawai: TAHAP KEDUA setelah PengajuanKenaikanPangkat
+// disetujui penuh (administrator) -- dibuat OTOMATIS berstatus
+// "menunggu_upload" (lihat setujuiKenaikanPangkatAdmin di
+// handlers/peta_jabatan_kenaikan_pangkat.go), muncul sebagai peringatan
+// pada akun pegawai yang wajib diselesaikan dengan mengupload SK (surat
+// keputusan) jabatan/pangkat barunya (lihat
+// handlers/peta_jabatan_perubahan.go). Begitu pegawai upload (status ->
+// menunggu_admin) lalu administrator menyetujuinya (status -> disetujui),
+// Pegawai.IDJabatan/IDSubJabatan/IDPangkatGol BARU-lah diterapkan -- titik
+// inilah "B" (Bezetting) Jabatan tujuan bertambah & Jabatan asal berkurang,
+// karena B selalu dihitung langsung dari data pegawai saat ini (lihat
+// FormasiJabatan).
+type PerubahanJabatanPegawai struct {
+	ID                         uint                      `json:"id" gorm:"primaryKey"`
+	IDPengajuanKenaikanPangkat uint                      `json:"id_pengajuan_kenaikan_pangkat" gorm:"column:id_pengajuan_kenaikan_pangkat;not null"`
+	PengajuanKenaikanPangkat   *PengajuanKenaikanPangkat `json:"pengajuan_kenaikan_pangkat,omitempty" gorm:"foreignKey:IDPengajuanKenaikanPangkat;references:ID"`
+	IDPegawai                  uint                      `json:"id_pegawai" gorm:"column:id_pegawai;not null"`
+	Pegawai                    *Pegawai                  `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+
+	IDJabatanBaru    uint        `json:"id_jabatan_baru" gorm:"column:id_jabatan_baru;not null"`
+	JabatanBaru      *Jabatan    `json:"jabatan_baru,omitempty" gorm:"foreignKey:IDJabatanBaru;references:ID"`
+	IDSubJabatanBaru *uint       `json:"id_sub_jabatan_baru" gorm:"column:id_sub_jabatan_baru"`
+	SubJabatanBaru   *SubJabatan `json:"sub_jabatan_baru,omitempty" gorm:"foreignKey:IDSubJabatanBaru;references:ID"`
+	// IDPangkatGolBaru: OPSIONAL -- diisi administrator sendiri saat
+	// menyetujui (BUKAN oleh pegawai saat upload) kalau kenaikan jabatan ini
+	// juga diikuti kenaikan pangkat/golongan resminya, boleh dikosongkan
+	// kalau belum ada perubahan pangkat/golongan.
+	IDPangkatGolBaru *uint       `json:"id_pangkat_gol_baru" gorm:"column:id_pangkat_gol_baru"`
+	PangkatGolBaru   *PangkatGol `json:"pangkat_gol_baru,omitempty" gorm:"foreignKey:IDPangkatGolBaru;references:ID"`
+
+	SkNamaFile string `json:"sk_nama_file" gorm:"column:sk_nama_file;size:255"`
+	SkFile     []byte `json:"-" gorm:"column:sk_file;type:bytea"`
+
+	Status         string     `json:"status" gorm:"size:20;not null;default:menunggu_upload"`
+	CatatanAdmin   string     `json:"catatan_admin" gorm:"column:catatan_admin;size:255"`
+	DiputuskanOleh string     `json:"diputuskan_oleh" gorm:"column:diputuskan_oleh;size:150"`
+	TglKeputusan   *time.Time `json:"tgl_keputusan" gorm:"column:tgl_keputusan"`
+	CreatedAt      time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt      time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+}
+
+func (PerubahanJabatanPegawai) TableName() string { return "perubahan_jabatan_pegawai" }

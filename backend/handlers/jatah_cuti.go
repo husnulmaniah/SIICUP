@@ -111,7 +111,7 @@ func listJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		pageSize = 25
 	}
 
-	query := db.Model(&models.JatahCuti{}).Preload("Pegawai")
+	query := db.Model(&models.JatahCuti{}).Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) })
 	countQuery := db.Model(&models.JatahCuti{})
 
 	switch claims.RoleName {
@@ -206,7 +206,7 @@ func deleteJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 func exportJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var items []models.JatahCuti
-	db.Preload("Pegawai").Order("tahun desc, id asc").Find(&items)
+	db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).Order("tahun desc, id asc").Find(&items)
 	f, err := utils.ExportData(items, jatahCutiExcelColumns(db))
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, err.Error())

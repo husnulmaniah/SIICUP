@@ -442,8 +442,13 @@ func listPengajuanSuratKolektifAdmin(w http.ResponseWriter, r *http.Request, db 
 	isAdministrator := claims != nil && claims.RoleName == "administrator"
 	// Preload("Pegawai.UnitKerja") -- supaya frontend bisa menyaring tabel
 	// Verifikasi lewat kotak pencarian nama/NIP/unit kerja yang sama seperti
-	// tab Rekap Absen/Surat Kolektif.
-	query := db.Omit("file").Preload("Pegawai.UnitKerja")
+	// tab Rekap Absen/Surat Kolektif. Preload("Pegawai", ...Omit(dokumenFileFields...))
+	// supaya kolom-kolom berkas (SK, foto, ttd) milik Pegawai TIDAK ikut
+	// ditarik untuk setiap baris -- tabel ini bisa memuat banyak pengajuan
+	// sekaligus, jadi menarik ber-byte dokumen per baris bikin lambat.
+	query := db.Omit("file").
+		Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).
+		Preload("Pegawai.UnitKerja")
 	if isAdministrator {
 		query = query.Preload("Verifikator")
 	}
