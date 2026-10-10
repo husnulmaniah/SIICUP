@@ -65,6 +65,12 @@ func RegisterPetaJabatanRoutes(mux *http.ServeMux, db *gorm.DB) {
 
 	mux.Handle("PUT /api/peta-jabatan/formasi", kelola(func(w http.ResponseWriter, r *http.Request) { setFormasiJabatanHandler(w, r, db) }))
 	mux.Handle("PUT /api/peta-jabatan/pegawai/{id}/sub-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { setPegawaiSubJabatanHandler(w, r, db) }))
+
+	// cetak/unduh tabel Peta Jabatan Sekolah (Excel & PDF, kertas Legal) --
+	// permintaan pengguna, HANYA administrator/admin/atasan (sama dengan
+	// "kelola" di atas) -- lihat handlers/peta_jabatan_export.go.
+	mux.Handle("GET /api/peta-jabatan/sekolah/export-excel", kelola(func(w http.ResponseWriter, r *http.Request) { exportPetaJabatanSekolahExcel(w, r, db) }))
+	mux.Handle("GET /api/peta-jabatan/sekolah/cetak-pdf", kelola(func(w http.ResponseWriter, r *http.Request) { cetakPetaJabatanSekolahPDF(w, r, db) }))
 }
 
 // ============================================================

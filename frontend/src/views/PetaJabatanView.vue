@@ -126,6 +126,40 @@ async function sinkronkanData() {
   }
 }
 
+// ============================================================
+// "Cetak Excel" / "Cetak PDF" -- permintaan pengguna: administrator &
+// atasan/Kepala Sekolah bisa mengunduh tabel Peta Jabatan Sekolah (Jabatan/
+// Sub-Jabatan/B/K/+-) dalam bentuk Excel ATAU PDF, keduanya diset ukuran
+// kertas Legal di backend (lihat handlers/peta_jabatan_export.go) supaya
+// seluruh tabel tetap muat rapi. HANYA untuk yang bolehKelola (sama seperti
+// tombol "Sinkronkan Data").
+// ============================================================
+const cetakExcelSubmitting = ref(false)
+const cetakPdfSubmitting = ref(false)
+async function unduhPetaJabatan(jenis) {
+  const loadingRef = jenis === 'excel' ? cetakExcelSubmitting : cetakPdfSubmitting
+  loadingRef.value = true
+  try {
+    const endpoint = jenis === 'excel' ? '/peta-jabatan/sekolah/export-excel' : '/peta-jabatan/sekolah/cetak-pdf'
+    const params = {}
+    if (auth.canManageMaster) params.id_unit_kerja = selectedUnitKerja.value
+    const res = await http.get(endpoint, { params, responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    const namaSekolah = (petaData.value?.unit_kerja?.unit || 'sekolah').replace(/[^a-zA-Z0-9]+/g, '_')
+    link.download = `peta_jabatan_${namaSekolah}.${jenis === 'excel' ? 'xlsx' : 'pdf'}`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    loadingRef.value = false
+  }
+}
+
 const expandedRows = ref({})
 
 // ============================================================
@@ -868,6 +902,28 @@ onMounted(() => {
                 :loading="sinkronkanSubmitting"
                 title="Tarik ulang data Jabatan & nama pegawai dari Data Pegawai, perbarui Peta Jabatan sesuai data terkini"
                 @click="sinkronkanData"
+              />
+              <Button
+                v-if="bolehKelola"
+                label="Cetak Excel"
+                icon="pi pi-file-excel"
+                size="small"
+                severity="success"
+                outlined
+                :loading="cetakExcelSubmitting"
+                title="Unduh tabel Peta Jabatan sebagai Excel (kertas Legal)"
+                @click="unduhPetaJabatan('excel')"
+              />
+              <Button
+                v-if="bolehKelola"
+                label="Cetak PDF"
+                icon="pi pi-file-pdf"
+                size="small"
+                severity="danger"
+                outlined
+                :loading="cetakPdfSubmitting"
+                title="Unduh tabel Peta Jabatan sebagai PDF (kertas Legal)"
+                @click="unduhPetaJabatan('pdf')"
               />
               <Button
                 v-if="auth.isPegawai || auth.isAtasan"
