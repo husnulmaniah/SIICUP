@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -48,6 +49,15 @@ func RegisterPetaJabatanRoutes(mux *http.ServeMux, db *gorm.DB) {
 
 	mux.Handle("GET /api/peta-jabatan/sekolah/daftar", adminOnly(func(w http.ResponseWriter, r *http.Request) { daftarSekolahPetaJabatan(w, r, db) }))
 	mux.Handle("GET /api/peta-jabatan/sekolah", lihat(func(w http.ResponseWriter, r *http.Request) { getPetaJabatanSekolah(w, r, db) }))
+	// sinkronkan: permintaan pengguna -- tombol "Sinkronkan Data" di
+	// frontend, menarik ulang data Jabatan & nama pegawai yang ada di tabel
+	// pegawai (lewat id_unit_kerja sekolah ini) lalu memastikan setiap
+	// jabatan/sub-jabatan yang BENAR-BENAR dipegang pegawai sudah punya
+	// baris kebutuhan (K) -- lihat sinkronkanPetaJabatanSekolah di bawah.
+	// HANYA administrator/admin/atasan (yang berhak mengelola, sama seperti
+	// aksi Atur K/Kelola Sub-Jabatan lainnya) -- bukan pegawai, karena ini
+	// bisa membuat baris FormasiJabatan baru.
+	mux.Handle("POST /api/peta-jabatan/sekolah/sinkronkan", kelola(func(w http.ResponseWriter, r *http.Request) { sinkronkanPetaJabatanSekolah(w, r, db) }))
 
 	mux.Handle("GET /api/peta-jabatan/sub-jabatan", lihat(func(w http.ResponseWriter, r *http.Request) { listSubJabatanHandler(w, r, db) }))
 	mux.Handle("POST /api/peta-jabatan/sub-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { createSubJabatanHandler(w, r, db) }))
@@ -340,6 +350,108 @@ func getPetaJabatanSekolah(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 	}
 	out.BolehKelola = canManagePetaJabatanSekolah(claims, idUnitKerja, db)
 	utils.Success(w, "ok", out)
+}
+
+// sinkronkanPetaJabatanSekolah menangani POST
+// /api/peta-jabatan/sekolah/sinkronkan -- permintaan pengguna: "tarik data
+// dan hitung berdasarkan data jabatan dan nama pegawai yang ada di unit
+// kerja pada data pegawai ... ketika diklik sinkronkan data maka data peta
+// jabatan akan terupdate sesuai data yang ada pada data pegawai".
+//
+// "B" (Bezetting) SUDAH SELALU dihitung langsung dari tabel pegawai pada
+// SETIAP kali tabel Peta Jabatan dimuat (lihat hitungPetaJabatanSekolah) --
+// tidak pernah basi/butuh disinkronkan terpisah. Yang disinkronkan di sini
+// adalah baris "K" (FormasiJabatan): memastikan SETIAP Jabatan (dan, kalau
+// sudah dipecah, SETIAP SubJabatan) yang BENAR-BENAR dipegang oleh pegawai
+// pada sekolah ini saat ini (ditarik langsung dari kolom id_jabatan/nama
+// pegawai pada tabel pegawai, bukan dari catatan lama yang mungkin sudah
+// tidak relevan) langsung punya baris kebutuhan (K) -- default 0 kalau
+// memang belum pernah diatur -- supaya baris itu terlihat & siap diatur
+// administrator/atasan tanpa harus menunggu salah satu pegawainya
+// "kebetulan" membuka dialog Atur Kebutuhan duluan. Baris FormasiJabatan
+// yang SUDAH ada (K-nya sudah diisi manual) TIDAK PERNAH disentuh/ditimpa.
+func sinkronkanPetaJabatanSekolah(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	idUnitKerja, err := resolveUnitKerjaSekolahForRequest(claims, r, db)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+	if !canManagePetaJabatanSekolah(claims, idUnitKerja, db) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses mengelola sekolah ini")
+		return
+	}
+
+	// Jabatan yang BENAR-BENAR dipegang pegawai pada sekolah ini SAAT INI --
+	// ditarik langsung dari data Jabatan & nama pegawai pada tabel pegawai.
+	var idJabatanDipegang []uint
+	db.Model(&models.Pegawai{}).
+		Distinct("id_jabatan").
+		Where("id_unit_kerja = ? AND id_jabatan IS NOT NULL", idUnitKerja).
+		Pluck("id_jabatan", &idJabatanDipegang)
+
+	var subRows []models.SubJabatan
+	db.Where("id_unit_kerja = ?", idUnitKerja).Find(&subRows)
+	subPerJabatan := map[uint][]models.SubJabatan{}
+	for _, s := range subRows {
+		subPerJabatan[s.IDJabatan] = append(subPerJabatan[s.IDJabatan], s)
+	}
+
+	dibuat := 0
+	for _, idJabatan := range idJabatanDipegang {
+		subs := subPerJabatan[idJabatan]
+		if len(subs) == 0 {
+			if _, created, err := ensureFormasiJabatan(db, idUnitKerja, idJabatan, nil); err == nil && created {
+				dibuat++
+			}
+			continue
+		}
+		for _, s := range subs {
+			subID := s.ID
+			if _, created, err := ensureFormasiJabatan(db, idUnitKerja, idJabatan, &subID); err == nil && created {
+				dibuat++
+			}
+		}
+	}
+
+	out, err := hitungPetaJabatanSekolah(db, idUnitKerja)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+	out.BolehKelola = true
+	pesan := "data Peta Jabatan sudah sesuai dengan data Jabatan & Pegawai terbaru"
+	if dibuat > 0 {
+		pesan = fmt.Sprintf("data Peta Jabatan disinkronkan -- %d baris kebutuhan (K) baru dibuat (default 0) untuk jabatan/sub-jabatan yang belum pernah diatur", dibuat)
+	}
+	utils.Success(w, pesan, out)
+}
+
+// ensureFormasiJabatan: seperti upsertFormasiJabatan, TAPI tidak pernah
+// mengubah nilai Kebutuhan yang sudah ada -- hanya membuat baris baru
+// (default Kebutuhan 0) kalau memang belum ada sama sekali. Dipakai KHUSUS
+// oleh sinkronkanPetaJabatanSekolah supaya K yang sudah diatur manual
+// administrator/atasan tidak pernah tertimpa balik ke 0.
+func ensureFormasiJabatan(db *gorm.DB, idUnitKerja, idJabatan uint, idSubJabatan *uint) (*models.FormasiJabatan, bool, error) {
+	query := db.Where("id_unit_kerja = ? AND id_jabatan = ?", idUnitKerja, idJabatan)
+	if idSubJabatan != nil {
+		query = query.Where("id_sub_jabatan = ?", *idSubJabatan)
+	} else {
+		query = query.Where("id_sub_jabatan IS NULL")
+	}
+	var item models.FormasiJabatan
+	err := query.First(&item).Error
+	if err == nil {
+		return &item, false, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return nil, false, err
+	}
+	item = models.FormasiJabatan{IDUnitKerja: idUnitKerja, IDJabatan: idJabatan, IDSubJabatan: idSubJabatan, Kebutuhan: 0}
+	if err := db.Create(&item).Error; err != nil {
+		return nil, false, err
+	}
+	return &item, true, nil
 }
 
 // ============================================================

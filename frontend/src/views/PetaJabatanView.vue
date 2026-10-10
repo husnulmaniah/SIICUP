@@ -98,6 +98,34 @@ watch(selectedUnitKerja, () => {
   if (auth.canManageMaster) loadPeta()
 })
 
+// ============================================================
+// "Sinkronkan Data" -- permintaan pengguna: tarik ulang data Jabatan & nama
+// pegawai yang ada di unit kerja pada menu Data Pegawai, lalu perbarui
+// tabel Peta Jabatan supaya sesuai. "B" sebenarnya SUDAH SELALU dihitung
+// langsung dari data pegawai setiap tabel ini dimuat (lihat
+// hitungPetaJabatanSekolah di backend) -- tombol ini terutama memastikan
+// SETIAP jabatan/sub-jabatan yang benar-benar dipegang pegawai sekolah ini
+// langsung punya baris kebutuhan (K, default 0 kalau belum pernah diatur)
+// supaya langsung terlihat & bisa diatur, TANPA menimpa K yang sudah diisi
+// manual (lihat sinkronkanPetaJabatanSekolah di
+// backend/handlers/peta_jabatan.go). HANYA untuk administrator/admin/
+// atasan (sama seperti aksi Atur K/Kelola Sub-Jabatan lainnya).
+const sinkronkanSubmitting = ref(false)
+async function sinkronkanData() {
+  sinkronkanSubmitting.value = true
+  try {
+    const params = {}
+    if (auth.canManageMaster) params.id_unit_kerja = selectedUnitKerja.value
+    const { data } = await http.post('/peta-jabatan/sekolah/sinkronkan', null, { params })
+    petaData.value = data.data
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 6000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyinkronkan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    sinkronkanSubmitting.value = false
+  }
+}
+
 const expandedRows = ref({})
 
 // ============================================================
@@ -792,6 +820,17 @@ onMounted(() => {
               <div v-else-if="petaData?.unit_kerja" style="font-weight: 600; flex: 1">
                 <i class="pi pi-building" style="margin-right: 0.4rem"></i>{{ petaData.unit_kerja.unit }}
               </div>
+              <Button
+                v-if="bolehKelola"
+                label="Sinkronkan Data"
+                icon="pi pi-sync"
+                size="small"
+                severity="secondary"
+                outlined
+                :loading="sinkronkanSubmitting"
+                title="Tarik ulang data Jabatan & nama pegawai dari Data Pegawai, perbarui Peta Jabatan sesuai data terkini"
+                @click="sinkronkanData"
+              />
               <Button
                 v-if="auth.isPegawai || auth.isAtasan"
                 label="Ajukan Kenaikan Pangkat"
