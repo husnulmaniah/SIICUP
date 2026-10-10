@@ -153,11 +153,54 @@ async function loadSubJabatanItems() {
     subJabatanLoading.value = false
   }
 }
+// daftar pegawai pemegang Jabatan ini (ditarik dari data pegawai yang
+// berhasil disinkronkan -- sama sumbernya dengan B) -- dipakai untuk
+// menempatkan pegawai ke salah satu pecahan Sub-Jabatan yang baru dibuat
+// (permintaan pengguna: "tambahkan inputan untuk menarik data pegawai...
+// sesuai data B yang berhasil disinkronkan"). Dulu ini dialog "Kelola
+// Penempatan" terpisah -- sekarang digabung langsung ke dialog "Kelola
+// Sub-Jabatan" supaya begitu sub-jabatan baru dibuat, penempatannya bisa
+// langsung diatur di tempat yang sama.
+const kelolaSubPegawaiList = ref([])
+const kelolaSubPegawaiLoading = ref(false)
+async function loadKelolaSubPegawaiList() {
+  if (!kelolaSubRow.value) return
+  kelolaSubPegawaiLoading.value = true
+  try {
+    const { data } = await http.get('/pegawai', {
+      params: { id_unit_kerja: currentUnitKerjaId.value, id_jabatan: kelolaSubRow.value.id_jabatan, pageSize: 200 },
+    })
+    kelolaSubPegawaiList.value = (Array.isArray(data.data) ? data.data : []).map((p) => ({
+      id: p.id,
+      nama: p.nama,
+      nip: p.nip,
+      id_sub_jabatan: p.id_sub_jabatan,
+    }))
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    kelolaSubPegawaiLoading.value = false
+  }
+}
+const subJabatanOptionsKelola = computed(() => [
+  { label: '(Belum dikategorikan)', value: null },
+  ...subJabatanItems.value.map((s) => ({ label: s.nama, value: s.id })),
+])
+async function ubahPenempatanSub(pg) {
+  try {
+    await http.put(`/peta-jabatan/pegawai/${pg.id}/sub-jabatan`, { id_sub_jabatan: pg.id_sub_jabatan })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `Penempatan ${pg.nama} disimpan`, life: 3000 })
+    loadPeta()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
 function openKelolaSub(row) {
   kelolaSubRow.value = row
   newSubNama.value = ''
   kelolaSubDialog.value = true
   loadSubJabatanItems()
+  loadKelolaSubPegawaiList()
 }
 async function tambahSubJabatan() {
   const nama = newSubNama.value.trim()
@@ -190,7 +233,7 @@ function konfirmasiHapusSub(item) {
       try {
         await http.delete(`/peta-jabatan/sub-jabatan/${item.id}`)
         toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Sub-jabatan dihapus', life: 3000 })
-        await Promise.all([loadSubJabatanItems(), loadPeta()])
+        await Promise.all([loadSubJabatanItems(), loadKelolaSubPegawaiList(), loadPeta()])
       } catch (e) {
         toast.add({ severity: 'error', summary: 'Gagal menghapus', detail: e.response?.data?.message || e.message, life: 5000 })
       }
@@ -234,44 +277,39 @@ async function simpanAturK() {
 }
 
 // ============================================================
-// dialog "Kelola Penempatan" -- menempatkan pegawai (yang sudah menduduki
-// satu Jabatan di sekolah ini) ke salah satu pecahan SubJabatan-nya.
+// modal "Daftar Pegawai" -- permintaan pengguna: klik nilai B atau K pada
+// baris Jabatan (tabel utama) ATAU baris Sub-Jabatan (panel expand)
+// menampilkan nama & NIP pegawai yang masuk hitungan baris tersebut.
+// Menggunakan GET /pegawai yang sama (sudah otomatis membatasi hasil sesuai
+// role pemanggil -- atasan hanya bawahannya, pegawai hanya dirinya sendiri,
+// administrator/admin seluruhnya), jadi tidak perlu endpoint baru di
+// backend. Kalau sub diisi (klik baris sub-jabatan), hasil disaring lagi di
+// sisi frontend supaya hanya pegawai yang sudah ditempatkan ke sub-jabatan
+// itu yang tampil; kalau tidak (klik baris Jabatan induk), seluruh pegawai
+// pemegang jabatan tersebut tampil (termasuk yang sudah dipecah ke
+// sub-jabatan manapun).
 // ============================================================
-const penempatanDialog = ref(false)
-const penempatanRow = ref(null)
-const penempatanPegawaiList = ref([])
-const penempatanLoading = ref(false)
-async function openPenempatan(row) {
-  penempatanRow.value = row
-  penempatanDialog.value = true
-  penempatanLoading.value = true
+const pegawaiListDialog = ref(false)
+const pegawaiListTitle = ref('')
+const pegawaiListLoading = ref(false)
+const pegawaiListItems = ref([])
+async function openPegawaiList(row, sub) {
+  pegawaiListTitle.value = sub ? `${row.jabatan} -- ${sub.nama}` : row.jabatan
+  pegawaiListDialog.value = true
+  pegawaiListLoading.value = true
   try {
     const { data } = await http.get('/pegawai', {
       params: { id_unit_kerja: currentUnitKerjaId.value, id_jabatan: row.id_jabatan, pageSize: 200 },
     })
-    penempatanPegawaiList.value = (Array.isArray(data.data) ? data.data : []).map((p) => ({
-      id: p.id,
-      nama: p.nama,
-      nip: p.nip,
-      id_sub_jabatan: p.id_sub_jabatan,
-    }))
+    let items = Array.isArray(data.data) ? data.data : []
+    if (sub) {
+      items = items.filter((p) => p.id_sub_jabatan === sub.id)
+    }
+    pegawaiListItems.value = items.map((p) => ({ id: p.id, nama: p.nama, nip: p.nip }))
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 4000 })
   } finally {
-    penempatanLoading.value = false
-  }
-}
-const subJabatanOptionsPenempatan = computed(() => [
-  { label: '(Belum dikategorikan)', value: null },
-  ...((penempatanRow.value?.sub_jabatan || []).map((s) => ({ label: s.nama, value: s.id }))),
-])
-async function ubahPenempatan(pg) {
-  try {
-    await http.put(`/peta-jabatan/pegawai/${pg.id}/sub-jabatan`, { id_sub_jabatan: pg.id_sub_jabatan })
-    toast.add({ severity: 'success', summary: 'Berhasil', detail: `Penempatan ${pg.nama} disimpan`, life: 3000 })
-    loadPeta()
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal menyimpan', detail: e.response?.data?.message || e.message, life: 4000 })
+    pegawaiListLoading.value = false
   }
 }
 
@@ -864,10 +902,14 @@ onMounted(() => {
                   <Column expander style="width: 3rem" />
                   <Column field="jabatan" header="Jabatan" />
                   <Column header="B" style="width: 80px">
-                    <template #body="{ data }">{{ data.b }}</template>
+                    <template #body="{ data }">
+                      <span class="clickable-count" title="Lihat daftar pegawai" @click="openPegawaiList(data, null)">{{ data.b }}</span>
+                    </template>
                   </Column>
                   <Column header="K" style="width: 80px">
-                    <template #body="{ data }">{{ data.k }}</template>
+                    <template #body="{ data }">
+                      <span class="clickable-count" title="Lihat daftar pegawai" @click="openPegawaiList(data, null)">{{ data.k }}</span>
+                    </template>
                   </Column>
                   <Column header="+/-" style="width: 90px">
                     <template #body="{ data }">
@@ -886,15 +928,6 @@ onMounted(() => {
                           severity="secondary"
                           outlined
                           @click="openAturK(data, null)"
-                        />
-                        <Button
-                          v-else
-                          label="Penempatan"
-                          icon="pi pi-users"
-                          size="small"
-                          severity="secondary"
-                          outlined
-                          @click="openPenempatan(data)"
                         />
                       </div>
                     </template>
@@ -917,8 +950,8 @@ onMounted(() => {
                         <tbody>
                           <tr v-for="s in data.sub_jabatan" :key="s.id">
                             <td>{{ s.nama }}</td>
-                            <td>{{ s.b }}</td>
-                            <td>{{ s.k }}</td>
+                            <td><span class="clickable-count" title="Lihat daftar pegawai" @click="openPegawaiList(data, s)">{{ s.b }}</span></td>
+                            <td><span class="clickable-count" title="Lihat daftar pegawai" @click="openPegawaiList(data, s)">{{ s.k }}</span></td>
                             <td><Tag :value="signed(s.selisih)" :severity="selisihSeverity(s.selisih)" /></td>
                             <td v-if="bolehKelola">
                               <Button label="Atur K" icon="pi pi-pencil" size="small" severity="secondary" outlined text @click="openAturK(data, s)" />
@@ -1002,8 +1035,10 @@ onMounted(() => {
       </TabPanels>
     </Tabs>
 
-    <!-- dialog "Kelola Sub-Jabatan" -->
-    <Dialog v-model:visible="kelolaSubDialog" modal :header="`Kelola Sub-Jabatan -- ${kelolaSubRow?.jabatan || ''}`" style="width: 32rem; max-width: 95vw">
+    <!-- dialog "Kelola Sub-Jabatan" -- sekaligus menempatkan pegawai ke
+         sub-jabatan yang dibuat (permintaan pengguna, lihat
+         loadKelolaSubPegawaiList di atas) -->
+    <Dialog v-model:visible="kelolaSubDialog" modal :header="`Kelola Sub-Jabatan -- ${kelolaSubRow?.jabatan || ''}`" style="width: 36rem; max-width: 95vw">
       <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem">
         <InputText v-model="newSubNama" placeholder="Nama sub-jabatan baru, mis. Guru Kelas" style="flex: 1" @keyup.enter="tambahSubJabatan" />
         <Button label="Tambah" icon="pi pi-plus" :loading="subJabatanSubmitting" @click="tambahSubJabatan" />
@@ -1018,6 +1053,35 @@ onMounted(() => {
           <Button icon="pi pi-trash" size="small" severity="danger" text rounded @click="konfirmasiHapusSub(item)" />
         </li>
       </ul>
+
+      <template v-if="subJabatanItems.length">
+        <div class="field-label" style="margin-top: 1.25rem">Tempatkan Pegawai ke Sub-Jabatan</div>
+        <p style="font-size: 0.78rem; color: var(--p-text-muted-color); margin: 0.2rem 0 0.75rem 0">
+          Daftar pegawai berikut ditarik dari data pegawai yang sudah disinkronkan (B) pada jabatan ini. Pilih sub-jabatan
+          untuk masing-masing pegawai.
+        </p>
+        <div v-if="kelolaSubPegawaiLoading" style="display: flex; justify-content: center; padding: 1rem">
+          <ProgressSpinner style="width: 2rem; height: 2rem" />
+        </div>
+        <Message v-else-if="!kelolaSubPegawaiList.length" severity="info" :closable="false">Belum ada pegawai pada jabatan ini.</Message>
+        <div v-else class="pegawai-sub-list">
+          <div v-for="pg in kelolaSubPegawaiList" :key="pg.id" class="pegawai-sub-item">
+            <div style="flex: 1; min-width: 0">
+              <div style="font-weight: 600; font-size: 0.85rem">{{ pg.nama }}</div>
+              <div style="font-size: 0.75rem; color: var(--p-text-muted-color)">{{ pg.nip }}</div>
+            </div>
+            <Select
+              v-model="pg.id_sub_jabatan"
+              :options="subJabatanOptionsKelola"
+              optionLabel="label"
+              optionValue="value"
+              style="width: 210px"
+              @update:modelValue="ubahPenempatanSub(pg)"
+            />
+          </div>
+        </div>
+      </template>
+
       <template #footer>
         <Button label="Tutup" severity="secondary" outlined @click="kelolaSubDialog = false" />
       </template>
@@ -1035,30 +1099,20 @@ onMounted(() => {
       </template>
     </Dialog>
 
-    <!-- dialog "Kelola Penempatan" -->
-    <Dialog v-model:visible="penempatanDialog" modal :header="`Kelola Penempatan -- ${penempatanRow?.jabatan || ''}`" style="width: 36rem; max-width: 95vw">
-      <div v-if="penempatanLoading" style="display: flex; justify-content: center; padding: 1.5rem">
+    <!-- modal "Daftar Pegawai" -- klik nilai B/K pada baris Jabatan/Sub-Jabatan -->
+    <Dialog v-model:visible="pegawaiListDialog" modal :header="`Daftar Pegawai -- ${pegawaiListTitle}`" style="width: 28rem; max-width: 95vw">
+      <div v-if="pegawaiListLoading" style="display: flex; justify-content: center; padding: 1.5rem">
         <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
       </div>
-      <Message v-else-if="!penempatanPegawaiList.length" severity="info" :closable="false">Belum ada pegawai pada jabatan ini.</Message>
-      <div v-else style="display: flex; flex-direction: column; gap: 0.75rem">
-        <div v-for="pg in penempatanPegawaiList" :key="pg.id" style="display: flex; align-items: center; gap: 0.75rem">
-          <div style="flex: 1; min-width: 0">
-            <div style="font-weight: 600; font-size: 0.88rem">{{ pg.nama }}</div>
-            <div style="font-size: 0.76rem; color: var(--p-text-muted-color)">{{ pg.nip }}</div>
-          </div>
-          <Select
-            v-model="pg.id_sub_jabatan"
-            :options="subJabatanOptionsPenempatan"
-            optionLabel="label"
-            optionValue="value"
-            style="width: 220px"
-            @update:modelValue="ubahPenempatan(pg)"
-          />
-        </div>
-      </div>
+      <Message v-else-if="!pegawaiListItems.length" severity="info" :closable="false">Belum ada pegawai pada baris ini.</Message>
+      <ul v-else class="pegawai-list-view">
+        <li v-for="pg in pegawaiListItems" :key="pg.id">
+          <div style="font-weight: 600; font-size: 0.88rem">{{ pg.nama }}</div>
+          <div style="font-size: 0.78rem; color: var(--p-text-muted-color)">{{ pg.nip || '-' }}</div>
+        </li>
+      </ul>
       <template #footer>
-        <Button label="Tutup" severity="secondary" outlined @click="penempatanDialog = false" />
+        <Button label="Tutup" severity="secondary" outlined @click="pegawaiListDialog = false" />
       </template>
     </Dialog>
 
@@ -1329,6 +1383,49 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: var(--p-content-background, #f8fafc);
+  border: 1px solid var(--p-content-border-color, #e2e8f0);
+}
+
+.clickable-count {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  color: var(--p-primary-color);
+  font-weight: 600;
+}
+.clickable-count:hover {
+  opacity: 0.75;
+}
+
+.pegawai-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.pegawai-sub-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.1rem;
+  border-bottom: 1px solid var(--p-content-border-color, #f1f5f9);
+}
+
+.pegawai-list-view {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+.pegawai-list-view li {
   padding: 0.5rem 0.6rem;
   border-radius: 8px;
   background: var(--p-content-background, #f8fafc);
