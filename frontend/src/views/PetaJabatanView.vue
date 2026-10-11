@@ -171,7 +171,26 @@ const kelolaSubRow = ref(null)
 const subJabatanItems = ref([])
 const subJabatanLoading = ref(false)
 const newSubNama = ref('')
+const newSubKJ = ref(null)
 const subJabatanSubmitting = ref(false)
+// menyimpan KJ (Kelas Jabatan) satu sub-jabatan yang SUDAH ada -- dipanggil
+// saat admin mengubah angka KJ pada daftar sub-jabatan di dialog ini.
+// Murni data cetak untuk Peta Jabatan Sekolah (lihat komentar
+// models.SubJabatan.KelasJabatan), tidak mengubah logika B/K apa pun.
+const subJabatanKJSaving = ref({})
+async function ubahKJSub(item) {
+  subJabatanKJSaving.value = { ...subJabatanKJSaving.value, [item.id]: true }
+  try {
+    await http.put(`/peta-jabatan/sub-jabatan/${item.id}`, { kelas_jabatan: item.kelas_jabatan })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `KJ "${item.nama}" disimpan`, life: 2500 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan KJ', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    const copy = { ...subJabatanKJSaving.value }
+    delete copy[item.id]
+    subJabatanKJSaving.value = copy
+  }
+}
 
 async function loadSubJabatanItems() {
   if (!kelolaSubRow.value) return
@@ -232,6 +251,7 @@ async function ubahPenempatanSub(pg) {
 function openKelolaSub(row) {
   kelolaSubRow.value = row
   newSubNama.value = ''
+  newSubKJ.value = null
   kelolaSubDialog.value = true
   loadSubJabatanItems()
   loadKelolaSubPegawaiList()
@@ -245,8 +265,10 @@ async function tambahSubJabatan() {
       id_unit_kerja: currentUnitKerjaId.value,
       id_jabatan: kelolaSubRow.value.id_jabatan,
       nama,
+      kelas_jabatan: newSubKJ.value,
     })
     newSubNama.value = ''
+    newSubKJ.value = null
     toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Sub-jabatan ditambahkan', life: 3000 })
     await Promise.all([loadSubJabatanItems(), loadPeta()])
   } catch (e) {
@@ -1095,10 +1117,14 @@ onMounted(() => {
          sub-jabatan yang dibuat (permintaan pengguna, lihat
          loadKelolaSubPegawaiList di atas) -->
     <Dialog v-model:visible="kelolaSubDialog" modal :header="`Kelola Sub-Jabatan -- ${kelolaSubRow?.jabatan || ''}`" style="width: 36rem; max-width: 95vw">
-      <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem">
+      <div style="display: flex; gap: 0.5rem; margin-bottom: 0.25rem">
         <InputText v-model="newSubNama" placeholder="Nama sub-jabatan baru, mis. Guru Kelas" style="flex: 1" @keyup.enter="tambahSubJabatan" />
+        <InputNumber v-model="newSubKJ" placeholder="KJ" :min="1" :max="17" showButtons style="width: 7rem" inputStyle="width: 3rem" />
         <Button label="Tambah" icon="pi pi-plus" :loading="subJabatanSubmitting" @click="tambahSubJabatan" />
       </div>
+      <p style="font-size: 0.75rem; color: var(--p-text-muted-color); margin: 0.1rem 0 1rem 0">
+        KJ (Kelas Jabatan) opsional -- hanya ditampilkan sebagai kolom "KJ" saat mencetak Peta Jabatan Sekolah (Excel/PDF).
+      </p>
       <div v-if="subJabatanLoading" style="display: flex; justify-content: center; padding: 1rem">
         <ProgressSpinner style="width: 2rem; height: 2rem" />
       </div>
@@ -1106,7 +1132,19 @@ onMounted(() => {
       <ul v-else class="sub-jabatan-list">
         <li v-for="item in subJabatanItems" :key="item.id">
           <span>{{ item.nama }}</span>
-          <Button icon="pi pi-trash" size="small" severity="danger" text rounded @click="konfirmasiHapusSub(item)" />
+          <div style="display: flex; align-items: center; gap: 0.4rem">
+            <InputNumber
+              v-model="item.kelas_jabatan"
+              placeholder="KJ"
+              :min="1"
+              :max="17"
+              :disabled="subJabatanKJSaving[item.id]"
+              style="width: 6rem"
+              inputStyle="width: 3rem"
+              @update:modelValue="ubahKJSub(item)"
+            />
+            <Button icon="pi pi-trash" size="small" severity="danger" text rounded @click="konfirmasiHapusSub(item)" />
+          </div>
         </li>
       </ul>
 

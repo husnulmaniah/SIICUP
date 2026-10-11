@@ -35,6 +35,11 @@ type Jabatan struct {
 	// pegawai dengan jabatan ini. Default "pelaksana" untuk data lama yang
 	// belum diisi administrator.
 	JenisJabatan string `json:"jenis_jabatan" gorm:"column:jenis_jabatan;size:20;not null;default:'pelaksana'"`
+	// KelasJabatan ("KJ", 1-17 ala ASN): OPSIONAL, diisi administrator lewat
+	// Master Data Jabatan -- murni ditampilkan di dokumen cetak Peta Jabatan
+	// Sekolah (kolom "KJ", lihat handlers/peta_jabatan_export.go), tidak
+	// dipakai logika apa pun di sistem ini. nil/belum diisi ditampilkan "-".
+	KelasJabatan *int `json:"kelas_jabatan" gorm:"column:kelas_jabatan"`
 }
 
 func (Jabatan) TableName() string { return "jabatan" }
@@ -1642,7 +1647,13 @@ type SubJabatan struct {
 	Jabatan     *Jabatan   `json:"jabatan,omitempty" gorm:"foreignKey:IDJabatan;references:ID"`
 	Nama        string     `json:"nama" gorm:"size:100;not null;uniqueIndex:idx_sub_jabatan_unik,priority:3"`
 	Urutan      int        `json:"urutan" gorm:"column:urutan;default:0"`
-	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	// KelasJabatan ("KJ"): sama seperti Jabatan.KelasJabatan di atas, tapi
+	// khusus pecahan sub-jabatan ini -- satu Jabatan fungsional (mis. "Guru
+	// Ahli Pertama") bisa dipecah jadi beberapa jenjang dengan KJ berbeda
+	// (mis. "Guru Madya" KJ 9, "Guru Muda" KJ 8, "Guru Pertama" KJ 7). Diatur
+	// lewat dialog "Kelola Sub-Jabatan". OPSIONAL, nil ditampilkan "-".
+	KelasJabatan *int      `json:"kelas_jabatan" gorm:"column:kelas_jabatan"`
+	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 
 func (SubJabatan) TableName() string { return "sub_jabatan" }

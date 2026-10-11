@@ -61,6 +61,7 @@ func RegisterPetaJabatanRoutes(mux *http.ServeMux, db *gorm.DB) {
 
 	mux.Handle("GET /api/peta-jabatan/sub-jabatan", lihat(func(w http.ResponseWriter, r *http.Request) { listSubJabatanHandler(w, r, db) }))
 	mux.Handle("POST /api/peta-jabatan/sub-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { createSubJabatanHandler(w, r, db) }))
+	mux.Handle("PUT /api/peta-jabatan/sub-jabatan/{id}", kelola(func(w http.ResponseWriter, r *http.Request) { updateSubJabatanHandler(w, r, db) }))
 	mux.Handle("DELETE /api/peta-jabatan/sub-jabatan/{id}", kelola(func(w http.ResponseWriter, r *http.Request) { deleteSubJabatanHandler(w, r, db) }))
 
 	mux.Handle("PUT /api/peta-jabatan/formasi", kelola(func(w http.ResponseWriter, r *http.Request) { setFormasiJabatanHandler(w, r, db) }))
@@ -192,6 +193,9 @@ type subJabatanPetaOut struct {
 	B       int    `json:"b"`
 	K       int    `json:"k"`
 	Selisih int    `json:"selisih"`
+	// KJ (Kelas Jabatan): lihat models.SubJabatan.KelasJabatan -- nil kalau
+	// belum diisi administrator, ditampilkan "-" oleh frontend/dokumen cetak.
+	KJ *int `json:"kj"`
 }
 
 type jabatanPetaOut struct {
@@ -202,6 +206,12 @@ type jabatanPetaOut struct {
 	Selisih         int                 `json:"selisih"`
 	PunyaSubJabatan bool                `json:"punya_sub_jabatan"`
 	SubJabatan      []subJabatanPetaOut `json:"sub_jabatan"`
+	// JenisJabatan & KJ: lihat models.Jabatan.JenisJabatan/KelasJabatan --
+	// dipakai handlers/peta_jabatan_export.go untuk mengelompokkan dokumen
+	// cetak jadi dua tabel ("KELOMPOK JABATAN FUNGSIONAL" vs "KELOMPOK
+	// JABATAN PELAKSANA") & menampilkan kolom KJ, TANPA perlu query ulang.
+	JenisJabatan string `json:"jenis_jabatan"`
+	KJ           *int   `json:"kj"`
 }
 
 type petaJabatanSekolahOut struct {
@@ -297,8 +307,12 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 		db.Where("id IN ?", jabatanIDs).Find(&jabatanMaster)
 	}
 	namaJabatan := map[uint]string{}
+	jenisJabatanPerID := map[uint]string{}
+	kjPerJabatan := map[uint]*int{}
 	for _, j := range jabatanMaster {
 		namaJabatan[j.ID] = j.Jabatan
+		jenisJabatanPerID[j.ID] = j.JenisJabatan
+		kjPerJabatan[j.ID] = j.KelasJabatan
 	}
 
 	rows := make([]jabatanPetaOut, 0, len(jabatanIDs))
@@ -312,7 +326,7 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 				subB := bPerSub[idJabatan][s.ID]
 				subK := kPerSub[idJabatan][s.ID]
 				totalK += subK
-				subOut = append(subOut, subJabatanPetaOut{ID: s.ID, Nama: s.Nama, B: subB, K: subK, Selisih: subB - subK})
+				subOut = append(subOut, subJabatanPetaOut{ID: s.ID, Nama: s.Nama, B: subB, K: subK, Selisih: subB - subK, KJ: s.KelasJabatan})
 			}
 		} else {
 			totalK = kPerSub[idJabatan][0]
@@ -324,6 +338,10 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 		if nama == "" {
 			nama = "(jabatan tidak ditemukan)"
 		}
+		jenisJabatan := jenisJabatanPerID[idJabatan]
+		if jenisJabatan == "" {
+			jenisJabatan = models.JenisJabatanPelaksana
+		}
 		rows = append(rows, jabatanPetaOut{
 			IDJabatan:       idJabatan,
 			Jabatan:         nama,
@@ -332,6 +350,8 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 			Selisih:         totalB - totalK,
 			PunyaSubJabatan: len(subs) > 0,
 			SubJabatan:      subOut,
+			JenisJabatan:    jenisJabatan,
+			KJ:              kjPerJabatan[idJabatan],
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Jabatan < rows[j].Jabatan })
@@ -485,9 +505,10 @@ func listSubJabatanHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 }
 
 type subJabatanPayload struct {
-	IDUnitKerja uint   `json:"id_unit_kerja"`
-	IDJabatan   uint   `json:"id_jabatan"`
-	Nama        string `json:"nama"`
+	IDUnitKerja  uint   `json:"id_unit_kerja"`
+	IDJabatan    uint   `json:"id_jabatan"`
+	Nama         string `json:"nama"`
+	KelasJabatan *int   `json:"kelas_jabatan"`
 }
 
 func createSubJabatanHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -510,12 +531,47 @@ func createSubJabatanHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	db.Model(&models.SubJabatan{}).
 		Where("id_unit_kerja = ? AND id_jabatan = ?", p.IDUnitKerja, p.IDJabatan).
 		Select("COALESCE(MAX(urutan), 0)").Scan(&maxUrutan)
-	item := models.SubJabatan{IDUnitKerja: p.IDUnitKerja, IDJabatan: p.IDJabatan, Nama: p.Nama, Urutan: maxUrutan + 1}
+	item := models.SubJabatan{IDUnitKerja: p.IDUnitKerja, IDJabatan: p.IDJabatan, Nama: p.Nama, Urutan: maxUrutan + 1, KelasJabatan: p.KelasJabatan}
 	if err := db.Create(&item).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "gagal menambah sub-jabatan (kemungkinan nama sudah dipakai untuk jabatan ini): "+err.Error())
 		return
 	}
 	utils.Created(w, "sub-jabatan berhasil ditambahkan", item)
+}
+
+// updateSubJabatanHandler menangani PUT /api/peta-jabatan/sub-jabatan/{id} --
+// HANYA mengubah KelasJabatan (kolom "KJ", lihat komentar pada
+// models.SubJabatan.KelasJabatan) dari dialog "Kelola Sub-Jabatan". Nama
+// SENGAJA tidak diizinkan diubah lewat endpoint ini (cukup hapus & buat
+// ulang kalau perlu ganti nama, sama seperti perilaku sebelumnya) supaya
+// payload-nya simpel & tidak tumpang tindih dengan constraint unik nama.
+type subJabatanUpdatePayload struct {
+	KelasJabatan *int `json:"kelas_jabatan"`
+}
+
+func updateSubJabatanHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.SubJabatan
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "sub-jabatan tidak ditemukan")
+		return
+	}
+	if !canManagePetaJabatanSekolah(claims, item.IDUnitKerja, db) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses mengelola sekolah ini")
+		return
+	}
+	var p subJabatanUpdatePayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+		return
+	}
+	if err := db.Model(&item).Update("kelas_jabatan", p.KelasJabatan).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan kelas jabatan: "+err.Error())
+		return
+	}
+	item.KelasJabatan = p.KelasJabatan
+	utils.Success(w, "kelas jabatan (KJ) berhasil disimpan", item)
 }
 
 // deleteSubJabatanHandler menghapus satu pecahan SubJabatan -- pegawai yang

@@ -87,6 +87,7 @@ export const tableConfigs = {
       { field: 'id', header: 'ID', width: '80px' },
       { field: 'jabatan', header: 'Nama Jabatan' },
       { field: 'jenis_jabatan', header: 'Jenis Jabatan', type: 'lookup', map: jenisJabatanLabels, width: '160px' },
+      { field: 'kelas_jabatan', header: 'KJ', width: '70px' },
     ],
     formFields: [
       { field: 'jabatan', label: 'Nama Jabatan', type: 'text', required: true },
@@ -98,6 +99,12 @@ export const tableConfigs = {
         staticOptions: jenisJabatanOptions,
         optionLabel: 'label',
         hint: 'Menentukan usia pensiun standar jabatan ini (diatur di menu Pengajuan Pensiun): Pelaksana & Struktural, atau Fungsional.',
+      },
+      {
+        field: 'kelas_jabatan',
+        label: 'Kelas Jabatan (KJ)',
+        type: 'number',
+        hint: 'Opsional -- hanya ditampilkan sebagai kolom "KJ" saat mencetak Peta Jabatan Sekolah (Excel/PDF). Boleh dikosongkan.',
       },
     ],
     searchPlaceholder: 'Cari jabatan...',

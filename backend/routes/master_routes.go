@@ -168,6 +168,27 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 					}
 					return nil
 				}},
+			{Header: "Kelas Jabatan (KJ, opsional)", Example: "9",
+				Get: func(i interface{}) string {
+					kj := i.(models.Jabatan).KelasJabatan
+					if kj == nil {
+						return ""
+					}
+					return strconv.Itoa(*kj)
+				},
+				Set: func(i interface{}, raw string) error {
+					raw = strings.TrimSpace(raw)
+					if raw == "" {
+						i.(*models.Jabatan).KelasJabatan = nil
+						return nil
+					}
+					kj, err := strconv.Atoi(raw)
+					if err != nil {
+						return fmt.Errorf("kelas jabatan harus berupa angka")
+					}
+					i.(*models.Jabatan).KelasJabatan = &kj
+					return nil
+				}},
 		},
 	}, "administrator")
 

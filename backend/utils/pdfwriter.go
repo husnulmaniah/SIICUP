@@ -218,6 +218,26 @@ func (p *PDFPage) Rect(x, yTop, w, h float64) {
 	fmt.Fprintf(&p.buf, "%.2f %.2f %.2f %.2f re S\n", x, p.H-yTop-h, w, h)
 }
 
+// FilledRect draws a solid-filled rectangle (no border), RGB components in
+// the 0..1 range, whose top-left corner is (x, yTop) -- used for colored
+// header/box backgrounds (e.g. the "KEPALA SEKOLAH" organogram box on the
+// Peta Jabatan Sekolah export PDF, see handlers/peta_jabatan_export.go).
+// Resets the fill color back to black immediately after, so it never leaks
+// into text drawn afterwards.
+func (p *PDFPage) FilledRect(x, yTop, w, h, r, g, b float64) {
+	fmt.Fprintf(&p.buf, "%.3f %.3f %.3f rg\n", r, g, b)
+	fmt.Fprintf(&p.buf, "%.2f %.2f %.2f %.2f re f\n", x, p.H-yTop-h, w, h)
+	fmt.Fprintf(&p.buf, "0.000 0.000 0.000 rg\n")
+}
+
+// SetTextColor sets the fill color (RGB, 0..1 range) used by subsequent
+// Text/TextCentered/TextRight calls -- e.g. white text drawn on top of a
+// FilledRect box. Callers are responsible for calling SetTextColor(0, 0, 0)
+// once they're done, so black text drawn later isn't accidentally tinted.
+func (p *PDFPage) SetTextColor(r, g, b float64) {
+	fmt.Fprintf(&p.buf, "%.3f %.3f %.3f rg\n", r, g, b)
+}
+
 // Cross draws a small "X" mark (used to tick a checkbox) inside a box whose
 // top-left corner is (x, yTop) and side length is size.
 func (p *PDFPage) Cross(x, yTop, size float64) {
