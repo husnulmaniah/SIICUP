@@ -950,8 +950,17 @@ function absenPulangSudahTutup(data) {
   if (!pengaturan.jam_tutup_pulang) return false
   return skrg.jam >= pengaturan.jam_tutup_pulang
 }
+// CATATAN: dinas_dalam_masuk/dinas_dalam_pulang SENGAJA TIDAK dipakai untuk
+// mengecualikan hari ini dari TAP. Kedua tanda itu cuma berarti "validasi
+// radius kantor dilewati" saat absen masuk/pulang (lihat komentar
+// models.Absensi.DinasDalamMasuk di backend) -- BUKAN pembebasan dari
+// kewajiban absen pulang. dinas_dalam_pulang SELALU dibarengi jam_pulang
+// terisi (diset bersamaan di absenPulang, backend), jadi baris yang benar2
+// sudah pulang (dinas dalam maupun biasa) otomatis lolos lewat pengecekan
+// jam_pulang di bawah. Yang masih dianggap TAP: absen masuk ditandai Dinas
+// Dalam tapi sampai jendela pulang tertutup TIDAK PERNAH ada jam_pulang
+// sama sekali (foto pulang tidak ada) -- sesuai laporan pengguna.
 function tidakAbsenPulang(data) {
-  if (data.dinas_dalam_masuk || data.dinas_dalam_pulang) return false
   if (!data.jam_masuk || data.jam_pulang) return false
   return absenPulangSudahTutup(data)
 }
@@ -2478,14 +2487,18 @@ const defaultTab = computed(() => {
           </Column>
           <Column header="Status">
             <template #body="{ data }">
-              <Tag v-if="data.dinas_dalam_masuk || data.dinas_dalam_pulang" severity="info" value="Dinas Dalam" />
               <Tag
-                v-else-if="tercoverUntukTap(data)"
+                v-if="tercoverUntukTap(data)"
                 severity="info"
                 :value="`${tercoverUntukTap(data).label} (${tercoverUntukTap(data).kode})`"
                 :title="tercoverUntukTap(data).keterangan || ''"
               />
+              <!-- tidakAbsenPulang dicek SEBELUM dinas_dalam_masuk/pulang --
+                   dinas dalam masuk yang tidak pernah ada jam_pulang sama
+                   sekali (foto pulang tidak ada) tetap TAP, bukan otomatis
+                   "Dinas Dalam" (lihat komentar tidakAbsenPulang di atas). -->
               <Tag v-else-if="tidakAbsenPulang(data)" severity="danger" value="Tidak Absen Pulang" />
+              <Tag v-else-if="data.dinas_dalam_masuk || data.dinas_dalam_pulang" severity="info" value="Dinas Dalam" />
               <Tag v-else-if="data.jam_masuk" severity="success" value="Hadir" />
               <span v-else>-</span>
             </template>

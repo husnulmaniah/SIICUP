@@ -58,6 +58,13 @@ type ringkasanRekapPDF struct {
 	Izin       int
 	Sakit      int
 	TidakAbsen int
+	// TidakAbsenPulang: hari TAP (sudah absen masuk -- termasuk yang ditandai
+	// Dinas Dalam sendiri oleh pegawai -- tapi sampai jendela pulang tertutup
+	// TIDAK PERNAH ada absen pulang sama sekali) yang tanggalnya TIDAK
+	// tertutup surat apa pun. Kalau tertutup surat, hari itu masuk hitungan
+	// DinasDalam/Izin/Sakit/Lainnya lewat terapkanStatusDokumenPDF, BUKAN ke
+	// sini -- lihat komentar di hitungBarisRingkasanPDF.
+	TidakAbsenPulang int
 	// Lainnya menghitung dokumen ber-Kode selain DD/I/S (kode bebas buatan
 	// administrator sendiri, mis. "CT" untuk Cuti Tahunan) -- key-nya kode,
 	// value-nya label (Nama jenis surat) supaya baris ringkasan tambahan di
@@ -226,20 +233,34 @@ func hitungBarisRingkasanPDF(
 
 		if a, ada := absenByTanggal[key]; ada && (a.JamMasuk != nil || a.JamPulang != nil) {
 			dok, adaDok := dokumenByTanggal[key]
-			// TAP (absen masuk ada, tidak absen pulang, bukan dinas dalam)
-			// yang tanggalnya sudah tertutup surat (Izin/Sakit/Surat
-			// Tugas/dst yang diinput admin untuk tanggal yang sama) ditimpa
-			// jadi klasifikasi surat tersebut, bukan "Hadir" polos --
-			// sesuai permintaan user: TAP otomatis mengikuti jenis surat
-			// yang diupload untuk tanggal itu, baik di dialog Detail Absen
-			// (lihat tercoverUntukTap di RekapAbsensiView.vue) maupun di
-			// PDF rekap ini. Jam masuk/foto pagi tetap ditampilkan di
-			// bawah karena itu tetap data faktual -- hanya kolom Status &
-			// hitungan ringkasannya yang ikut surat.
-			isTapTertutupSurat := a.JamPulang == nil && !a.IsDinasDalam() && adaDok
+			// Hari ini dianggap TAP (tidak absen pulang) kalau sama sekali
+			// tidak ada JamPulang -- TERMASUK kalau absen masuknya ditandai
+			// Dinas Dalam sendiri oleh pegawai. DinasDalamMasuk cuma berarti
+			// validasi radius kantor dilewati saat absen masuk (lihat
+			// komentar models.Absensi.DinasDalamMasuk), BUKAN pembebasan
+			// dari kewajiban absen pulang -- DinasDalamPulang SELALU
+			// dibarengi JamPulang terisi (lihat komentar absensiDianggapHadir
+			// di absensi.go), jadi baris yang benar2 sudah pulang (dinas
+			// dalam maupun biasa) tidak kena cabang TAP ini. Laporan
+			// pengguna: baris Dinas Dalam yang foto pulangnya tidak ada
+			// harus tetap TAP, bukan otomatis "Dinas Dalam".
+			//
+			// Kalau TAP ini tanggalnya sudah tertutup surat (Izin/Sakit/
+			// Surat Tugas/dst yang diinput admin), statusnya ikut surat
+			// tersebut (sesuai permintaan user yang sama: TAP otomatis
+			// mengikuti jenis surat yang diupload, baik di dialog Detail
+			// Absen -- lihat tercoverUntukTap di RekapAbsensiView.vue --
+			// maupun di PDF rekap ini); kalau tidak ada suratnya, tetap
+			// ditulis "Tidak Absen Pulang" apa adanya, bukan "Hadir"/"Dinas
+			// Dalam". Jam masuk/foto pagi tetap ditampilkan di bawah karena
+			// itu tetap data faktual.
+			isTap := a.JamPulang == nil
 			switch {
-			case isTapTertutupSurat:
+			case isTap && adaDok:
 				terapkanStatusDokumenPDF(&row, &ringkasan, dok, jenisLookup)
+			case isTap:
+				row.Status = "Tidak Absen Pulang"
+				ringkasan.TidakAbsenPulang++
 			case a.IsDinasDalam():
 				row.Status = "Dinas Dalam"
 				ringkasan.DinasDalam++
@@ -618,8 +639,8 @@ func buildRekapAbsensiPDF(
 			p.Text(marginX, 250, "Ringkasan:")
 			p.SetFont(false, 9.5)
 			p.Text(marginX+60, 250, fmt.Sprintf(
-				"Hadir %d hari  |  Terlambat %d kali  |  Dinas Dalam %d  |  Izin %d  |  Sakit %d  |  Tidak Absen %d",
-				ringkasan.Hadir, ringkasan.Terlambat, ringkasan.DinasDalam, ringkasan.Izin, ringkasan.Sakit, ringkasan.TidakAbsen,
+				"Hadir %d hari  |  Terlambat %d kali  |  Dinas Dalam %d  |  Izin %d  |  Sakit %d  |  Tidak Absen Pulang %d  |  Tidak Absen %d",
+				ringkasan.Hadir, ringkasan.Terlambat, ringkasan.DinasDalam, ringkasan.Izin, ringkasan.Sakit, ringkasan.TidakAbsenPulang, ringkasan.TidakAbsen,
 			))
 			yCatatan := 265.0
 			if lainnyaLine != "" {

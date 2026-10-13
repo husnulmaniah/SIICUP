@@ -297,9 +297,14 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 		// (lihat models.Absensi.IsDinasDalam) ikut dihitung sebagai "DD" di
 		// sini, sama seperti dokumen Surat Tugas/Berita Acara yang diinput
 		// administrator -- keduanya sama-sama berarti "Dinas Dalam" bagi
-		// pegawai yang bersangkutan, walau sumbernya berbeda.
+		// pegawai yang bersangkutan, walau sumbernya berbeda. SYARAT
+		// TAMBAHAN a.JamPulang != nil -- kalau absen masuknya ditandai Dinas
+		// Dalam tapi sampai jendela pulang tertutup TIDAK PERNAH ada absen
+		// pulang sama sekali, hari itu TAP (lihat absensiDianggapHadir di
+		// absensi.go & tidakAbsenPulang di RekapAbsensiView.vue), bukan
+		// "Dinas Dalam" yang sudah selesai, jadi tidak ikut dihitung di sini.
 		for _, a := range rows {
-			if a.JamMasuk != nil && a.IsDinasDalam() {
+			if a.JamMasuk != nil && a.JamPulang != nil && a.IsDinasDalam() {
 				jumlahDD++
 			}
 		}
@@ -447,9 +452,22 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 					out.Koordinat = "-"
 					out.LinkMaps = "-"
 				}
-				if a.IsDinasDalam() {
+				// a.JamPulang == nil -> TAP (tidak absen pulang), TERMASUK
+				// yang absen masuknya ditandai Dinas Dalam sendiri (lihat
+				// komentar panjang di hitungBarisRingkasanPDF, absensi_pdf.go,
+				// & absensiDianggapHadir di absensi.go -- pola sama persis).
+				// Kalau tanggalnya sudah tertutup surat, ikut klasifikasi
+				// surat itu; kalau tidak, ditulis apa adanya "Tidak Absen
+				// Pulang" -- bukan "Hadir"/"Dinas Dalam" yang keliru.
+				switch {
+				case a.JamPulang == nil && tercoverByTanggal[key].Kode != "":
+					t := tercoverByTanggal[key]
+					out.Status = fmt.Sprintf("%s (%s)", t.Label, t.Kode)
+				case a.JamPulang == nil:
+					out.Status = "Tidak Absen Pulang"
+				case a.IsDinasDalam():
 					out.Status = "Dinas Dalam"
-				} else {
+				default:
 					out.Status = "Hadir"
 				}
 			case terlewatSet[key]:

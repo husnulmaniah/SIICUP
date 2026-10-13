@@ -62,9 +62,19 @@ func absensiToday() time.Time {
 // atau Surat Tugas, sesuai permintaan user ("absensi yg terlewat jika ada
 // rekapan TAP maka dia masuk kategori tdk absen").
 //
-// Dinas dalam (DinasDalamMasuk/DinasDalamPulang) dikecualikan dari aturan
-// TAP ini karena absen pulang dinas dalam memang punya mekanisme tersendiri.
-// Hari ini (dan tanggal ke depan) juga dikecualikan -- jendela absen pulang
+// CATATAN DinasDalamMasuk/DinasDalamPulang: SENGAJA TIDAK dipakai di sini
+// untuk otomatis menganggap "hadir". Kedua tanda itu cuma berarti validasi
+// radius kantor dilewati saat absen masuk/pulang (lihat komentar
+// models.Absensi.DinasDalamMasuk) -- BUKAN pembebasan dari kewajiban absen
+// pulang. DinasDalamPulang SELALU dibarengi JamPulang terisi (diset
+// bersamaan di absenPulang di atas), jadi baris yang benar2 sudah pulang
+// (dinas dalam maupun biasa) tetap lolos lewat pengecekan JamPulang != nil
+// di bawah. Yang TIDAK dianggap hadir: absen masuk ditandai Dinas Dalam
+// tapi sampai jendela pulang tertutup TIDAK PERNAH ada JamPulang sama
+// sekali (foto pulang tidak ada) -- laporan pengguna: hari seperti ini
+// harus tetap jatuh ke kategori TAP, bukan otomatis "Dinas Dalam".
+//
+// Hari ini (dan tanggal ke depan) dikecualikan -- jendela absen pulang
 // (JamTutupPulang, berbeda per unit kerja & hari, lihat pengaturan absensi)
 // belum pasti tertutup untuk hari yang masih berjalan, jadi pegawai masih
 // punya kesempatan absen pulang dan belum selayaknya dianggap "tidak hadir".
@@ -72,7 +82,7 @@ func absensiDianggapHadir(row models.Absensi) bool {
 	if row.JamMasuk == nil {
 		return false
 	}
-	if row.JamPulang != nil || row.IsDinasDalam() {
+	if row.JamPulang != nil {
 		return true
 	}
 	// JamPulang kosong (TAP) -- tetap dianggap hadir kalau tanggalnya hari
