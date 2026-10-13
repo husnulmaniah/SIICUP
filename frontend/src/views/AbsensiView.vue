@@ -911,10 +911,22 @@ const geoStatus = ref('')
 const locationChecking = ref(false)
 const locationBlocked = ref(false)
 const locationBlockedMsg = ref('')
+// locationUnavailable: true KHUSUS kalau GPS gagal total (lokasi tidak
+// terdeteksi sama sekali -- izin ditolak/GPS mati/sinyal tidak ketemu),
+// BEDA dari locationBlocked yang juga true untuk kasus "ketemu tapi di luar
+// radius kantor". Dipakai supaya "Dinas Dalam" TIDAK BISA melewati blokir
+// untuk kasus ini -- titik lokasi tetap WAJIB ada, walau pegawai sedang
+// dinas dalam (permintaan pengguna: "wajib ada titik lokasi jangan buka
+// kamera jika titik lokasi tidak terbaca walaupun menggunakan dinas
+// dalam"). Dinas Dalam cuma boleh melewati validasi RADIUS (lihat watch
+// dinasDalam di bawah), bukan pembebasan dari kewajiban mengirim koordinat
+// sama sekali.
+const locationUnavailable = ref(false)
 // dinasDalam: tombol "Dinas Dalam" pada dialog kamera -- kalau dicentang,
-// pegawai boleh absen dari mana saja (validasi radius kantor dilewati, lihat
-// cekLokasiKantor & absensiCekRadius di backend), tapi hari itu akan tercatat
-// sebagai "Dinas Dalam" pada rekap/riwayat, BUKAN "Hadir" (lihat backend
+// pegawai boleh absen dari mana saja (validasi RADIUS kantor dilewati,
+// lihat cekLokasiKantor & absensiCekRadius di backend) SELAMA titik lokasi
+// GPS-nya sendiri tetap terdeteksi, tapi hari itu akan tercatat sebagai
+// "Dinas Dalam" pada rekap/riwayat, BUKAN "Hadir" (lihat backend
 // models.Absensi.IsDinasDalam). Berbeda dari surat tugas/berita acara yang
 // diinput admin -- ini laporan mandiri pegawai saat mengambil foto absen.
 const dinasDalam = ref(false)
@@ -1027,11 +1039,22 @@ function getLocationOnce() {
 // dihitung ke kantor pusat yang jauh. Sekarang memakai titik yang sudah
 // "resolved" oleh backend, sama seperti yang dipakai validasi akhir di
 // server, supaya kedua validasi ini selalu konsisten. Kamera hanya dibuka
-// kalau lolos -- kalau di luar radius atau lokasi tidak terdeteksi (padahal
-// geofence aktif), kamera TIDAK dibuka dan peringatan ditampilkan (lihat
+// kalau lolos -- kalau di luar radius ATAU lokasi tidak terdeteksi sama
+// sekali, kamera TIDAK dibuka dan peringatan ditampilkan (lihat
 // locationBlocked di template).
+//
+// Titik lokasi WAJIB ada -- permintaan pengguna: "wajib ada titik lokasi
+// jangan buka kamera jika titik lokasi tidak terbaca walaupun menggunakan
+// dinas dalam". Jadi beda dari versi sebelumnya (yang membiarkan kamera
+// tetap dibuka kalau geofence tidak diaktifkan admin), SEKARANG GPS gagal
+// total SELALU memblokir kamera apapun pengaturan geofence-nya, dan
+// locationUnavailable ditandai true supaya watch(dinasDalam) di bawah TAHU
+// blokir ini tidak boleh dilewati dengan mencentang Dinas Dalam -- Dinas
+// Dalam cuma boleh melewati validasi RADIUS kantor (kasus GPS ketemu tapi
+// di luar radius), bukan ketiadaan titik lokasi sama sekali.
 async function cekLokasiKantor() {
   locationChecking.value = true
+  locationUnavailable.value = false
   geoStatus.value = 'mencari titik koordinat...'
   const pos = await getLocationOnce()
   locationChecking.value = false
@@ -1044,13 +1067,11 @@ async function cekLokasiKantor() {
 
   if (!pos) {
     geoStatus.value = 'lokasi tidak diizinkan/tidak ditemukan'
-    if (geofenceAktif) {
-      locationBlocked.value = true
-      locationBlockedMsg.value =
-        'Lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi dan izinkan akses lokasi pada browser ini, lalu coba lagi.'
-      return false
-    }
-    return true
+    locationBlocked.value = true
+    locationUnavailable.value = true
+    locationBlockedMsg.value =
+      'Lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi dan izinkan akses lokasi pada browser/HP ini, lalu tekan "Coba Lagi". Absen tidak dapat dilakukan tanpa titik lokasi, walau menggunakan opsi Dinas Dalam.'
+    return false
   }
 
   coords.value = { lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy ?? null }
@@ -1152,6 +1173,7 @@ async function openCamera(mode) {
   noBlinkWarning.value = false
   coords.value = { lat: null, lng: null, accuracy: null }
   locationBlocked.value = false
+  locationUnavailable.value = false
   locationBlockedMsg.value = ''
   dinasDalam.value = false
   cameraDialog.value = true
@@ -1173,6 +1195,7 @@ async function openCamera(mode) {
 // dialog kamera.
 async function retryLocation() {
   locationBlocked.value = false
+  locationUnavailable.value = false
   locationBlockedMsg.value = ''
   const lolos = await cekLokasiKantor()
   if (!lolos) return
@@ -1185,12 +1208,19 @@ async function retryLocation() {
 }
 
 // Kalau pegawai mencentang "Dinas Dalam" pada saat dialog sedang menampilkan
-// peringatan lokasi di luar radius (locationBlocked), langsung lewati
-// pemblokiran itu dan buka kameranya -- tidak perlu menekan tombol lain.
-// Validasi radius tetap dilewati juga di backend selama dinas_dalam=true
-// dikirim saat submit (lihat absenMasuk/absenPulang di absensi.go).
+// peringatan lokasi DI LUAR RADIUS (locationBlocked tapi BUKAN
+// locationUnavailable), langsung lewati pemblokiran itu dan buka kameranya
+// -- tidak perlu menekan tombol lain. Validasi radius tetap dilewati juga
+// di backend selama dinas_dalam=true dikirim saat submit (lihat
+// absenMasuk/absenPulang di absensi.go).
+//
+// SENGAJA TIDAK melewati blokir kalau locationUnavailable true (GPS gagal
+// total, titik lokasi tidak terdeteksi sama sekali) -- permintaan pengguna:
+// titik lokasi WAJIB ada, kamera tidak boleh dibuka tanpanya walau
+// mencentang Dinas Dalam. Satu-satunya jalan keluar untuk kasus ini adalah
+// tombol "Coba Lagi" (retryLocation) supaya GPS benar2 dicoba ulang.
 watch(dinasDalam, async (aktif) => {
-  if (aktif && locationBlocked.value) {
+  if (aktif && locationBlocked.value && !locationUnavailable.value) {
     locationBlocked.value = false
     locationBlockedMsg.value = ''
     try {
@@ -1262,6 +1292,7 @@ function closeCameraDialog() {
   capturedUrl.value = ''
   capturedBlob.value = null
   locationBlocked.value = false
+  locationUnavailable.value = false
   locationBlockedMsg.value = ''
   dinasDalam.value = false
 }
@@ -1841,11 +1872,19 @@ async function downloadDokumen(item) {
 
       <template v-else>
         <div class="dinas-dalam-toggle">
-          <Checkbox v-model="dinasDalam" inputId="dinasDalamChk" binary />
+          <Checkbox v-model="dinasDalam" inputId="dinasDalamChk" binary :disabled="locationUnavailable" />
           <label for="dinasDalamChk">
             Dinas Dalam <span class="text-muted">(boleh absen dari luar kantor -- rekap akan tertulis "Dinas Dalam", bukan "Hadir")</span>
           </label>
         </div>
+        <!-- locationUnavailable: GPS gagal total -- Dinas Dalam cuma boleh
+             melewati validasi RADIUS kantor, BUKAN ketiadaan titik lokasi
+             sama sekali, jadi tombolnya dinonaktifkan & diberi keterangan
+             supaya pegawai tahu harus "Coba Lagi" dulu (lihat komentar
+             cekLokasiKantor/watch dinasDalam di script). -->
+        <p v-if="locationUnavailable" class="text-muted" style="margin: 2px 0 0; font-size: 0.85rem">
+          Titik lokasi wajib terdeteksi untuk bisa absen, walau menggunakan Dinas Dalam -- aktifkan GPS/izin lokasi lalu tekan "Coba Lagi".
+        </p>
 
         <Message v-if="locationBlocked" severity="warn" :closable="false">{{ locationBlockedMsg }}</Message>
       </template>

@@ -962,11 +962,25 @@ func absenMasuk(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	lng := parseFloatForm(r, "lng")
 	akurasi := parseFloatForm(r, "accuracy")
 	// dinas_dalam: pegawai mencentang tombol "Dinas Dalam" pada dialog kamera
-	// (lihat AbsensiView.vue) -- kalau true, validasi radius kantor DILEWATI
+	// (lihat AbsensiView.vue) -- kalau true, validasi RADIUS kantor DILEWATI
 	// (boleh absen dari mana saja) dan hari itu akan tercatat sebagai "Dinas
 	// Dalam", bukan "Hadir", di rekap/riwayat/export (lihat models.Absensi.
 	// IsDinasDalam & pemakaiannya di absensi_admin.go/absensi_pdf.go).
 	dinasDalam := r.FormValue("dinas_dalam") == "true"
+
+	// Titik lokasi WAJIB ada -- permintaan pengguna: "wajib ada titik lokasi
+	// jangan buka kamera jika titik lokasi tidak terbaca walaupun
+	// menggunakan dinas dalam". Dinas Dalam cuma melewati validasi RADIUS di
+	// bawah, BUKAN pembebasan dari kewajiban mengirim koordinat sama sekali
+	// -- jadi pengecekan ini TIDAK digerbang oleh dinasDalam, beda dari
+	// absensiCekRadius. Validasi utama ada di frontend (cekLokasiKantor di
+	// AbsensiView.vue, yang bahkan tidak membuka kamera kalau GPS gagal),
+	// ini cuma pengaman terakhir di server kalau ada yang memanggil endpoint
+	// ini langsung tanpa lewat UI tersebut.
+	if lat == nil || lng == nil {
+		utils.Error(w, http.StatusBadRequest, "titik lokasi tidak terdeteksi -- aktifkan GPS/izin lokasi lalu coba lagi (wajib ada walau menggunakan Dinas Dalam)")
+		return
+	}
 
 	if !dinasDalam {
 		if ok, pesan := absensiCekRadius(setting, pegawaiSelf.UnitKerja, lat, lng, akurasi); !ok {
@@ -1127,6 +1141,12 @@ func absenPulang(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	akurasi := parseFloatForm(r, "accuracy")
 	// dinas_dalam: lihat komentar yang sama pada absenMasuk.
 	dinasDalam := r.FormValue("dinas_dalam") == "true"
+
+	// Titik lokasi WAJIB ada -- lihat komentar yang sama pada absenMasuk.
+	if lat == nil || lng == nil {
+		utils.Error(w, http.StatusBadRequest, "titik lokasi tidak terdeteksi -- aktifkan GPS/izin lokasi lalu coba lagi (wajib ada walau menggunakan Dinas Dalam)")
+		return
+	}
 
 	if !dinasDalam {
 		if ok, pesan := absensiCekRadius(setting, pegawaiSelf.UnitKerja, lat, lng, akurasi); !ok {
