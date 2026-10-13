@@ -62,6 +62,18 @@ const petaLoading = ref(false)
 const bolehKelola = computed(() => !!petaData.value?.boleh_kelola)
 const currentUnitKerjaId = computed(() => (auth.canManageMaster ? selectedUnitKerja.value : petaData.value?.unit_kerja?.id))
 
+// Visibilitas tab "Peta Jabatan Dinas"/"Peta Jabatan Sekolah" -- permintaan
+// pengguna: pegawai/atasan bertempat tugas SEKOLAH tidak perlu (dan tidak
+// boleh bingung) melihat tab Dinas, begitu juga sebaliknya pegawai/atasan
+// bertempat tugas Dinas/Kantor tidak perlu melihat tab Sekolah.
+// administrator/admin (auth.canManageMaster) SELALU melihat KEDUANYA
+// karena mereka mengelola peta jabatan semua unit kerja, bukan cuma
+// tempat tugasnya sendiri (auth.canManageMaster tidak punya is_sekolah
+// yang berarti apa-apa, pola yang sama dipakai auth.canViewTemplateSurat).
+const canSeeSekolahTab = computed(() => auth.canManageMaster || auth.isSekolah)
+const canSeeDinasTab = computed(() => auth.canManageMaster || !auth.isSekolah)
+const defaultPetaTab = computed(() => (canSeeSekolahTab.value ? 'sekolah' : 'dinas'))
+
 async function loadDaftarSekolah() {
   try {
     const { data } = await http.get('/peta-jabatan/sekolah/daftar')
@@ -532,10 +544,15 @@ function kpStatusLabel(s) {
   return (
     {
       menunggu_atasan: 'Menunggu Atasan',
-      menunggu_admin: 'Menunggu Administrator',
-      disetujui: 'Disetujui',
+      // "menunggu_admin"/"ditolak_admin" seharusnya tidak lagi terjadi pada
+      // pengajuan baru (lihat komentar alur di
+      // handlers/peta_jabatan_kenaikan_pangkat.go) -- labelnya tetap
+      // disiapkan di sini HANYA untuk baris historis yang sempat tersimpan
+      // dengan status itu sebelum perubahan alur ini.
+      menunggu_admin: 'Menunggu Administrator (lama)',
+      disetujui: 'Disetujui Atasan',
       ditolak_atasan: 'Dikembalikan Atasan',
-      ditolak_admin: 'Dikembalikan Administrator',
+      ditolak_admin: 'Dikembalikan Administrator (lama)',
     }[s] || s
   )
 }
@@ -563,14 +580,27 @@ const kpBisaDibatalkan = computed(
   () => kpDetailRow.value?.status === 'menunggu_atasan' && auth.idPegawai != null && auth.idPegawai === kpDetailRow.value?.id_pegawai,
 )
 const kpBisaDiprosesAtasan = computed(() => kpDetailRow.value?.status === 'menunggu_atasan' && auth.isAtasan)
-const kpBisaDiprosesAdmin = computed(() => kpDetailRow.value?.status === 'menunggu_admin' && auth.canManageMaster)
+// kpBisaDiprosesAdmin/kpSetujuiAdmin/kpKembalikanAdmin (tahap "administrator"
+// pada pengajuan Kenaikan Pangkat ini) SUDAH DIHAPUS -- permintaan pengguna:
+// begitu atasan/Kepala Sekolah menyetujui, pengajuan ini LANGSUNG final;
+// persetujuan administrator yang sesungguhnya (yang mengubah data pegawai)
+// sekarang ada di tahap Perubahan Jabatan/upload SK (lihat
+// perubahanStepperSteps & kartu "Perubahan Jabatan (Upload SK)" di bawah).
 
 // Progress bar/stepper untuk dialog Detail Pengajuan Kenaikan Pangkat --
 // permintaan pengguna agar pegawai dapat mentracking proses pengajuan,
-// bukan cuma lihat satu Tag status. Alur: Diajukan -> Atasan -> Administrator
-// -> (kalau disetujui) lanjut ke Perubahan Jabatan (upload SK, lihat
-// perubahanStepperSteps di bawah -- itu record yang BERBEDA/terpisah,
-// otomatis dibuat begitu tahap administrator di sini disetujui).
+// bukan cuma lihat satu Tag status. Alur SEKARANG (lihat komentar alur
+// lengkap di handlers/peta_jabatan_kenaikan_pangkat.go): Diajukan ->
+// Persetujuan Atasan -> (kalau disetujui) Cetak & Upload SK -- TIDAK ada
+// lagi tahap administrator TERSENDIRI di sini; persetujuan administrator
+// yang sesungguhnya (yang mengubah data pegawai) ada di tahap Perubahan
+// Jabatan/upload SK (lihat perubahanStepperSteps di bawah -- record
+// BERBEDA/terpisah, otomatis dibuat begitu atasan menyetujui).
+//
+// Dua cabang "menunggu_admin"/"ditolak_admin" di bawah HANYA untuk baris
+// historis dari SEBELUM perubahan alur ini (seharusnya sudah dimigrasikan
+// maju lewat backfill di database/migrate.go, tapi tetap ditangani di sini
+// untuk jaga-jaga).
 const kpStepperSteps = computed(() => {
   const row = kpDetailRow.value
   if (!row) return []
@@ -584,8 +614,9 @@ const kpStepperSteps = computed(() => {
   ]
   if (row.status === 'menunggu_atasan') {
     steps.push({ label: 'Persetujuan Atasan', state: 'current' })
-    steps.push({ label: 'Persetujuan Administrator', state: 'pending' })
-  } else if (row.status === 'ditolak_atasan') {
+    return steps
+  }
+  if (row.status === 'ditolak_atasan') {
     steps.push({
       label: 'Persetujuan Atasan',
       state: 'rejected',
@@ -593,41 +624,32 @@ const kpStepperSteps = computed(() => {
       timestamp: formatTanggal(row.tgl_atasan_approve),
       note: row.catatan_atasan,
     })
-    steps.push({ label: 'Persetujuan Administrator', state: 'pending' })
-  } else {
+    return steps
+  }
+  steps.push({
+    label: 'Persetujuan Atasan',
+    state: 'done',
+    actor: row.atasan_approve?.nama,
+    timestamp: formatTanggal(row.tgl_atasan_approve),
+    note: row.catatan_atasan,
+  })
+  if (row.status === 'menunggu_admin') {
+    // baris historis, lihat komentar di atas
+    steps.push({ label: 'Menunggu Administrator (data lama)', state: 'current' })
+  } else if (row.status === 'ditolak_admin') {
     steps.push({
-      label: 'Persetujuan Atasan',
-      state: 'done',
-      actor: row.atasan_approve?.nama,
-      timestamp: formatTanggal(row.tgl_atasan_approve),
-      note: row.catatan_atasan,
+      label: 'Dikembalikan Administrator (data lama)',
+      state: 'rejected',
+      actor: row.admin_approve?.nama || row.admin_approve?.username,
+      timestamp: formatTanggal(row.tgl_admin_approve),
+      note: row.catatan_admin,
     })
-    if (row.status === 'menunggu_admin') {
-      steps.push({ label: 'Persetujuan Administrator', state: 'current' })
-    } else if (row.status === 'ditolak_admin') {
-      steps.push({
-        label: 'Persetujuan Administrator',
-        state: 'rejected',
-        actor: row.admin_approve?.nama || row.admin_approve?.username,
-        timestamp: formatTanggal(row.tgl_admin_approve),
-        note: row.catatan_admin,
-      })
-    } else {
-      steps.push({
-        label: 'Persetujuan Administrator',
-        state: 'done',
-        actor: row.admin_approve?.nama || row.admin_approve?.username,
-        timestamp: formatTanggal(row.tgl_admin_approve),
-        note: row.catatan_admin,
-      })
-      if (row.status === 'disetujui') {
-        steps.push({
-          label: 'Upload SK Jabatan Baru',
-          state: 'current',
-          note: 'Lanjutkan di tab Perubahan Jabatan',
-        })
-      }
-    }
+  } else if (row.status === 'disetujui') {
+    steps.push({
+      label: 'Cetak & Upload SK',
+      state: 'current',
+      note: 'Cetak dokumen, serahkan ke ORTAL lalu BKD, kemudian upload SK baru di tab Perubahan Jabatan',
+    })
   }
   return steps
 })
@@ -690,10 +712,16 @@ async function kpSetujuiAtasan() {
     if (kpIdSubTujuan.value) body.append('id_sub_jabatan_tujuan', kpIdSubTujuan.value)
     body.append('catatan', kpCatatan.value || '')
     await http.put(`/peta-jabatan/kenaikan-pangkat/${kpDetailRow.value.id}/setujui-atasan`, body)
-    toast.add({ severity: 'success', summary: 'Disetujui', detail: 'Kebutuhan (K) jabatan tujuan bertambah, diteruskan ke administrator', life: 7000 })
+    toast.add({
+      severity: 'success',
+      summary: 'Disetujui',
+      detail: 'Kebutuhan (K) jabatan tujuan bertambah. Cetak dokumen ini, serahkan ke ORTAL lalu BKD, kemudian upload SK baru begitu terbit.',
+      life: 8000,
+    })
     kpDetailDialog.value = false
     loadKenaikanPangkat()
     loadPeta()
+    if (auth.canManageMaster) loadPerubahanJabatan()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Gagal menyetujui', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
@@ -718,44 +746,8 @@ async function kpKembalikanAtasan() {
     kpProcessing.value = false
   }
 }
-async function kpSetujuiAdmin() {
-  kpProcessing.value = true
-  try {
-    const body = new URLSearchParams({ catatan: kpCatatan.value || '' })
-    await http.put(`/peta-jabatan/kenaikan-pangkat/${kpDetailRow.value.id}/setujui-admin`, body)
-    toast.add({
-      severity: 'success',
-      summary: 'Disetujui',
-      detail: 'Dokumen final siap dicetak. Peringatan Perubahan Jabatan (wajib upload SK) sudah muncul pada akun pegawai',
-      life: 8000,
-    })
-    kpDetailDialog.value = false
-    loadKenaikanPangkat()
-    if (auth.canManageMaster) loadPerubahanJabatan()
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal menyetujui', detail: e.response?.data?.message || e.message, life: 5000 })
-  } finally {
-    kpProcessing.value = false
-  }
-}
-async function kpKembalikanAdmin() {
-  if (!kpCatatan.value.trim()) {
-    toast.add({ severity: 'warn', summary: 'Catatan wajib diisi', detail: 'Isi catatan supaya diketahui apa yang perlu diperbaiki', life: 4000 })
-    return
-  }
-  kpProcessing.value = true
-  try {
-    const body = new URLSearchParams({ catatan: kpCatatan.value })
-    await http.put(`/peta-jabatan/kenaikan-pangkat/${kpDetailRow.value.id}/kembalikan-admin`, body)
-    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pengajuan dikembalikan', life: 4000 })
-    kpDetailDialog.value = false
-    loadKenaikanPangkat()
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
-  } finally {
-    kpProcessing.value = false
-  }
-}
+// kpSetujuiAdmin/kpKembalikanAdmin SUDAH DIHAPUS -- lihat komentar di
+// kpBisaDiprosesAdmin di atas.
 async function previewUkom(row) {
   try {
     const res = await http.get(`/peta-jabatan/kenaikan-pangkat/${row.id}/ukom`, { params: { inline: 1 }, responseType: 'blob' })
@@ -1049,23 +1041,23 @@ onMounted(() => {
       </div>
     </Message>
 
-    <Tabs value="sekolah">
+    <Tabs :value="defaultPetaTab">
       <TabList>
-        <Tab value="dinas" disabled>
+        <Tab v-if="canSeeDinasTab" value="dinas" disabled>
           Peta Jabatan Dinas
           <Tag value="Segera Hadir" severity="secondary" style="margin-left: 0.4rem" />
         </Tab>
-        <Tab value="sekolah"><i class="pi pi-sitemap" style="margin-right: 0.4rem"></i> Peta Jabatan Sekolah</Tab>
+        <Tab v-if="canSeeSekolahTab" value="sekolah"><i class="pi pi-sitemap" style="margin-right: 0.4rem"></i> Peta Jabatan Sekolah</Tab>
       </TabList>
       <TabPanels>
-        <TabPanel value="dinas">
+        <TabPanel v-if="canSeeDinasTab" value="dinas">
           <Message severity="info" :closable="false">
             Peta Jabatan Dinas (untuk pegawai bertempat tugas Dinas/Kantor) akan hadir menyusul setelah Peta Jabatan Sekolah
             selesai.
           </Message>
         </TabPanel>
 
-        <TabPanel value="sekolah">
+        <TabPanel v-if="canSeeSekolahTab" value="sekolah">
           <div class="card">
             <div class="tab-toolbar">
               <div v-if="auth.canManageMaster" style="min-width: 240px; flex: 1">
@@ -1490,6 +1482,18 @@ onMounted(() => {
           <Button icon="pi pi-download" size="small" severity="secondary" outlined @click="unduhCetakKP(kpDetailRow)" title="Unduh" />
         </div>
 
+        <!-- Begitu atasan/Kepala Sekolah menyetujui, pengajuan ini LANGSUNG
+        final -- tidak ada lagi tahap "menunggu administrator" di sini.
+        Pesan ini menjelaskan langkah selanjutnya yang sebenarnya:
+        cetak -> ORTAL -> BKD -> upload SK baru (lihat komentar alur di
+        handlers/peta_jabatan_kenaikan_pangkat.go). -->
+        <Message v-if="kpDetailRow.status === 'disetujui'" severity="info" :closable="false" style="margin-bottom: 0.75rem">
+          Pengajuan telah disetujui Kepala Sekolah. Cetak dokumen ini ("Lihat Dokumen" di atas), serahkan ke bagian
+          Organisasi (ORTAL), lalu teruskan ke BKD. Setelah SK baru terbit dari BKD, upload SK tersebut lewat menu
+          "Perubahan Jabatan" agar disetujui administrator dan data pegawai (jabatan/pangkat/golongan) diperbarui
+          otomatis.
+        </Message>
+
         <template v-if="kpBisaDiprosesAtasan">
           <div class="field-label-wrap" v-if="kpSubTujuanOptions.length">
             <label class="field-label">Sub-Jabatan Tujuan (wajib dipilih)</label>
@@ -1507,12 +1511,6 @@ onMounted(() => {
             <Textarea v-model="kpCatatan" rows="2" style="width: 100%" />
           </div>
         </template>
-        <template v-else-if="kpBisaDiprosesAdmin">
-          <div class="field-label-wrap">
-            <label class="field-label">Catatan (wajib diisi jika mengembalikan)</label>
-            <Textarea v-model="kpCatatan" rows="2" style="width: 100%" />
-          </div>
-        </template>
       </template>
 
       <template #footer>
@@ -1521,10 +1519,6 @@ onMounted(() => {
         <template v-if="kpBisaDiprosesAtasan">
           <Button label="Kembalikan" icon="pi pi-undo" severity="danger" outlined :loading="kpProcessing" @click="kpKembalikanAtasan" />
           <Button label="Setujui" icon="pi pi-check" :loading="kpProcessing" @click="kpSetujuiAtasan" />
-        </template>
-        <template v-if="kpBisaDiprosesAdmin">
-          <Button label="Kembalikan" icon="pi pi-undo" severity="danger" outlined :loading="kpProcessing" @click="kpKembalikanAdmin" />
-          <Button label="Setujui" icon="pi pi-check" :loading="kpProcessing" @click="kpSetujuiAdmin" />
         </template>
       </template>
     </Dialog>

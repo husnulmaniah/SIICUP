@@ -16,14 +16,29 @@ import (
 )
 
 // peta_jabatan_kenaikan_pangkat.go menangani pengajuan & persetujuan
-// Kenaikan Pangkat (tahap PERTAMA dari dua tahap, lihat komentar alur di
-// models.go bagian "PETA JABATAN -- SEKOLAH"): pegawai yang sudah lulus
-// UKOM mengajukan naik dari Jabatan asal ke Jabatan tujuan, atasan (Kepala
-// Sekolah) menyetujui tahap pertama (K bertambah otomatis + memilih
-// SubJabatan tujuan kalau ada), administrator (mewakili Kepala Dinas)
-// menyetujui tahap akhir (dokumen final siap cetak + memicu pembuatan
-// PerubahanJabatanPegawai, tahap KEDUA -- lihat
-// handlers/peta_jabatan_perubahan.go).
+// Kenaikan Pangkat: pegawai yang sudah lulus UKOM mengajukan naik dari
+// Jabatan asal ke Jabatan tujuan, atasan (Kepala Sekolah) menyetujui (K
+// bertambah otomatis + memilih SubJabatan tujuan kalau ada).
+//
+// CATATAN PERUBAHAN ALUR (permintaan pengguna): dulu ada tahap KEDUA di
+// SINI juga -- administrator harus menyetujui lagi sebelum
+// PerubahanJabatanPegawai (upload SK) dibuat. Itu TIDAK sesuai proses
+// sebenarnya: begitu Kepala Sekolah menyetujui, dokumen ini SUDAH bisa
+// dicetak pegawai untuk diserahkan ke bagian Organisasi (ORTAL) lalu
+// diteruskan ke BKD -- BUKAN menunggu administrator dulu. Administrator
+// baru benar-benar berperan setelah SK BARU terbit dari BKD & pegawai
+// mengupload-nya (PerubahanJabatanPegawai, lihat
+// handlers/peta_jabatan_perubahan.go) -- SITULAH persetujuan administrator
+// yang sesungguhnya mengubah data pegawai di database. Karena itu,
+// setujuiKenaikanPangkatAtasan di bawah ini SEKARANG LANGSUNG menandai
+// pengajuan "disetujui" (final, dari sisi pengajuan Kenaikan Pangkat ini)
+// DAN langsung membuat baris PerubahanJabatanPegawai (menunggu_upload) --
+// tidak ada lagi tahap "menunggu_admin" di ENTITAS INI. Endpoint
+// setujui-admin/kembalikan-admin yang dulu ada di sini sudah DIHAPUS;
+// baris lama (kalau ada) yang masih berstatus "menunggu_admin" dari
+// sebelum perubahan ini otomatis dimigrasikan maju lewat backfill di
+// database/migrate.go, supaya tidak ada pengajuan yang tertinggal/tidak
+// bisa diproses lagi.
 
 func RegisterPetaJabatanKenaikanPangkatRoutes(mux *http.ServeMux, db *gorm.DB) {
 	authed := func(h http.HandlerFunc, roles ...string) http.Handler {
@@ -32,7 +47,6 @@ func RegisterPetaJabatanKenaikanPangkatRoutes(mux *http.ServeMux, db *gorm.DB) {
 	anyRole := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin", "atasan", "pegawai") }
 	pegawaiAtasan := func(h http.HandlerFunc) http.Handler { return authed(h, "pegawai", "atasan") }
 	atasanOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "atasan") }
-	adminOnly := func(h http.HandlerFunc) http.Handler { return authed(h, "administrator", "admin") }
 
 	mux.Handle("GET /api/peta-jabatan/kenaikan-pangkat", anyRole(func(w http.ResponseWriter, r *http.Request) { listKenaikanPangkat(w, r, db) }))
 	mux.Handle("GET /api/peta-jabatan/kenaikan-pangkat/{id}", anyRole(func(w http.ResponseWriter, r *http.Request) { getKenaikanPangkatDetail(w, r, db) }))
@@ -43,8 +57,8 @@ func RegisterPetaJabatanKenaikanPangkatRoutes(mux *http.ServeMux, db *gorm.DB) {
 
 	mux.Handle("PUT /api/peta-jabatan/kenaikan-pangkat/{id}/setujui-atasan", atasanOnly(func(w http.ResponseWriter, r *http.Request) { setujuiKenaikanPangkatAtasan(w, r, db) }))
 	mux.Handle("PUT /api/peta-jabatan/kenaikan-pangkat/{id}/kembalikan-atasan", atasanOnly(func(w http.ResponseWriter, r *http.Request) { kembalikanKenaikanPangkatAtasan(w, r, db) }))
-	mux.Handle("PUT /api/peta-jabatan/kenaikan-pangkat/{id}/setujui-admin", adminOnly(func(w http.ResponseWriter, r *http.Request) { setujuiKenaikanPangkatAdmin(w, r, db) }))
-	mux.Handle("PUT /api/peta-jabatan/kenaikan-pangkat/{id}/kembalikan-admin", adminOnly(func(w http.ResponseWriter, r *http.Request) { kembalikanKenaikanPangkatAdmin(w, r, db) }))
+	// setujui-admin/kembalikan-admin SUDAH DIHAPUS -- lihat komentar alur di
+	// atas (tahap administrator pindah ke peta_jabatan_perubahan.go).
 }
 
 func kenaikanPangkatPreload(db *gorm.DB) *gorm.DB {
@@ -328,7 +342,12 @@ func setujuiKenaikanPangkatAtasan(w http.ResponseWriter, r *http.Request, db *go
 
 	now := absensiNow()
 	item.IDSubJabatanTujuan = idSubTujuan
-	item.Status = models.KenaikanPangkatMenungguAdmin
+	// LANGSUNG "disetujui" -- tidak ada lagi tahap menunggu_admin di
+	// entitas ini (lihat komentar alur di atas file). Dokumen final siap
+	// dicetak pegawai begitu atasan menyetujui, dan baris
+	// PerubahanJabatanPegawai (menunggu_upload) langsung dibuat supaya
+	// peringatan "upload SK baru" langsung tampil pada akun pegawai.
+	item.Status = models.KenaikanPangkatDisetujui
 	item.IDAtasanApprove = claims.IDPegawai
 	item.TglAtasanApprove = &now
 	item.CatatanAtasan = strings.TrimSpace(r.FormValue("catatan"))
@@ -343,11 +362,24 @@ func setujuiKenaikanPangkatAtasan(w http.ResponseWriter, r *http.Request, db *go
 	if pdfBytes, err := buildKenaikanPangkatPDF(db, item); err == nil {
 		item.File = pdfBytes
 	}
-	if err := db.Save(&item).Error; err != nil {
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&item).Error; err != nil {
+			return err
+		}
+		perubahan := models.PerubahanJabatanPegawai{
+			IDPengajuanKenaikanPangkat: item.ID,
+			IDPegawai:                  item.IDPegawai,
+			IDJabatanBaru:              item.IDJabatanTujuan,
+			IDSubJabatanBaru:           item.IDSubJabatanTujuan,
+			Status:                     models.PerubahanJabatanMenungguUpload,
+		}
+		return tx.Create(&perubahan).Error
+	})
+	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan persetujuan: "+err.Error())
 		return
 	}
-	utils.Success(w, "pengajuan disetujui, kebutuhan (K) jabatan tujuan bertambah, diteruskan ke administrator untuk persetujuan tahap akhir", nil)
+	utils.Success(w, "pengajuan disetujui, kebutuhan (K) jabatan tujuan bertambah. Silakan cetak dokumen ini dan serahkan ke bagian Organisasi (ORTAL), lalu teruskan ke BKD. Setelah SK baru terbit, upload SK tersebut lewat menu Perubahan Jabatan agar disetujui administrator dan data pegawai diperbarui otomatis", nil)
 }
 
 func kembalikanKenaikanPangkatAtasan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -384,95 +416,15 @@ func kembalikanKenaikanPangkatAtasan(w http.ResponseWriter, r *http.Request, db 
 	utils.Success(w, "pengajuan dikembalikan/ditolak", nil)
 }
 
-// ============================================================
-// persetujuan tahap 2: ADMINISTRATOR (mewakili Kepala Dinas)
-// ============================================================
-
-// setujuiKenaikanPangkatAdmin menangani PUT
-// /api/peta-jabatan/kenaikan-pangkat/{id}/setujui-admin -- tahap akhir.
-// Dokumen PDF digenerate ulang DENGAN QR tanda tangan Kepala Dinas (QR
-// Kepala Sekolah sudah tampil sejak tahap atasan), DAN baris
-// PerubahanJabatanPegawai otomatis dibuat (status "menunggu_upload") --
-// inilah yang memicu peringatan pada akun pegawai untuk mengupload SK
-// jabatan/pangkat barunya (lihat handlers/peta_jabatan_perubahan.go).
-func setujuiKenaikanPangkatAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
-	claims, _ := middleware.GetClaims(r)
-	id := r.PathValue("id")
-	var item models.PengajuanKenaikanPangkat
-	if err := db.First(&item, "id = ?", id).Error; err != nil {
-		utils.Error(w, http.StatusNotFound, "pengajuan tidak ditemukan")
-		return
-	}
-	if item.Status != models.KenaikanPangkatMenungguAdmin {
-		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya, atau belum disetujui atasan (status: "+item.Status+")")
-		return
-	}
-
-	now := absensiNow()
-	item.Status = models.KenaikanPangkatDisetujui
-	item.IDAdminApprove = &claims.UserID
-	item.TglAdminApprove = &now
-	r.ParseForm()
-	item.CatatanAdmin = strings.TrimSpace(r.FormValue("catatan"))
-	if pdfBytes, err := buildKenaikanPangkatPDF(db, item); err == nil {
-		item.File = pdfBytes
-	}
-
-	err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&item).Error; err != nil {
-			return err
-		}
-		perubahan := models.PerubahanJabatanPegawai{
-			IDPengajuanKenaikanPangkat: item.ID,
-			IDPegawai:                  item.IDPegawai,
-			IDJabatanBaru:              item.IDJabatanTujuan,
-			IDSubJabatanBaru:           item.IDSubJabatanTujuan,
-			Status:                     models.PerubahanJabatanMenungguUpload,
-		}
-		return tx.Create(&perubahan).Error
-	})
-	if err != nil {
-		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan persetujuan: "+err.Error())
-		return
-	}
-	utils.Success(w, "pengajuan kenaikan pangkat disetujui, dokumen final siap dicetak. Peringatan perubahan jabatan (wajib upload SK) sudah muncul pada akun pegawai", nil)
-}
-
-func kembalikanKenaikanPangkatAdmin(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
-	claims, _ := middleware.GetClaims(r)
-	id := r.PathValue("id")
-	var item models.PengajuanKenaikanPangkat
-	if err := db.First(&item, "id = ?", id).Error; err != nil {
-		utils.Error(w, http.StatusNotFound, "pengajuan tidak ditemukan")
-		return
-	}
-	if item.Status != models.KenaikanPangkatMenungguAdmin {
-		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya, atau belum disetujui atasan (status: "+item.Status+")")
-		return
-	}
-	r.ParseForm()
-	catatan := strings.TrimSpace(r.FormValue("catatan"))
-	if catatan == "" {
-		utils.Error(w, http.StatusBadRequest, "catatan wajib diisi supaya diketahui apa yang perlu diperbaiki")
-		return
-	}
-	now := absensiNow()
-	// Dikembalikan/ditolak di tahap admin TIDAK mengurangi lagi K yang sudah
-	// bertambah di tahap atasan -- SENGAJA, karena K adalah formasi yang
-	// dibutuhkan sekolah (independen dari status pengajuan pegawai
-	// tertentu); kalau formasi itu memang tidak lagi relevan, atasan/
-	// administrator tetap bisa menguranginya manual lewat dialog "Atur
-	// Kebutuhan" di tabel Peta Jabatan.
-	item.Status = models.KenaikanPangkatDitolakAdmin
-	item.CatatanAdmin = catatan
-	item.IDAdminApprove = &claims.UserID
-	item.TglAdminApprove = &now
-	if err := db.Save(&item).Error; err != nil {
-		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan: "+err.Error())
-		return
-	}
-	utils.Success(w, "pengajuan dikembalikan/ditolak", nil)
-}
+// setujuiKenaikanPangkatAdmin/kembalikanKenaikanPangkatAdmin (tahap
+// "administrator" pada ENTITAS Kenaikan Pangkat ini) SUDAH DIHAPUS --
+// lihat komentar alur lengkap di bagian atas file ini. Persetujuan
+// administrator yang sesungguhnya sekarang ada di
+// handlers/peta_jabatan_perubahan.go (approvePerubahanJabatan/
+// rejectPerubahanJabatan), dipicu setelah pegawai mengupload SK baru dari
+// BKD. Baris lama yang masih berstatus "menunggu_admin" dari sebelum
+// perubahan ini dimigrasikan maju otomatis lewat backfill di
+// database/migrate.go.
 
 func cetakKenaikanPangkat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)

@@ -73,6 +73,19 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		var jatah models.JatahCuti
 		db.Where("id_pegawai = ? AND tahun = ?", *claims.IDPegawai, currentYear).First(&jatah)
 
+		// jenisJabatan: dipakai DashboardView.vue untuk menyembunyikan kartu
+		// "Statistik Absensi" bagi pegawai dengan jabatan fungsional (Guru
+		// Ahli Pertama/Muda/Madya, dst) -- permintaan pengguna: dashboard
+		// Guru cukup menampilkan statistik Pengajuan Cuti & Kenaikan Pangkat
+		// saja, bukan statistik absensi (sama pola dengan Jabatan.JenisJabatan
+		// yang sudah dipakai untuk usia pensiun, lihat pengajuan_pensiun.go).
+		var pegawaiJabatan models.Pegawai
+		jenisJabatan := ""
+		db.Preload("Jabatan").Select("id", "id_jabatan").First(&pegawaiJabatan, *claims.IDPegawai)
+		if pegawaiJabatan.Jabatan != nil {
+			jenisJabatan = pegawaiJabatan.Jabatan.JenisJabatan
+		}
+
 		var riwayat []models.PengajuanCuti
 		db.Preload("JenisCuti").Where("id_pegawai = ?", *claims.IDPegawai).
 			Order("created_at desc").Limit(10).Find(&riwayat)
@@ -98,34 +111,55 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			permintaanSk = &psk
 		}
 
-		// ttdKosong: dipakai DashboardView.vue untuk menampilkan pemberitahuan
-		// "Tanda Tangan Digital Belum Dibuat" -- cukup baca kolom
-		// ttd_pegawai_nama saja (BUKAN ttd_pegawai_file yang bisa besar) supaya
-		// query dashboard tetap ringan. Lihat uploadTtdPegawai/drawTtdPegawai
-		// di handlers/pegawai.go & handlers/formulir.go.
-		var ttdRow models.Pegawai
-		db.Select("ttd_pegawai_nama").First(&ttdRow, *claims.IDPegawai)
-		ttdKosong := ttdRow.TtdPegawaiNama == ""
+		// ringkasanKenaikanPangkat: ditampilkan sebagai kartu statistik baru
+		// "Pengajuan Kenaikan Pangkat" di dashboard pegawai -- permintaan
+		// pengguna supaya pegawai jabatan Guru (yang tidak lagi melihat
+		// Statistik Absensi, lihat jenisJabatan di atas) tetap punya sesuatu
+		// yang relevan untuk dipantau selain Pengajuan Cuti. Menghitung dari
+		// DUA entitas sekaligus (lihat komentar alur di
+		// handlers/peta_jabatan_kenaikan_pangkat.go): PengajuanKenaikanPangkat
+		// (tahap atasan) & PerubahanJabatanPegawai (tahap upload SK +
+		// persetujuan administrator, yang sekarang benar-benar mengubah data
+		// pegawai).
+		var kpMenungguAtasan, kpDitolakAtasan int64
+		db.Model(&models.PengajuanKenaikanPangkat{}).Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.KenaikanPangkatMenungguAtasan).Count(&kpMenungguAtasan)
+		db.Model(&models.PengajuanKenaikanPangkat{}).Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.KenaikanPangkatDitolakAtasan).Count(&kpDitolakAtasan)
+		var pjMenungguUpload, pjMenungguAdmin, pjSelesai int64
+		db.Model(&models.PerubahanJabatanPegawai{}).Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.PerubahanJabatanMenungguUpload).Count(&pjMenungguUpload)
+		db.Model(&models.PerubahanJabatanPegawai{}).Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.PerubahanJabatanMenungguAdmin).Count(&pjMenungguAdmin)
+		db.Model(&models.PerubahanJabatanPegawai{}).Where("id_pegawai = ? AND status = ?", *claims.IDPegawai, models.PerubahanJabatanDisetujui).Count(&pjSelesai)
+		ringkasanKenaikanPangkat := map[string]interface{}{
+			"menunggu_atasan":    kpMenungguAtasan,
+			"menunggu_upload_sk": pjMenungguUpload,
+			"menunggu_admin":     pjMenungguAdmin,
+			"selesai":            pjSelesai,
+			"ditolak":            kpDitolakAtasan,
+			"total":              kpMenungguAtasan + pjMenungguUpload + pjMenungguAdmin + pjSelesai + kpDitolakAtasan,
+		}
 
 		utils.Success(w, "ok", map[string]interface{}{
-			"role":              claims.RoleName,
-			"jatah_tahun_ini":   jatah.JumlahHari,
-			"terpakai":          jatah.Terpakai,
-			"sisa":              jatah.JumlahHari - jatah.Terpakai,
-			"total_pending":     totalPending,
-			"total_disetujui":   totalDisetujui,
-			"riwayat_cuti":      riwayat,
-			"statistik_absensi": statistikAbsensiBulanIni(db, *claims.IDPegawai),
-			"permintaan_sk":     permintaanSk,
-			// kp4_kelengkapan: dipakai DashboardView.vue untuk menampilkan
-			// pemberitahuan "KP4 belum terisi, silakan dilengkapi" dan/atau
-			// "data X masih kosong, silakan dilengkapi di menu Profil ->
-			// Ajukan Perubahan Data" (lihat handlers/kp4.go).
-			"kp4_kelengkapan": kp4KelengkapanUntukDashboard(db, *claims.IDPegawai),
-			// ttd_kosong: true kalau pegawai ini belum pernah menyimpan tanda
-			// tangan digitalnya lewat Profil Saya (lihat komentar ttdKosong di
-			// atas).
-			"ttd_kosong": ttdKosong,
+			"role":            claims.RoleName,
+			"jatah_tahun_ini": jatah.JumlahHari,
+			"terpakai":        jatah.Terpakai,
+			"sisa":            jatah.JumlahHari - jatah.Terpakai,
+			"total_pending":   totalPending,
+			"total_disetujui": totalDisetujui,
+			"riwayat_cuti":    riwayat,
+			// jenis_jabatan: "fungsional"/"struktural"/"pelaksana" (lihat
+			// komentar jenisJabatan di atas) -- dipakai DashboardView.vue untuk
+			// menyembunyikan statistik_absensi bagi jabatan Guru/fungsional.
+			"jenis_jabatan":              jenisJabatan,
+			"statistik_absensi":          statistikAbsensiBulanIni(db, *claims.IDPegawai),
+			"ringkasan_kenaikan_pangkat": ringkasanKenaikanPangkat,
+			"permintaan_sk":              permintaanSk,
+			// kelengkapan_data: SATU ringkasan gabungan (persentase + daftar
+			// kategori yang belum lengkap) menggantikan 3 kartu "KP4 Belum
+			// Terisi"/"Data Pegawai Belum Lengkap"/"Tanda Tangan Digital Belum
+			// Dibuat" yang dulu SELALU tampil terpisah -- permintaan pengguna
+			// supaya dashboard pegawai lebih bersih: sekarang satu kartu
+			// persentase yang baru menampilkan rinciannya kalau diklik (lihat
+			// hitungKelengkapanDashboard di bawah & DashboardView.vue).
+			"kelengkapan_data": hitungKelengkapanDashboard(db, *claims.IDPegawai),
 		})
 
 	default:
@@ -274,4 +308,69 @@ func statistikAbsensiBulanIni(db *gorm.DB, idPegawai uint) statistikAbsensiPegaw
 		out.TidakMelakukanAbsen++
 	}
 	return out
+}
+
+// kelengkapanKategoriOut adalah SATU kelompok data yang masih kosong pada
+// kartu "Kelengkapan Data Pegawai" di dashboard -- Items kosong berarti
+// kategori ini biner (cuma ada/tidak ada, mis. tanda tangan digital), bukan
+// daftar field. Aksi/AksiLabel mengarahkan tombol "lengkapi" pada kategori
+// itu ke menu yang tepat (persis tombol-tombol yang dulu ada di 3 kartu
+// terpisah, lihat komentar kelengkapan_data di dashboardHandler).
+type kelengkapanKategoriOut struct {
+	Label     string   `json:"label"`
+	Items     []string `json:"items"`
+	Aksi      string   `json:"aksi"`
+	AksiLabel string   `json:"aksi_label"`
+}
+
+type kelengkapanDashboardOut struct {
+	Persentase int                      `json:"persentase"`
+	Lengkap    bool                     `json:"lengkap"`
+	Kategori   []kelengkapanKategoriOut `json:"kategori"`
+}
+
+// hitungKelengkapanDashboard menggabungkan kelengkapan KP4 (lihat
+// hitungKelengkapanKp4 di handlers/kp4.go) & tanda tangan digital menjadi
+// SATU persentase + daftar kategori yang masih kosong, dipakai dashboard
+// pegawai untuk satu kartu ringkas ("Kelengkapan Data: NN%") yang baru
+// menampilkan rinciannya kalau diklik -- menggantikan 3 kartu peringatan
+// terpisah yang dulu selalu tampil sekaligus (permintaan pengguna: "agar
+// tampilan dashboard pegawai lebih bersih"). Denominator TOTAL ITEM (13)
+// SENGAJA ditulis tetap di sini (bukan dihitung dinamis) supaya persentase
+// stabil & gampang ditelusuri: 7 field KP4 + 5 field Data Pegawai (lihat
+// hitungKelengkapanKp4) + 1 tanda tangan digital.
+func hitungKelengkapanDashboard(db *gorm.DB, idPegawai uint) kelengkapanDashboardOut {
+	const totalItem = 13
+
+	kp4 := kp4KelengkapanUntukDashboard(db, idPegawai)
+	var ttdRow models.Pegawai
+	db.Select("ttd_pegawai_nama").First(&ttdRow, idPegawai)
+	ttdKosong := ttdRow.TtdPegawaiNama == ""
+
+	missing := 0
+	var kategori []kelengkapanKategoriOut
+	if kp4 != nil && len(kp4.Kp4FieldKosong) > 0 {
+		missing += len(kp4.Kp4FieldKosong)
+		kategori = append(kategori, kelengkapanKategoriOut{
+			Label: "KP4 Belum Terisi", Items: kp4.Kp4FieldKosong, Aksi: "/kp4", AksiLabel: "Lengkapi KP4",
+		})
+	}
+	if kp4 != nil && len(kp4.DataPegawaiKosong) > 0 {
+		missing += len(kp4.DataPegawaiKosong)
+		kategori = append(kategori, kelengkapanKategoriOut{
+			Label: "Data Pegawai Belum Lengkap", Items: kp4.DataPegawaiKosong, Aksi: "/profil-saya", AksiLabel: "Ajukan Perubahan Data",
+		})
+	}
+	if ttdKosong {
+		missing++
+		kategori = append(kategori, kelengkapanKategoriOut{
+			Label: "Tanda Tangan Digital Belum Dibuat", Items: []string{}, Aksi: "/profil-saya", AksiLabel: "Buat Tanda Tangan",
+		})
+	}
+
+	return kelengkapanDashboardOut{
+		Persentase: (totalItem - missing) * 100 / totalItem,
+		Lengkap:    missing == 0,
+		Kategori:   kategori,
+	}
 }

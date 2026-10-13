@@ -15,17 +15,21 @@ import (
 // satu PengajuanKenaikanPangkat -- kop sekolah, garis komando sederhana
 // (Kepala Sekolah paling atas), tabel B (Bezetting)/K (Kebutuhan)/+- SELURUH
 // Jabatan di sekolah itu (sama angkanya dengan tabel menu, lihat
-// hitungPetaJabatanSekolah), dan blok tanda tangan QR Kepala Sekolah &
-// Kepala Dinas -- QR masing-masing HANYA tampil begitu tahap persetujuannya
-// sendiri sudah dilewati (atasan untuk QR kiri, administrator untuk QR
-// kanan), sama pola dengan dokumen Berita Acara/Surat Rekomendasi Sekolah
-// yang sudah ada (tampilkanQR mengikuti status, bukan selalu tampil).
+// hitungPetaJabatanSekolah), dan SATU blok tanda tangan QR Kepala Sekolah.
+//
+// CATATAN PERUBAHAN ALUR (permintaan pengguna, lihat komentar lengkap di
+// peta_jabatan_kenaikan_pangkat.go): dokumen ini HANYA perlu tanda tangan
+// Kepala Sekolah -- begitu atasan menyetujui, dokumen ini SUDAH final &
+// dicetak pegawai untuk diserahkan ke ORTAL lalu BKD, TANPA menunggu tanda
+// tangan/persetujuan administrator (Kepala Dinas) lagi di sini. Blok tanda
+// tangan Kepala Dinas yang dulu ada di sebelah kanan sudah DIHAPUS --
+// administrator baru berperan lagi setelah SK baru dari BKD diupload
+// (persetujuan itu ada di PerubahanJabatanPegawai, bukan dokumen ini).
 
 // buildKenaikanPangkatPDF menyusun ulang dokumen PETA JABATAN SEKOLAH untuk
 // satu pengajuan kenaikan pangkat -- dipanggil ulang setiap kali statusnya
-// berubah (setujuiKenaikanPangkatAtasan & setujuiKenaikanPangkatAdmin)
-// supaya dokumen yang tersimpan selalu mencerminkan tahap persetujuan
-// terakhir.
+// berubah (setujuiKenaikanPangkatAtasan) supaya dokumen yang tersimpan
+// selalu mencerminkan tahap persetujuan terakhir.
 func buildKenaikanPangkatPDF(db *gorm.DB, item models.PengajuanKenaikanPangkat) ([]byte, error) {
 	var pegawai models.Pegawai
 	if err := db.Preload("Jabatan").Preload("UnitKerja").Preload("PangkatGol.Pangkat").Preload("PangkatGol.Gol").
@@ -62,9 +66,6 @@ func buildKenaikanPangkatPDF(db *gorm.DB, item models.PengajuanKenaikanPangkat) 
 	if err != nil {
 		return nil, err
 	}
-
-	pengaturan := pengaturanSuratOrDefault(db)
-	dinasNama, dinasNip, dinasJabatan, _, _ := resolveSignerFullRekomendasi(db, pengaturan)
 
 	doc := utils.NewPDFDoc()
 	p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
@@ -194,16 +195,11 @@ func buildKenaikanPangkatPDF(db *gorm.DB, item models.PengajuanKenaikanPangkat) 
 	if y > signY-20 {
 		signY = y + 20
 	}
-	colW := (rightX - marginX - 20) / 2
-	leftCenterX := marginX + colW/2
-	rightCenterX := rightX - colW/2
 	qrSide := 54.0
 
 	p.SetFont(false, 9)
-	p.TextCentered(leftCenterX, signY, "Mengetahui,")
-	p.TextCentered(leftCenterX, signY+13, "Kepala Sekolah "+unitKerjaNama)
-	p.TextCentered(rightCenterX, signY, "Kolonodale, "+formatDateID(absensiNow()))
-	p.TextCentered(rightCenterX, signY+13, "Kepala Dinas Pendidikan dan Kebudayaan")
+	p.TextCentered(centerX, signY, "Mengetahui,")
+	p.TextCentered(centerX, signY+13, "Kepala Sekolah "+unitKerjaNama)
 
 	qrY := signY + 20
 	if item.TglAtasanApprove != nil && atasan != nil {
@@ -215,33 +211,16 @@ func buildKenaikanPangkatPDF(db *gorm.DB, item models.PengajuanKenaikanPangkat) 
 			namaOrDash(atasan.Nama), namaOrDash(atasan.NIP), namaOrDash(atasanJabatan), nomor, formatDateID(*item.TglAtasanApprove))
 		if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(query), qrcode.Medium, 180); err == nil {
 			if err := doc.RegisterImage("ttd_qr_peta_jabatan_atasan", qrPng); err == nil {
-				p.Image("ttd_qr_peta_jabatan_atasan", leftCenterX-qrSide/2, qrY, qrSide, qrSide)
+				p.Image("ttd_qr_peta_jabatan_atasan", centerX-qrSide/2, qrY, qrSide, qrSide)
 			}
 		}
 		p.SetFont(true, 9)
-		p.TextCentered(leftCenterX, qrY+qrSide+14, atasan.Nama)
+		p.TextCentered(centerX, qrY+qrSide+14, atasan.Nama)
 		p.SetFont(false, 8.5)
-		p.TextCentered(leftCenterX, qrY+qrSide+26, "NIP. "+namaOrDash(atasan.NIP))
+		p.TextCentered(centerX, qrY+qrSide+26, "NIP. "+namaOrDash(atasan.NIP))
 	} else {
 		p.SetFont(false, 8.5)
-		p.TextCentered(leftCenterX, qrY+qrSide/2, "(belum ditandatangani)")
-	}
-
-	if item.TglAdminApprove != nil {
-		query := fmt.Sprintf("Kepala Dinas %s NIP %s Jabatan %s menyetujui Peta Jabatan Nomor %s tanggal %s",
-			namaOrDash(dinasNama), namaOrDash(dinasNip), namaOrDash(dinasJabatan), nomor, formatDateID(*item.TglAdminApprove))
-		if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(query), qrcode.Medium, 180); err == nil {
-			if err := doc.RegisterImage("ttd_qr_peta_jabatan_admin", qrPng); err == nil {
-				p.Image("ttd_qr_peta_jabatan_admin", rightCenterX-qrSide/2, qrY, qrSide, qrSide)
-			}
-		}
-		p.SetFont(true, 9)
-		p.TextCentered(rightCenterX, qrY+qrSide+14, namaOrDash(dinasNama))
-		p.SetFont(false, 8.5)
-		p.TextCentered(rightCenterX, qrY+qrSide+26, "NIP. "+namaOrDash(dinasNip))
-	} else {
-		p.SetFont(false, 8.5)
-		p.TextCentered(rightCenterX, qrY+qrSide/2, "(belum ditandatangani)")
+		p.TextCentered(centerX, qrY+qrSide/2, "(belum ditandatangani)")
 	}
 
 	return doc.Output()

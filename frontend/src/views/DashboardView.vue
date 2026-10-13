@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import http from '../api/http'
@@ -16,6 +16,11 @@ const toast = useToast()
 const router = useRouter()
 const data = ref(null)
 const loading = ref(true)
+
+// kartu "Kelengkapan Data Pegawai" (lihat kelengkapan_data pada respons
+// dashboard) -- rinciannya cuma tampil kalau kartu ini diklik, lihat
+// kelengkapanExpanded di template.
+const kelengkapanExpanded = ref(false)
 
 // ------------------------------------------------------------
 // notifikasi "Permintaan SK" (menu Penerima TPP, lihat
@@ -122,6 +127,15 @@ function namaBulanTahun(statistik) {
   if (!statistik) return ''
   return `${NAMA_BULAN[statistik.bulan] || ''} ${statistik.tahun}`
 }
+
+// warna cincin persentase pada kartu "Kelengkapan Data Pegawai" -- hijau
+// kalau sudah lengkap/mendekati, kuning di tengah, merah kalau masih jauh.
+const kelengkapanRingClass = computed(() => {
+  const p = data.value?.kelengkapan_data?.persentase ?? 0
+  if (p >= 100) return 'kelengkapan-ring-hijau'
+  if (p >= 60) return 'kelengkapan-ring-kuning'
+  return 'kelengkapan-ring-merah'
+})
 
 onMounted(() => {
   muatDashboard()
@@ -260,51 +274,35 @@ onMounted(() => {
           </div>
         </Message>
 
-        <!-- notifikasi KP4 (lihat handlers/kp4.go, kp4_kelengkapan pada
-        respons dashboard) -- dua pesan berbeda: (1) data KP4-nya sendiri
-        belum lengkap -> arahkan ke menu KP4, (2) field dasar Data Pegawai
-        yang dipakai KP4 belum lengkap -> arahkan ke Profil Saya. Keduanya
-        bisa muncul bersamaan. -->
-        <Message v-if="data.kp4_kelengkapan?.kp4_belum_lengkap" severity="warn" :closable="false" style="margin-bottom: 1rem">
-          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
-            <div>
-              <strong>KP4 Belum Terisi</strong>
-              <div style="margin-top: 0.25rem">
-                Data KP4 Anda belum lengkap ({{ data.kp4_kelengkapan.kp4_field_kosong?.join(', ') }}). Silakan
-                dilengkapi.
+        <!-- kartu "Kelengkapan Data Pegawai" (lihat kelengkapan_data pada
+        respons dashboard, handlers/dashboard.go) -- SATU kartu ringkas
+        persentase menggantikan 3 kartu peringatan terpisah (KP4/Data
+        Pegawai/Tanda Tangan Digital) yang dulu SELALU tampil sekaligus --
+        permintaan pengguna: "agar tampilan dashboard pegawai lebih bersih".
+        Rinciannya baru muncul (dropdown) kalau kartu ini diklik. -->
+        <div v-if="data.kelengkapan_data" class="card kelengkapan-card" style="margin-bottom: 1rem" @click="kelengkapanExpanded = !kelengkapanExpanded">
+          <div style="display: flex; align-items: center; gap: 1rem">
+            <div class="kelengkapan-ring" :class="kelengkapanRingClass">{{ data.kelengkapan_data.persentase }}%</div>
+            <div style="flex: 1; min-width: 0">
+              <strong>Kelengkapan Data Pegawai</strong>
+              <div class="page-subtitle" style="margin: 0.15rem 0 0 0">
+                {{ data.kelengkapan_data.lengkap ? 'Data Anda sudah lengkap.' : 'Klik untuk melihat data yang belum lengkap.' }}
               </div>
             </div>
-            <Button label="Lengkapi KP4" icon="pi pi-id-card" size="small" @click="router.push('/kp4')" />
+            <i :class="kelengkapanExpanded ? 'pi pi-chevron-up' : 'pi pi-chevron-down'" style="color: var(--p-text-muted-color)"></i>
           </div>
-        </Message>
-        <Message v-if="data.kp4_kelengkapan?.data_pegawai_kosong?.length" severity="warn" :closable="false" style="margin-bottom: 1rem">
-          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
-            <div>
-              <strong>Data Pegawai Belum Lengkap</strong>
-              <div style="margin-top: 0.25rem">
-                Data berikut masih kosong: {{ data.kp4_kelengkapan.data_pegawai_kosong.join(', ') }}. Silakan
-                dilengkapi di menu Profil Saya (Ajukan Perubahan Data).
+          <div v-if="kelengkapanExpanded && data.kelengkapan_data.kategori?.length" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.6rem" @click.stop>
+            <div v-for="(kat, idx) in data.kelengkapan_data.kategori" :key="idx" class="kelengkapan-kategori-row">
+              <div style="min-width: 0">
+                <strong>{{ kat.label }}</strong>
+                <div v-if="kat.items?.length" style="font-size: 0.85rem; color: var(--p-text-muted-color); margin-top: 0.15rem">
+                  {{ kat.items.join(', ') }}
+                </div>
               </div>
+              <Button :label="kat.aksi_label" size="small" outlined @click="router.push(kat.aksi)" />
             </div>
-            <Button label="Ajukan Perubahan Data" icon="pi pi-user-edit" size="small" @click="router.push('/profil-saya')" />
           </div>
-        </Message>
-
-        <!-- notifikasi tanda tangan digital (lihat ttd_kosong pada respons
-        dashboard, handlers/dashboard.go) -- mengarahkan ke Profil Saya
-        supaya Formulir Cuti berikutnya bisa langsung tertempel TTD tanpa
-        perlu cetak-tanda tangan basah-scan lagi. -->
-        <Message v-if="data.ttd_kosong" severity="warn" :closable="false" style="margin-bottom: 1rem">
-          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; justify-content: space-between">
-            <div>
-              <strong>Tanda Tangan Digital Belum Dibuat</strong>
-              <div style="margin-top: 0.25rem">
-                Isi tanda tangan digital anda terlebih dahulu agar otomatis tertempel di atas nama anda pada Formulir Cuti, tanpa perlu mencetak dan tanda tangan basah lebih dulu.
-              </div>
-            </div>
-            <Button label="Buat Tanda Tangan" icon="pi pi-pencil" size="small" @click="router.push('/profil-saya')" />
-          </div>
-        </Message>
+        </div>
 
         <div class="stat-grid">
           <div class="stat-card tile-teal">
@@ -325,7 +323,41 @@ onMounted(() => {
           </div>
         </div>
 
-        <div v-if="data.statistik_absensi" class="card">
+        <!-- Statistik Kenaikan Pangkat (lihat ringkasan_kenaikan_pangkat,
+        handlers/dashboard.go) -- SELALU tampil untuk pegawai (permintaan
+        pengguna: jabatan Guru/fungsional melihat statistik cuti & kenaikan
+        pangkat saja, tapi pegawai lain tetap boleh melihatnya juga). -->
+        <div v-if="data.ringkasan_kenaikan_pangkat" class="card">
+          <h3 style="margin-top: 0">Pengajuan Kenaikan Pangkat</h3>
+          <div class="stat-grid">
+            <div class="stat-card tile-amber">
+              <div class="stat-icon-badge"><i class="pi pi-clock"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.ringkasan_kenaikan_pangkat.menunggu_atasan }}</div><div class="stat-label">Menunggu Atasan</div></div>
+            </div>
+            <div class="stat-card tile-sky">
+              <div class="stat-icon-badge"><i class="pi pi-file-export"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.ringkasan_kenaikan_pangkat.menunggu_upload_sk }}</div><div class="stat-label">Menunggu Cetak &amp; Upload SK</div></div>
+            </div>
+            <div class="stat-card tile-purple">
+              <div class="stat-icon-badge"><i class="pi pi-hourglass"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.ringkasan_kenaikan_pangkat.menunggu_admin }}</div><div class="stat-label">Menunggu Administrator</div></div>
+            </div>
+            <div class="stat-card tile-green">
+              <div class="stat-icon-badge"><i class="pi pi-check-circle"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.ringkasan_kenaikan_pangkat.selesai }}</div><div class="stat-label">Selesai</div></div>
+            </div>
+            <div class="stat-card tile-red">
+              <div class="stat-icon-badge"><i class="pi pi-times-circle"></i></div>
+              <div class="stat-body"><div class="stat-value">{{ data.ringkasan_kenaikan_pangkat.ditolak }}</div><div class="stat-label">Ditolak</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Statistik Absensi disembunyikan untuk jabatan fungsional (Guru
+        Ahli Pertama/Muda/Madya, dst, lihat jenis_jabatan) -- permintaan
+        pengguna: dashboard Guru cukup menampilkan statistik Pengajuan Cuti &
+        Kenaikan Pangkat, bukan statistik absensi. -->
+        <div v-if="data.statistik_absensi && data.jenis_jabatan !== 'fungsional'" class="card">
           <h3 style="margin-top: 0">Statistik Absensi &mdash; {{ namaBulanTahun(data.statistik_absensi) }}</h3>
           <p class="page-subtitle" style="margin-top: -0.5rem">
             Dari {{ data.statistik_absensi.total_hari_kerja }} hari kerja bulan ini (Sabtu-Minggu untuk pegawai dinas, atau hanya Minggu untuk pegawai sekolah, & tanggal merah tidak dihitung)
@@ -552,5 +584,46 @@ onMounted(() => {
 }
 .stat-grid-absensi .stat-value {
   font-size: 1.4rem;
+}
+
+/* kartu "Kelengkapan Data Pegawai" -- satu kartu klik-untuk-expand yang
+   menggantikan 3 kartu peringatan terpisah (lihat komentar di template). */
+.kelengkapan-card {
+  cursor: pointer;
+  user-select: none;
+}
+
+.kelengkapan-ring {
+  width: 3.4rem;
+  height: 3.4rem;
+  min-width: 3.4rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #fff;
+}
+
+.kelengkapan-ring-hijau {
+  background: #15803d;
+}
+.kelengkapan-ring-kuning {
+  background: #b45309;
+}
+.kelengkapan-ring-merah {
+  background: #b91c1c;
+}
+
+.kelengkapan-kategori-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--p-content-background, #f8fafc);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 10px;
 }
 </style>

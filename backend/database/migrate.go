@@ -2,6 +2,7 @@ package database
 
 import (
 	"log"
+	"time"
 
 	"cuti-app/models"
 
@@ -208,6 +209,51 @@ func Migrate(db *gorm.DB) {
 		  AND nama_file ~ '^berita_acara_[0-9]{8}_[0-9]+\.pdf$'
 	`, models.AbsensiDokumenBeritaAcara).Error; err != nil {
 		log.Printf("peringatan: gagal backfill absensi_dokumen.diinput_langsung_menu_berita_acara: %v", err)
+	}
+
+	// Alur persetujuan Kenaikan Pangkat berubah (permintaan pengguna, lihat
+	// komentar lengkap di handlers/peta_jabatan_kenaikan_pangkat.go): tahap
+	// "menunggu_admin" (administrator menyetujui lagi SEBELUM pegawai boleh
+	// upload SK) dihapus -- begitu atasan/Kepala Sekolah menyetujui,
+	// pengajuan LANGSUNG "disetujui" & baris PerubahanJabatanPegawai
+	// (menunggu_upload) langsung dibuat. Baris PengajuanKenaikanPangkat lama
+	// yang terlanjur tersimpan dengan status "menunggu_admin" (dibuat
+	// SEBELUM perubahan ini dideploy) perlu dimajukan otomatis di sini,
+	// supaya tidak ada pengajuan pegawai yang macet tidak bisa diproses lagi
+	// gara-gara endpoint setujui-admin/kembalikan-admin sudah tidak ada.
+	// Aman dijalankan berkali-kali -- begitu tidak ada lagi baris berstatus
+	// "menunggu_admin", blok ini tidak melakukan apa-apa.
+	var pendingKP []models.PengajuanKenaikanPangkat
+	if err := db.Where("status = ?", "menunggu_admin").Find(&pendingKP).Error; err != nil {
+		log.Printf("peringatan: gagal cek pengajuan_kenaikan_pangkat lama berstatus menunggu_admin: %v", err)
+	}
+	for _, kp := range pendingKP {
+		now := time.Now()
+		if err := db.Model(&models.PengajuanKenaikanPangkat{}).Where("id = ?", kp.ID).
+			Updates(map[string]interface{}{"status": models.KenaikanPangkatDisetujui}).Error; err != nil {
+			log.Printf("peringatan: gagal memajukan pengajuan_kenaikan_pangkat id=%d ke status disetujui: %v", kp.ID, err)
+			continue
+		}
+		var sudahAda int64
+		db.Model(&models.PerubahanJabatanPegawai{}).Where("id_pengajuan_kenaikan_pangkat = ?", kp.ID).Count(&sudahAda)
+		if sudahAda > 0 {
+			continue
+		}
+		perubahan := models.PerubahanJabatanPegawai{
+			IDPengajuanKenaikanPangkat: kp.ID,
+			IDPegawai:                  kp.IDPegawai,
+			IDJabatanBaru:              kp.IDJabatanTujuan,
+			IDSubJabatanBaru:           kp.IDSubJabatanTujuan,
+			Status:                     models.PerubahanJabatanMenungguUpload,
+			CreatedAt:                  now,
+			UpdatedAt:                  now,
+		}
+		if err := db.Create(&perubahan).Error; err != nil {
+			log.Printf("peringatan: gagal membuat perubahan_jabatan_pegawai backfill untuk pengajuan_kenaikan_pangkat id=%d: %v", kp.ID, err)
+		}
+	}
+	if len(pendingKP) > 0 {
+		log.Printf("migrasi: %d pengajuan kenaikan pangkat lama (menunggu_admin) dimajukan ke disetujui + perubahan jabatan menunggu_upload", len(pendingKP))
 	}
 
 	log.Println("migrasi database berhasil")
