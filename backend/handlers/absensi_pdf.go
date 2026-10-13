@@ -143,6 +143,48 @@ func slugNamaFile(nama string) string {
 	return strings.Trim(b.String(), "_")
 }
 
+// terapkanStatusDokumenPDF mengisi Status satu baris rekap PDF berdasarkan
+// dokumen (surat) yang menutupi tanggal tersebut, dan menambah hitungan
+// ringkasan yang sesuai (DD/Izin/Sakit/lainnya) -- dipakai baik untuk
+// tanggal yang sama sekali tidak ada absen masuknya, maupun tanggal yang
+// TAP (absen masuk ada tapi tidak absen pulang) namun sudah tertutup
+// surat, supaya logikanya tidak dobel. Lihat komentar pemanggilnya di
+// hitungBarisRingkasanPDF.
+func terapkanStatusDokumenPDF(row *barisRekapPDF, ringkasan *ringkasanRekapPDF, dok models.AbsensiDokumen, jenisLookup map[string]models.JenisSurat) {
+	kode := kodeUntukJenis(jenisLookup, dok.Jenis)
+	label := labelUntukJenis(jenisLookup, dok.Jenis, kode)
+	row.Status = fmt.Sprintf("%s (%s)", label, kode)
+	// Keterangan: catatan admin saat menginput surat ini (lihat komentar
+	// field senama di models.AbsensiDokumen -- dropdown baku "Surat
+	// Tugas"/"Absensi Manual"/dst, atau teks bebas) -- ditambahkan di
+	// belakang supaya tiap baris DD/Izin/Sakit tidak tampil generik sama
+	// semua (mis. "Dinas Dalam (DD)" polos untuk SEMUA baris), melainkan
+	// ikut menunjukkan surat/alasan spesifiknya, mis. "Dinas Dalam (DD) -
+	// Surat Tugas" atau "Dinas Dalam (DD) - Absensi Manual". Teks ini bisa
+	// jadi lebih dari satu baris di tabel kalau tidak cukup lebar -- lihat
+	// tulisStatus di gambarBaris yang membungkusnya otomatis.
+	if ket := strings.TrimSpace(dok.Keterangan); ket != "" {
+		row.Status += " - " + ket
+	}
+	switch kode {
+	case "DD":
+		ringkasan.DinasDalam++
+	case "I":
+		ringkasan.Izin++
+	case "S":
+		ringkasan.Sakit++
+	default:
+		if kode != "" {
+			if ringkasan.Lainnya == nil {
+				ringkasan.Lainnya = map[string]int{}
+				ringkasan.LabelLainnya = map[string]string{}
+			}
+			ringkasan.Lainnya[kode]++
+			ringkasan.LabelLainnya[kode] = label
+		}
+	}
+}
+
 // hitungBarisRingkasanPDF menghitung baris tabel & ringkasan rekap absensi
 // untuk SATU pegawai pada rentang start..end (limit = batas hari kerja yang
 // dihitung, biasanya min(end, hari ini)). Dipakai bersama oleh
@@ -183,10 +225,25 @@ func hitungBarisRingkasanPDF(
 		row := barisRekapPDF{Tanggal: d, JamMasuk: "-", Terlambat: "-", JamPulang: "-", Koordinat: "-", Status: "Tidak Absen"}
 
 		if a, ada := absenByTanggal[key]; ada && (a.JamMasuk != nil || a.JamPulang != nil) {
-			if a.IsDinasDalam() {
+			dok, adaDok := dokumenByTanggal[key]
+			// TAP (absen masuk ada, tidak absen pulang, bukan dinas dalam)
+			// yang tanggalnya sudah tertutup surat (Izin/Sakit/Surat
+			// Tugas/dst yang diinput admin untuk tanggal yang sama) ditimpa
+			// jadi klasifikasi surat tersebut, bukan "Hadir" polos --
+			// sesuai permintaan user: TAP otomatis mengikuti jenis surat
+			// yang diupload untuk tanggal itu, baik di dialog Detail Absen
+			// (lihat tercoverUntukTap di RekapAbsensiView.vue) maupun di
+			// PDF rekap ini. Jam masuk/foto pagi tetap ditampilkan di
+			// bawah karena itu tetap data faktual -- hanya kolom Status &
+			// hitungan ringkasannya yang ikut surat.
+			isTapTertutupSurat := a.JamPulang == nil && !a.IsDinasDalam() && adaDok
+			switch {
+			case isTapTertutupSurat:
+				terapkanStatusDokumenPDF(&row, &ringkasan, dok, jenisLookup)
+			case a.IsDinasDalam():
 				row.Status = "Dinas Dalam"
 				ringkasan.DinasDalam++
-			} else {
+			default:
 				row.Status = "Hadir"
 				ringkasan.Hadir++
 			}
@@ -226,38 +283,7 @@ func hitungBarisRingkasanPDF(
 				}
 			}
 		} else if dok, ada := dokumenByTanggal[key]; ada {
-			kode := kodeUntukJenis(jenisLookup, dok.Jenis)
-			label := labelUntukJenis(jenisLookup, dok.Jenis, kode)
-			row.Status = fmt.Sprintf("%s (%s)", label, kode)
-			// Keterangan: catatan admin saat menginput surat ini (lihat komentar
-			// field senama di models.AbsensiDokumen -- dropdown baku "Surat
-			// Tugas"/"Absensi Manual"/dst, atau teks bebas) -- ditambahkan di
-			// belakang supaya tiap baris DD/Izin/Sakit tidak tampil generik sama
-			// semua (mis. "Dinas Dalam (DD)" polos untuk SEMUA baris), melainkan
-			// ikut menunjukkan surat/alasan spesifiknya, mis. "Dinas Dalam (DD) -
-			// Surat Tugas" atau "Dinas Dalam (DD) - Absensi Manual". Teks ini bisa
-			// jadi lebih dari satu baris di tabel kalau tidak cukup lebar -- lihat
-			// tulisStatus di gambarBaris yang membungkusnya otomatis.
-			if ket := strings.TrimSpace(dok.Keterangan); ket != "" {
-				row.Status += " - " + ket
-			}
-			switch kode {
-			case "DD":
-				ringkasan.DinasDalam++
-			case "I":
-				ringkasan.Izin++
-			case "S":
-				ringkasan.Sakit++
-			default:
-				if kode != "" {
-					if ringkasan.Lainnya == nil {
-						ringkasan.Lainnya = map[string]int{}
-						ringkasan.LabelLainnya = map[string]string{}
-					}
-					ringkasan.Lainnya[kode]++
-					ringkasan.LabelLainnya[kode] = label
-				}
-			}
+			terapkanStatusDokumenPDF(&row, &ringkasan, dok, jenisLookup)
 		} else {
 			ringkasan.TidakAbsen++
 		}

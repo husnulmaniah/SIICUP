@@ -220,7 +220,7 @@ func buildKenaikanPangkatPDF(db *gorm.DB, item models.PengajuanKenaikanPangkat) 
 	p.TextCentered(leftCenterX, signY, "Mengetahui,")
 	p.TextCentered(rightCenterX, signY, "Kepala Sekolah "+unitKerjaNama)
 	p.SetFont(true, 9)
-	p.TextCentered(leftCenterX, signY+13, "Kepala Dinas Pendidikan dan Kebudayaan")
+	p.TextCentered(leftCenterX, signY+13, namaOrDash(dinasJabatan))
 	qrY := signY + 20
 
 	dinasQuery := fmt.Sprintf("Kepala Dinas %s NIP %s Jabatan %s mengetahui Peta Jabatan Nomor %s tanggal %s",

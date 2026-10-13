@@ -955,8 +955,29 @@ function tidakAbsenPulang(data) {
   if (!data.jam_masuk || data.jam_pulang) return false
   return absenPulangSudahTutup(data)
 }
+
+// tanggal_tercover (dikirim backend bersama detailItem, lihat
+// tercoverEntryFromDokumen di handlers/absensi.go) berisi tanggal yang
+// sudah ada suratnya (Izin/Sakit/Surat Tugas/dst). Dipakai supaya baris
+// "Tidak Absen Pulang (TAP)" yang tanggalnya SAMA dengan salah satu surat
+// itu otomatis ditimpa tampil sebagai klasifikasi surat tersebut (bukan
+// TAP lagi) -- sesuai permintaan: TAP + surat yang diupload untuk tanggal
+// itu -> tercatat sesuai jenis suratnya (Izin/Dinas Dalam/dst), baik di
+// dialog Detail Absen ini maupun di download PDF rekap (lihat perbaikan
+// senada di hitungBarisRingkasanPDF, handlers/absensi_pdf.go).
+const tercoverByTanggal = computed(() => {
+  const map = {}
+  for (const t of detailItem.value?.tanggal_tercover || []) {
+    map[t.tanggal] = t
+  }
+  return map
+})
+function tercoverUntukTap(data) {
+  if (!tidakAbsenPulang(data)) return null
+  return tercoverByTanggal.value[dateKey(data.tanggal)] || null
+}
 function rowClassRiwayat(data) {
-  return { 'row-tap': tidakAbsenPulang(data) }
+  return { 'row-tap': tidakAbsenPulang(data) && !tercoverUntukTap(data) }
 }
 function formatKoordinat(row, jenis) {
   const lat = jenis === 'masuk' ? row.lat_masuk : row.lat_pulang
@@ -2458,6 +2479,12 @@ const defaultTab = computed(() => {
           <Column header="Status">
             <template #body="{ data }">
               <Tag v-if="data.dinas_dalam_masuk || data.dinas_dalam_pulang" severity="info" value="Dinas Dalam" />
+              <Tag
+                v-else-if="tercoverUntukTap(data)"
+                severity="info"
+                :value="`${tercoverUntukTap(data).label} (${tercoverUntukTap(data).kode})`"
+                :title="tercoverUntukTap(data).keterangan || ''"
+              />
               <Tag v-else-if="tidakAbsenPulang(data)" severity="danger" value="Tidak Absen Pulang" />
               <Tag v-else-if="data.jam_masuk" severity="success" value="Hadir" />
               <span v-else>-</span>
@@ -2475,6 +2502,7 @@ const defaultTab = computed(() => {
           <Column header="Jam Pulang">
             <template #body="{ data }">
               <a v-if="data.jam_pulang" href="#" @click.prevent="lihatFoto(data, 'pulang')">{{ formatJam(data.jam_pulang) }}</a>
+              <span v-else-if="tercoverUntukTap(data)">-</span>
               <strong v-else-if="tidakAbsenPulang(data)" class="tap-note" title="Tidak Absen Pulang">TAP</strong>
               <span v-else>-</span>
             </template>

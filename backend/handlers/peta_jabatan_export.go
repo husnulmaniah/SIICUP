@@ -343,7 +343,7 @@ func buildPetaJabatanExcel(peta *petaJabatanSekolahOut, signers petaJabatanSigne
 	f.MergeCell(sheet, cellRef("G", row), cellRef("K", row))
 	f.SetCellStyle(sheet, cellRef("G", row), cellRef("K", row), signPlainStyle)
 	row++
-	f.SetCellValue(sheet, cellRef("A", row), "Kepala Dinas Pendidikan dan Kebudayaan")
+	f.SetCellValue(sheet, cellRef("A", row), namaOrDash(signers.DinasJabatan))
 	f.MergeCell(sheet, cellRef("A", row), cellRef("E", row))
 	f.SetCellStyle(sheet, cellRef("A", row), cellRef("E", row), signBoldStyle)
 	f.SetCellValue(sheet, cellRef("G", row), signers.KepsekJabatan)
@@ -691,7 +691,7 @@ func buildPetaJabatanSekolahExportPDF(peta *petaJabatanSekolahOut, uk *models.Un
 	p.TextCentered(rightSignCenterX, y, "Kolonodale, "+dicetakStr)
 	y += 13
 	p.SetFont(true, 9)
-	p.TextCentered(leftSignCenterX, y, "Kepala Dinas Pendidikan dan Kebudayaan")
+	p.TextCentered(leftSignCenterX, y, namaOrDash(signers.DinasJabatan))
 	p.TextCentered(rightSignCenterX, y, signers.KepsekJabatan)
 	qrY := y + 6
 
