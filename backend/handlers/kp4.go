@@ -439,7 +439,7 @@ type kp4AdminListItem struct {
 // dan pencarian ?q= (nama/NIP).
 func kp4AdminList(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var pegawaiList []models.Pegawai
-	q := db.Preload("Jabatan").Preload("UnitKerja").Omit(dokumenFileFields...).Order("nama asc")
+	q := scopePegawaiAktifDinas(db, db.Preload("Jabatan").Preload("UnitKerja").Omit(dokumenFileFields...)).Order("nama asc")
 	if search := strings.TrimSpace(r.URL.Query().Get("q")); search != "" {
 		like := "%" + strings.ToLower(search) + "%"
 		q = q.Where("LOWER(nama) LIKE ? OR LOWER(nip) LIKE ?", like, like)
@@ -510,7 +510,7 @@ func kp4AdminList(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 // diunduh konsisten dengan apa yang sedang ditampilkan/difilter di tabel.
 func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var pegawaiList []models.Pegawai
-	q := db.Preload("Jabatan").Preload("UnitKerja").Omit(dokumenFileFields...).Order("nama asc")
+	q := scopePegawaiAktifDinas(db, db.Preload("Jabatan").Preload("UnitKerja").Omit(dokumenFileFields...)).Order("nama asc")
 	if search := strings.TrimSpace(r.URL.Query().Get("q")); search != "" {
 		like := "%" + strings.ToLower(search) + "%"
 		q = q.Where("LOWER(nama) LIKE ? OR LOWER(nip) LIKE ?", like, like)

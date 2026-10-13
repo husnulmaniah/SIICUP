@@ -15,16 +15,20 @@ import (
 // satu PengajuanKenaikanPangkat -- kop sekolah, garis komando sederhana
 // (Kepala Sekolah paling atas), tabel B (Bezetting)/K (Kebutuhan)/+- SELURUH
 // Jabatan di sekolah itu (sama angkanya dengan tabel menu, lihat
-// hitungPetaJabatanSekolah), dan SATU blok tanda tangan QR Kepala Sekolah.
+// hitungPetaJabatanSekolah), dan DUA blok tanda tangan QR: Kepala Dinas
+// (kiri, "Mengetahui,") & Kepala Sekolah (kanan).
 //
-// CATATAN PERUBAHAN ALUR (permintaan pengguna, lihat komentar lengkap di
-// peta_jabatan_kenaikan_pangkat.go): dokumen ini HANYA perlu tanda tangan
-// Kepala Sekolah -- begitu atasan menyetujui, dokumen ini SUDAH final &
-// dicetak pegawai untuk diserahkan ke ORTAL lalu BKD, TANPA menunggu tanda
-// tangan/persetujuan administrator (Kepala Dinas) lagi di sini. Blok tanda
-// tangan Kepala Dinas yang dulu ada di sebelah kanan sudah DIHAPUS --
-// administrator baru berperan lagi setelah SK baru dari BKD diupload
-// (persetujuan itu ada di PerubahanJabatanPegawai, bukan dokumen ini).
+// CATATAN ALUR (lihat komentar lengkap di peta_jabatan_kenaikan_pangkat.go):
+// begitu atasan (Kepala Sekolah) menyetujui, dokumen ini SUDAH final &
+// dicetak pegawai untuk diserahkan ke ORTAL lalu BKD -- tahap administrator
+// yang SEBENARNYA (yang mengubah data pegawai) ada di PerubahanJabatanPegawai
+// setelah SK baru dari BKD diupload, BUKAN di dokumen ini. TAPI atas
+// permintaan pengguna, Kepala Dinas tetap "mengetahui" dokumen ini --
+// blok tanda tangannya digambar SELALU (tidak digerbang oleh status
+// administrator apa pun, karena fungsi ini cuma dipanggil sekali setelah
+// atasan menyetujui), identitasnya mengikuti Pengaturan Formulir
+// (nama/NIP/jabatan/pangkat-golongan, lihat resolveSignerFullRekomendasi) --
+// pola sama persis dengan blok Kepala Dinas pada peta_jabatan_export.go.
 
 // buildKenaikanPangkatPDF menyusun ulang dokumen PETA JABATAN SEKOLAH untuk
 // satu pengajuan kenaikan pangkat -- dipanggil ulang setiap kali statusnya
@@ -190,37 +194,66 @@ func buildKenaikanPangkatPDF(db *gorm.DB, item models.PengajuanKenaikanPangkat) 
 	}
 	y += 10
 
-	// --- blok tanda tangan QR ---
+	// --- blok tanda tangan QR: Kepala Dinas (kiri, "Mengetahui,") & Kepala
+	// Sekolah (kanan) -- lihat catatan di atas fungsi. Posisi & gaya sama
+	// persis dengan blok serupa pada peta_jabatan_export.go supaya kedua
+	// dokumen "Peta Jabatan Sekolah" ini konsisten.
 	signY := utils.PageHeightA4 - 150
 	if y > signY-20 {
 		signY = y + 20
 	}
-	qrSide := 54.0
+	qrSide := 70.0
+	signColW := (rightX - marginX - 20) / 2
+	leftCenterX := marginX + signColW/2
+	rightCenterX := rightX - signColW/2
+
+	tglStr := "-"
+	if item.TglAtasanApprove != nil {
+		tglStr = formatDateID(*item.TglAtasanApprove)
+	}
+
+	pengaturan := pengaturanSuratOrDefault(db)
+	dinasNama, dinasNip, dinasJabatan, _, _ := resolveSignerFullRekomendasi(db, pengaturan)
+	dinasNama, dinasNip = namaOrDash(dinasNama), namaOrDash(dinasNip)
 
 	p.SetFont(false, 9)
-	p.TextCentered(centerX, signY, "Mengetahui,")
-	p.TextCentered(centerX, signY+13, "Kepala Sekolah "+unitKerjaNama)
-
+	p.TextCentered(leftCenterX, signY, "Mengetahui,")
+	p.TextCentered(rightCenterX, signY, "Kepala Sekolah "+unitKerjaNama)
+	p.SetFont(true, 9)
+	p.TextCentered(leftCenterX, signY+13, "Kepala Dinas Pendidikan dan Kebudayaan")
 	qrY := signY + 20
+
+	dinasQuery := fmt.Sprintf("Kepala Dinas %s NIP %s Jabatan %s mengetahui Peta Jabatan Nomor %s tanggal %s",
+		dinasNama, dinasNip, namaOrDash(dinasJabatan), nomor, tglStr)
+	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(dinasQuery), qrcode.Medium, 220); err == nil {
+		if err := doc.RegisterImage("ttd_qr_peta_jabatan_dinas", qrPng); err == nil {
+			p.Image("ttd_qr_peta_jabatan_dinas", leftCenterX-qrSide/2, qrY, qrSide, qrSide)
+		}
+	}
+	p.SetFont(true, 9)
+	p.TextCentered(leftCenterX, qrY+qrSide+14, dinasNama)
+	p.SetFont(false, 8.5)
+	p.TextCentered(leftCenterX, qrY+qrSide+26, "NIP. "+dinasNip)
+
 	if item.TglAtasanApprove != nil && atasan != nil {
 		atasanJabatan := "Kepala Sekolah"
 		if atasan.Jabatan != nil {
 			atasanJabatan = atasan.Jabatan.Jabatan
 		}
 		query := fmt.Sprintf("Kepala Sekolah %s NIP %s Jabatan %s menyetujui Peta Jabatan Nomor %s tanggal %s",
-			namaOrDash(atasan.Nama), namaOrDash(atasan.NIP), namaOrDash(atasanJabatan), nomor, formatDateID(*item.TglAtasanApprove))
-		if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(query), qrcode.Medium, 180); err == nil {
+			namaOrDash(atasan.Nama), namaOrDash(atasan.NIP), namaOrDash(atasanJabatan), nomor, tglStr)
+		if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(query), qrcode.Medium, 220); err == nil {
 			if err := doc.RegisterImage("ttd_qr_peta_jabatan_atasan", qrPng); err == nil {
-				p.Image("ttd_qr_peta_jabatan_atasan", centerX-qrSide/2, qrY, qrSide, qrSide)
+				p.Image("ttd_qr_peta_jabatan_atasan", rightCenterX-qrSide/2, qrY, qrSide, qrSide)
 			}
 		}
 		p.SetFont(true, 9)
-		p.TextCentered(centerX, qrY+qrSide+14, atasan.Nama)
+		p.TextCentered(rightCenterX, qrY+qrSide+14, atasan.Nama)
 		p.SetFont(false, 8.5)
-		p.TextCentered(centerX, qrY+qrSide+26, "NIP. "+namaOrDash(atasan.NIP))
+		p.TextCentered(rightCenterX, qrY+qrSide+26, "NIP. "+namaOrDash(atasan.NIP))
 	} else {
 		p.SetFont(false, 8.5)
-		p.TextCentered(centerX, qrY+qrSide/2, "(belum ditandatangani)")
+		p.TextCentered(rightCenterX, qrY+qrSide/2, "(belum ditandatangani)")
 	}
 
 	return doc.Output()

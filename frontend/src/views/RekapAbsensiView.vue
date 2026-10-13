@@ -446,7 +446,10 @@ function gabungKolektifDenganTerpilih(list) {
 async function loadKolektifPegawaiOptions(keyword = '') {
   kolektifLoadingPegawai.value = true
   try {
-    const params = { pageSize: PEGAWAI_PAGE_SIZE }
+    // aktif_saja: pegawai berstatus Pensiun/Mutasi tidak ditawarkan sebagai
+    // penerima Surat Kolektif baru (permintaan pengguna, lihat
+    // scopePegawaiAktifDinas di handlers/pegawai.go).
+    const params = { pageSize: PEGAWAI_PAGE_SIZE, aktif_saja: 1 }
     const q = (keyword || '').trim()
     kolektifPegawaiKeyword.value = q
     if (q) params.q = q

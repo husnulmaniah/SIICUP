@@ -201,6 +201,12 @@ const dokumenSlots = [
   // memicu status pegawai berubah otomatis jadi "Pensiun" di backend (lihat
   // uploadDokumenPegawai di handlers/pegawai.go), bukan sebaliknya.
   { jenis: 'sk-pensiun', field: 'sk_pensiun_nama', label: 'SK Pensiun' },
+  // SK/Berkas Pendukung Mutasi -- SAMA pola dengan SK Pensiun di atas:
+  // meng-upload berkas ini memicu status pegawai berubah otomatis jadi
+  // "Mutasi" (lihat uploadDokumenPegawai, handlers/pegawai.go) -- permintaan
+  // pengguna: "jika admin yang melakukan mutasi maka harus mengupload
+  // berkas pendukungnya".
+  { jenis: 'sk-mutasi', field: 'sk_mutasi_nama', label: 'Berkas Pendukung Mutasi' },
 ]
 
 function docFilename(jenis) {
@@ -399,8 +405,8 @@ async function onDocFileChosen(e) {
     })
     const slot = dokumenSlots.find((d) => d.jenis === jenis)
     if (slot) detailItem.value[slot.field] = data.data.nama_file
-    if (jenis === 'sk-pensiun') {
-      // Upload SK Pensiun otomatis mengubah status pegawai jadi "Pensiun" di
+    if (jenis === 'sk-pensiun' || jenis === 'sk-mutasi') {
+      // Upload SK Pensiun/berkas Mutasi otomatis mengubah status pegawai di
       // backend (lihat uploadDokumenPegawai) -- muat ulang detail & tabel
       // supaya tag Status di dialog ini dan baris tabel di belakangnya ikut
       // ter-update tanpa perlu tutup-buka dialog / reload halaman.
@@ -1439,7 +1445,10 @@ const canManage = computed(() => true) // route guard already restricts page acc
           </div>
         </div>
         <small style="display: block; margin-top: 0.4rem; color: var(--p-text-muted-color)">
-          Meng-upload SK Pensiun akan otomatis mengubah Status pegawai ini menjadi "Pensiun".
+          Meng-upload SK Pensiun akan otomatis mengubah Status pegawai ini menjadi "Pensiun". Meng-upload Berkas
+          Pendukung Mutasi akan otomatis mengubah Status pegawai ini menjadi "Mutasi" -- keduanya membuat akun login
+          pegawai ini nonaktif & tidak lagi dihitung di KP4, Peta Jabatan, TPP, Surat Rekomendasi, Berita Acara, dan
+          Surat Kolektif.
         </small>
 
         <h4 style="margin: 1.5rem 0 0.75rem 0">Jatah Cuti Tahunan</h4>

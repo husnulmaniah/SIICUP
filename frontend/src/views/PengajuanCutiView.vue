@@ -696,13 +696,22 @@ const cutiStepperSteps = computed(() => {
     steps.push({ label: 'Persetujuan', state: 'rejected', actor: approver, timestamp: formatDate(row.tgl_approval), note: row.catatan_approval })
     return steps
   }
-  // disetujui
+  // disetujui -- begitu pengajuan disetujui (berkas kelengkapan otomatis
+  // sudah diperiksa atasan/administrator sebelum menyetujui, lihat catatan
+  // approval), tahap "TTD Kepala Dinas" LANGSUNG dicentang (state 'done')
+  // -- permintaan pengguna: tidak perlu menunggu upload scan fisik lagi,
+  // karena formulir yang diterbitkan sistem sudah punya QR
+  // "Mengetahui Kepala Dinas" otomatis (sama pola dengan dokumen lain di
+  // sistem ini, mis. Peta Jabatan/Kenaikan Pangkat). Upload berkas fisik
+  // bertanda tangan basah (ttd_formulir) TETAP bisa dilakukan administrator
+  // kalau instansi masih mau menyimpan arsip fisiknya -- cuma sudah tidak
+  // lagi dijadikan syarat supaya step ini tercentang.
   steps.push({ label: 'Persetujuan', state: 'done', actor: approver, timestamp: formatDate(row.tgl_approval), note: row.catatan_approval })
-  steps.push(
-    ttdDoc()
-      ? { label: 'TTD Kepala Dinas', state: 'done', note: 'Berkas bertanda tangan sudah diupload' }
-      : { label: 'TTD Kepala Dinas', state: 'current', note: 'Menunggu upload berkas bertanda tangan' },
-  )
+  steps.push({
+    label: 'TTD Kepala Dinas',
+    state: 'done',
+    note: ttdDoc() ? 'Berkas bertanda tangan sudah diupload' : 'Ditandatangani otomatis (QR) oleh sistem',
+  })
   return steps
 })
 // berkas kelengkapan pengajuan (yang diupload pegawai saat mengajukan),

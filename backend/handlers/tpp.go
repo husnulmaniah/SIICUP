@@ -179,9 +179,9 @@ func listCalonPegawaiTpp(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 	sudahAnggota := db.Model(&models.PenerimaTpp{}).Where("aktif = ?", true).Select("id_pegawai")
 
-	query := db.Model(&models.Pegawai{}).Omit(dokumenFileFields...).
+	query := scopePegawaiAktifDinas(db, db.Model(&models.Pegawai{}).Omit(dokumenFileFields...).
 		Preload("Jabatan").Preload("UnitKerja").
-		Where("id NOT IN (?)", sudahAnggota)
+		Where("id NOT IN (?)", sudahAnggota))
 	if search != "" {
 		query = query.Where("nama ILIKE ? OR nip ILIKE ?", "%"+search+"%", "%"+search+"%")
 	}
@@ -367,6 +367,21 @@ func hapusPenerimaTpp(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	utils.Success(w, "pegawai berhasil dikeluarkan dari Penerima TPP", nil)
+}
+
+// nonaktifkanPenerimaTppOtomatis: SAMA efeknya dengan hapusPenerimaTpp di
+// atas (Aktif=false + AlasanNonaktif + TglNonaktif), tapi dipanggil OTOMATIS
+// oleh sistem begitu pegawai berstatus Pensiun/Mutasi (lihat
+// uploadDokumenPegawai di handlers/pegawai.go & approvePengajuanPensiun di
+// handlers/pengajuan_pensiun.go) -- permintaan pengguna: "data tpp...akan
+// otomatis menonaktifkan nama-nama yang masuk kategori mutasi...dan
+// pensiun", supaya administrator tidak perlu lagi mengeluarkannya manual
+// dari menu Penerima TPP setiap kali ini terjadi. Tidak dianggap error
+// kalau pegawai ybs memang belum/tidak pernah jadi anggota TPP aktif.
+func nonaktifkanPenerimaTppOtomatis(db *gorm.DB, idPegawai uint, alasan string) {
+	now := time.Now()
+	db.Model(&models.PenerimaTpp{}).Where("id_pegawai = ? AND aktif = ?", idPegawai, true).
+		Updates(map[string]interface{}{"aktif": false, "alasan_nonaktif": alasan, "tgl_nonaktif": now})
 }
 
 // getPengaturanTpp menangani GET /api/pengaturan-tpp -- selalu berhasil,

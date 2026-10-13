@@ -273,7 +273,10 @@ async function loadKelolaSubPegawaiList() {
   kelolaSubPegawaiLoading.value = true
   try {
     const { data } = await http.get('/pegawai', {
-      params: { id_unit_kerja: currentUnitKerjaId.value, id_jabatan: kelolaSubRow.value.id_jabatan, pageSize: 200 },
+      // aktif_saja: pegawai Pensiun/Mutasi tidak ikut ditawarkan untuk
+      // ditempatkan ke sub-jabatan (permintaan pengguna, lihat
+      // scopePegawaiAktifDinas di handlers/pegawai.go).
+      params: { id_unit_kerja: currentUnitKerjaId.value, id_jabatan: kelolaSubRow.value.id_jabatan, pageSize: 200, aktif_saja: 1 },
     })
     kelolaSubPegawaiList.value = (Array.isArray(data.data) ? data.data : []).map((p) => ({
       id: p.id,
@@ -407,7 +410,10 @@ async function openPegawaiList(row, sub) {
   pegawaiListLoading.value = true
   try {
     const { data } = await http.get('/pegawai', {
-      params: { id_unit_kerja: currentUnitKerjaId.value, id_jabatan: row.id_jabatan, pageSize: 200 },
+      // aktif_saja: konsisten dengan Bezetting (B) pada tabel menu, yang
+      // sekarang juga tidak menghitung pegawai Pensiun/Mutasi (permintaan
+      // pengguna, lihat scopePegawaiAktifDinas di handlers/pegawai.go).
+      params: { id_unit_kerja: currentUnitKerjaId.value, id_jabatan: row.id_jabatan, pageSize: 200, aktif_saja: 1 },
     })
     let items = Array.isArray(data.data) ? data.data : []
     if (sub) {
@@ -576,9 +582,17 @@ const kpSubTujuanWajib = ref(false)
 const kpIdSubTujuan = ref(null)
 const kpProcessing = ref(false)
 
-const kpBisaDibatalkan = computed(
-  () => kpDetailRow.value?.status === 'menunggu_atasan' && auth.idPegawai != null && auth.idPegawai === kpDetailRow.value?.id_pegawai,
-)
+// kpBisaDibatalkan: pemilik pengajuan bisa membatalkan pengajuannya sendiri,
+// DAN (permintaan pengguna) Kepala Sekolah/atasan bawahan tersebut juga
+// bisa menghapus permohonannya -- sama tahap dengan kpBisaDiprosesAtasan
+// (selama masih "menunggu_atasan"). Backend (batalkanKenaikanPangkat) tetap
+// memverifikasi ulang akses ini, baris ini cuma mengatur tampil/tidaknya
+// tombol.
+const kpBisaDibatalkan = computed(() => {
+  if (kpDetailRow.value?.status !== 'menunggu_atasan') return false
+  const pemilik = auth.idPegawai != null && auth.idPegawai === kpDetailRow.value?.id_pegawai
+  return pemilik || auth.isAtasan
+})
 const kpBisaDiprosesAtasan = computed(() => kpDetailRow.value?.status === 'menunggu_atasan' && auth.isAtasan)
 // kpBisaDiprosesAdmin/kpSetujuiAdmin/kpKembalikanAdmin (tahap "administrator"
 // pada pengajuan Kenaikan Pangkat ini) SUDAH DIHAPUS -- permintaan pengguna:

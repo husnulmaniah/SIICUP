@@ -232,6 +232,14 @@ func createKenaikanPangkat(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 // pun) -- sama pola pembatasan dengan pembatalan pengajuan lain di sistem
 // ini (mis. Pengajuan Cuti) supaya tidak ada pengajuan yang tiba-tiba
 // hilang setelah mulai diproses.
+// batalkanKenaikanPangkat: pemilik pengajuan bisa membatalkan pengajuannya
+// SENDIRI, dan (permintaan pengguna) Kepala Sekolah/atasan bawahan tersebut
+// juga bisa menghapus permohonan bawahannya -- selama status masih
+// "menunggu_atasan" (sama tahap dengan saat atasan masih bisa
+// menyetujui/mengembalikan, lihat setujuiKenaikanPangkatAtasan), supaya
+// tidak ada pengajuan yang tiba-tiba hilang setelah mulai diproses lebih
+// lanjut (status disetujui dst. hanya bisa dibatalkan lewat mekanisme lain,
+// bukan endpoint ini).
 func batalkanKenaikanPangkat(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
@@ -240,12 +248,14 @@ func batalkanKenaikanPangkat(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		utils.Error(w, http.StatusNotFound, "pengajuan tidak ditemukan")
 		return
 	}
-	if claims.IDPegawai == nil || item.IDPegawai != *claims.IDPegawai {
+	isPemilik := claims.IDPegawai != nil && item.IDPegawai == *claims.IDPegawai
+	isAtasanBawahan := claims.RoleName == "atasan" && canManagePetaJabatanSekolah(claims, item.IDUnitKerja, db)
+	if !isPemilik && !isAtasanBawahan {
 		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke pengajuan ini")
 		return
 	}
 	if item.Status != models.KenaikanPangkatMenungguAtasan {
-		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses, tidak bisa dibatalkan sendiri lagi")
+		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses, tidak bisa dibatalkan lagi")
 		return
 	}
 	if err := db.Delete(&item).Error; err != nil {

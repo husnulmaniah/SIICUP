@@ -26,7 +26,7 @@ import (
 // must be excluded from ordinary list/detail queries so we don't drag large
 // binary blobs along with every request; they're only fetched by the
 // dedicated download endpoint below.
-var dokumenFileFields = []string{"SkTerakhirFile", "SkKgbFile", "SkPangkatFile", "SkPensiunFile", "FotoProfilFile", "TtdPegawaiFile"}
+var dokumenFileFields = []string{"SkTerakhirFile", "SkKgbFile", "SkPangkatFile", "SkPensiunFile", "SkMutasiFile", "FotoProfilFile", "TtdPegawaiFile"}
 
 var pegawaiPreloads = []string{"Jabatan", "UnitKerja", "PangkatGol.Pangkat", "PangkatGol.Gol", "Status", "Atasan"}
 
@@ -225,12 +225,12 @@ func RegisterPegawaiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("DELETE /api/pegawai/{id}/ttd", anyRole(func(w http.ResponseWriter, r *http.Request) { deleteTtdPegawai(w, r, db) }))
 }
 
-// validDokumenJenis restricts the {jenis} path segment to the three known
+// validDokumenJenis restricts the {jenis} path segment to the known
 // document slots described in the UI: SK Terakhir, SK Kenaikan Gaji
-// Berkala, and SK Pensiun.
+// Berkala, SK Pensiun, dan SK/Berkas Pendukung Mutasi.
 func validDokumenJenis(jenis string) bool {
 	switch jenis {
-	case "sk-terakhir", "sk-kgb", "sk-pangkat", "sk-pensiun":
+	case "sk-terakhir", "sk-kgb", "sk-pangkat", "sk-pensiun", "sk-mutasi":
 		return true
 	}
 	return false
@@ -286,6 +286,8 @@ func downloadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB)
 		filename, data = item.SkPangkatNama, item.SkPangkatFile
 	case "sk-pensiun":
 		filename, data = item.SkPensiunNama, item.SkPensiunFile
+	case "sk-mutasi":
+		filename, data = item.SkMutasiNama, item.SkMutasiFile
 	}
 	if len(data) == 0 {
 		utils.Error(w, http.StatusNotFound, "dokumen belum diupload")
@@ -361,6 +363,20 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		if sid, err := pensiunStatusID(db); err == nil {
 			updates["id_status"] = sid
 		}
+	case "sk-mutasi":
+		updates["sk_mutasi_nama"] = header.Filename
+		updates["sk_mutasi_file"] = data
+		// SAMA pola dengan sk-pensiun di atas -- begitu administrator
+		// mengupload berkas pendukung mutasi, status kepegawaian pegawai
+		// ini otomatis diubah jadi "Mutasi" (permintaan pengguna: "jika
+		// admin yang melakukan mutasi maka harus mengupload berkas
+		// pendukungnya"). Lihat mutasiStatusID & scopePegawaiAktifDinas
+		// untuk bagaimana status ini lalu menyaring pegawai ybs dari
+		// KP4/Peta Jabatan/TPP/Surat Rekomendasi/Berita Acara/Surat
+		// Kolektif.
+		if sid, err := mutasiStatusID(db); err == nil {
+			updates["id_status"] = sid
+		}
 	}
 	if err := db.Model(&item).Updates(updates).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan dokumen: "+err.Error())
@@ -379,6 +395,14 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		// Pensiun langsung di sini pun harus menutup akun login pegawai
 		// ybs, konsisten dengan makna status "Pensiun".
 		setAkunAktifByPegawai(db, item.ID, false)
+		nonaktifkanPenerimaTppOtomatis(db, item.ID, "Pensiun")
+	}
+	if jenis == "sk-mutasi" {
+		// Mutasi keluar OPD Dinas Pendidikan -- akun login ditutup & baris
+		// Penerima TPP (kalau masih aktif) ikut dinonaktifkan, sama pola
+		// dengan sk-pensiun di atas (permintaan pengguna).
+		setAkunAktifByPegawai(db, item.ID, false)
+		nonaktifkanPenerimaTppOtomatis(db, item.ID, "Mutasi / Pindah Tugas")
 	}
 	utils.Success(w, "dokumen berhasil diupload", map[string]string{"nama_file": header.Filename})
 }
@@ -408,6 +432,55 @@ func pensiunStatusID(db *gorm.DB) (uint, error) {
 		return 0, err
 	}
 	return s.ID, nil
+}
+
+// mutasiStatusID: SAMA pola dengan pensiunStatusID di atas, untuk status
+// "Mutasi" -- dipakai uploadDokumenPegawai saat berkas pendukung mutasi
+// (sk-mutasi) diupload.
+func mutasiStatusID(db *gorm.DB) (uint, error) {
+	var s models.Status
+	if err := db.Where("status ILIKE ?", "mutasi").First(&s).Error; err == nil {
+		return s.ID, nil
+	}
+	s = models.Status{Status: "Mutasi"}
+	if err := db.Create(&s).Error; err != nil {
+		return 0, err
+	}
+	return s.ID, nil
+}
+
+// statusNonaktifIDs mengambil ID master Status "Pensiun" & "Mutasi" --
+// pegawai berstatus salah satu dari ini dianggap sudah tidak lagi termasuk
+// pegawai AKTIF Dinas Pendidikan (permintaan pengguna). Dipakai
+// scopePegawaiAktifDinas di bawah; TIDAK membuat baris Status baru (beda
+// dari pensiunStatusID/mutasiStatusID) karena ini cuma query baca -- kalau
+// belum pernah ada pegawai berstatus itu, baris Status-nya pun belum tentu
+// ada, dan itu tidak masalah (berarti tidak ada yang perlu disaring).
+func statusNonaktifIDs(db *gorm.DB) []uint {
+	var ids []uint
+	db.Model(&models.Status{}).Where("status ILIKE ? OR status ILIKE ?", "pensiun", "mutasi").Pluck("id", &ids)
+	return ids
+}
+
+// scopePegawaiAktifDinas penambahkan filter supaya pegawai berstatus
+// Pensiun/Mutasi tidak ikut muncul -- dipakai KP4 (kp4AdminList), TPP
+// (listCalonPegawaiTpp), Peta Jabatan (hitungPetaJabatanSekolah &
+// dialog "siapa yang menjabat"), Surat Rekomendasi
+// (listCalonPegawaiSuratRekomendasi), dan listPegawai di bawah (lewat
+// parameter query "aktif_saja", dipakai picker Berita Acara & Surat
+// Kolektif) -- permintaan pengguna: pegawai yang sudah dimutasikan keluar
+// OPD Dinas Pendidikan atau pensiun otomatis tidak lagi dihitung/muncul di
+// menu-menu ini. Pegawai TANPA status (id_status NULL) TETAP dianggap
+// aktif (aman untuk data lama yang belum pernah diisi status apa pun) --
+// query dasarnya (parameter `query`) TIDAK diubah kalau belum ada satu pun
+// baris Status "Pensiun"/"Mutasi" di database (supaya tidak menghasilkan
+// SQL "NOT IN ()" yang kosong/invalid).
+func scopePegawaiAktifDinas(db *gorm.DB, query *gorm.DB) *gorm.DB {
+	ids := statusNonaktifIDs(db)
+	if len(ids) == 0 {
+		return query
+	}
+	return query.Where("id_status IS NULL OR id_status NOT IN (?)", ids)
 }
 
 // canManageFotoProfil menentukan siapa yang boleh mengganti/menghapus foto
@@ -726,6 +799,9 @@ func deleteDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	case "sk-pensiun":
 		updates["sk_pensiun_nama"] = ""
 		updates["sk_pensiun_file"] = nil
+	case "sk-mutasi":
+		updates["sk_mutasi_nama"] = ""
+		updates["sk_mutasi_file"] = nil
 	}
 	if err := db.Model(&item).Updates(updates).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menghapus dokumen: "+err.Error())
@@ -740,6 +816,13 @@ func deleteDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		// pensiun yang punya IDStatusSebelum) -- administrator perlu
 		// mengubah Status pegawai ini manual lewat form Edit kalau memang
 		// perlu dikembalikan dari "Pensiun".
+		setAkunAktifByPegawai(db, item.ID, true)
+	}
+	if jenis == "sk-mutasi" {
+		// SAMA pola dengan sk-pensiun di atas -- menghapus berkas mutasi
+		// mengaktifkan kembali akun login; id_status tetap tidak diubah
+		// otomatis di sini, administrator mengubahnya manual lewat form
+		// Edit kalau memang perlu dikembalikan dari "Mutasi".
 		setAkunAktifByPegawai(db, item.ID, true)
 	}
 	utils.Success(w, "dokumen berhasil dihapus", nil)
@@ -757,12 +840,28 @@ func listPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		pageSize = 25
 	}
 	search := strings.TrimSpace(q.Get("q"))
+	// aktif_saja: dipakai picker pemilihan pegawai yang MEMANG harus hanya
+	// menawarkan pegawai aktif Dinas Pendidikan -- Berita Acara (lihat
+	// makePegawaiPicker di BeritaAcaraView.vue), Surat Kolektif
+	// (loadKolektifPegawaiOptions di RekapAbsensiView.vue), & dialog
+	// "siapa yang menjabat" pada Peta Jabatan (PetaJabatanView.vue).
+	// SENGAJA opsional (default TIDAK difilter) supaya tabel CRUD "Data
+	// Pegawai" (yang juga memakai endpoint /api/pegawai ini) tetap
+	// menampilkan SEMUA pegawai termasuk yang Pensiun/Mutasi -- administrator
+	// masih perlu bisa melihat/mengelola baris mereka di sana.
+	aktifSaja := q.Get("aktif_saja") == "1"
 
 	query := db.Model(&models.Pegawai{}).Omit(dokumenFileFields...)
+	if aktifSaja {
+		query = scopePegawaiAktifDinas(db, query)
+	}
 	for _, p := range pegawaiPreloads {
 		query = query.Preload(p)
 	}
 	countQuery := db.Model(&models.Pegawai{})
+	if aktifSaja {
+		countQuery = scopePegawaiAktifDinas(db, countQuery)
+	}
 
 	// Akun ber-flag IsAdminAbsensi (lihat models.User.IsAdminAbsensi) TETAP
 	// perlu melihat SELURUH pegawai walau role dasarnya "pegawai"/"atasan" --

@@ -1085,6 +1085,12 @@ func listCalonPegawaiSuratRekomendasi(w http.ResponseWriter, r *http.Request, db
 
 	if len(idStatusList) > 0 {
 		query = query.Where("id_status IN ?", idStatusList)
+	} else {
+		// Tanpa filter Status Kepegawaian eksplisit, pegawai Pensiun/Mutasi
+		// otomatis tidak ditawarkan sebagai calon penerima Surat
+		// Rekomendasi -- permintaan pengguna, lihat
+		// scopePegawaiAktifDinas di handlers/pegawai.go.
+		query = scopePegawaiAktifDinas(db, query)
 	}
 	if tahunTmt != "" {
 		if tahun, err := strconv.Atoi(tahunTmt); err == nil {

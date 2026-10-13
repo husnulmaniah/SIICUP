@@ -156,7 +156,10 @@ function makePegawaiPicker() {
   async function load(kw = '') {
     loading.value = true
     try {
-      const params = { pageSize: PEGAWAI_PAGE_SIZE }
+      // aktif_saja: pegawai berstatus Pensiun/Mutasi tidak ditawarkan
+      // sebagai pihak yang terlibat dalam Berita Acara baru (permintaan
+      // pengguna, lihat scopePegawaiAktifDinas di handlers/pegawai.go).
+      const params = { pageSize: PEGAWAI_PAGE_SIZE, aktif_saja: 1 }
       const q = (kw || '').trim()
       keyword.value = q
       if (q) params.q = q

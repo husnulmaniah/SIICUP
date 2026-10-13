@@ -475,6 +475,17 @@ type Pegawai struct {
 	SkPangkatFile  []byte `json:"-" gorm:"column:sk_pangkat_file;type:bytea"`
 	SkPensiunNama  string `json:"sk_pensiun_nama" gorm:"column:sk_pensiun_nama;size:255"`
 	SkPensiunFile  []byte `json:"-" gorm:"column:sk_pensiun_file;type:bytea"`
+	// SkMutasiNama/SkMutasiFile: berkas pendukung mutasi (mis. SK Mutasi/
+	// Surat Pindah Tugas) -- SAMA pola dengan SkPensiunNama/SkPensiunFile di
+	// atas: begitu administrator mengupload berkas ini lewat menu Data
+	// Pegawai, status kepegawaian pegawai ini otomatis berubah jadi "Mutasi"
+	// & akun login dinonaktifkan (lihat uploadDokumenPegawai di
+	// handlers/pegawai.go) -- permintaan pengguna supaya pegawai yang
+	// dimutasikan keluar OPD Dinas Pendidikan tidak lagi dihitung
+	// aktif di KP4, Peta Jabatan, TPP, Surat Rekomendasi, Berita Acara, &
+	// Surat Kolektif (lihat scopePegawaiAktifDinas).
+	SkMutasiNama string `json:"sk_mutasi_nama" gorm:"column:sk_mutasi_nama;size:255"`
+	SkMutasiFile []byte `json:"-" gorm:"column:sk_mutasi_file;type:bytea"`
 
 	// FotoProfil: foto profil pegawai, ditampilkan di avatar topbar &
 	// halaman Profil Saya masing-masing pegawai (lihat AppLayout.vue,

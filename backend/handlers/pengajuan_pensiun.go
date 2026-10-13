@@ -378,6 +378,12 @@ func approvePengajuanPensiun(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		return
 	}
 	setAkunAktifByPegawai(db, item.IDPegawai, false)
+	// Sama seperti upload SK Pensiun langsung lewat Data Pegawai (lihat
+	// uploadDokumenPegawai) -- persetujuan lewat alur pengajuan ini pun
+	// harus mengeluarkan pegawai ybs dari Penerima TPP kalau masih aktif
+	// (permintaan pengguna: status Pensiun otomatis menonaktifkannya di
+	// sana juga, lepas dari lewat jalur mana statusnya berubah).
+	nonaktifkanPenerimaTppOtomatis(db, item.IDPegawai, "Pensiun")
 
 	now := time.Now()
 	item.Status = models.StatusDisetuju

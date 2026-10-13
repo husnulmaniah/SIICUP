@@ -94,6 +94,54 @@ async function exportExcel() {
   }
 }
 
+// Lihat/unduh PDF KP4 satu pegawai -- permintaan pengguna: administrator/
+// admin bisa mengecek data KP4 dalam bentuk PDF langsung dari menu ini,
+// bukan cuma lihat/edit form mentahnya. Endpoint cetaknya SUDAH ada & SUDAH
+// mengizinkan administrator/admin untuk pegawai MANAPUN (lihat
+// GET /api/kp4/pegawai/{id}/cetak, handlers/kp4_pdf.go) -- jadi di sini
+// tinggal dipanggil, sama pola dgn previewForm di PengajuanCutiView.vue
+// (preview lewat Dialog+iframe, unduh lewat <a download>). @click.stop pada
+// tombolnya supaya tidak ikut memicu row-click (yang membuka dialog edit).
+const pdfPreviewVisible = ref(false)
+const pdfPreviewUrl = ref('')
+const pdfPreviewTitle = ref('')
+const pdfLoadingId = ref(null)
+
+async function lihatPdfKp4(row) {
+  pdfLoadingId.value = row.id_pegawai
+  try {
+    const res = await http.get(`/kp4/pegawai/${row.id_pegawai}/cetak`, { params: { inline: 1 }, responseType: 'blob' })
+    pdfPreviewUrl.value = window.URL.createObjectURL(res.data)
+    pdfPreviewTitle.value = `KP4 -- ${row.nama}`
+    pdfPreviewVisible.value = true
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat PDF', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    pdfLoadingId.value = null
+  }
+}
+
+function closePdfPreview() {
+  if (pdfPreviewUrl.value) window.URL.revokeObjectURL(pdfPreviewUrl.value)
+  pdfPreviewUrl.value = ''
+}
+
+async function unduhPdfKp4(row) {
+  try {
+    const res = await http.get(`/kp4/pegawai/${row.id_pegawai}/cetak`, { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `kp4_${row.nip || row.id_pegawai}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh PDF', detail: e.response?.data?.message || e.message, life: 4000 })
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -140,6 +188,21 @@ onMounted(load)
             <Tag v-else severity="success" value="Lengkap" />
           </template>
         </Column>
+        <Column header="Aksi" style="width: 110px">
+          <template #body="{ data }">
+            <Button
+              icon="pi pi-file-pdf"
+              size="small"
+              severity="info"
+              rounded
+              text
+              title="Lihat PDF KP4"
+              :loading="pdfLoadingId === data.id_pegawai"
+              @click.stop="lihatPdfKp4(data)"
+            />
+            <Button icon="pi pi-download" size="small" severity="secondary" rounded text title="Unduh PDF KP4" @click.stop="unduhPdfKp4(data)" />
+          </template>
+        </Column>
       </DataTable>
     </div>
 
@@ -148,6 +211,21 @@ onMounted(load)
         {{ selectedPegawai.nama }} -- NIP. {{ selectedPegawai.nip }}
       </div>
       <Kp4FormPanel v-if="selectedPegawai" :key="selectedPegawai.id_pegawai" :idPegawai="selectedPegawai.id_pegawai" @saved="onSaved" />
+    </Dialog>
+
+    <Dialog
+      v-model:visible="pdfPreviewVisible"
+      modal
+      :header="pdfPreviewTitle"
+      :style="{ width: '95vw', maxWidth: '62rem' }"
+      @hide="closePdfPreview"
+    >
+      <div style="width: 100%; height: 75vh">
+        <iframe :src="pdfPreviewUrl" style="width: 100%; height: 100%; border: none" title="Pratinjau KP4"></iframe>
+      </div>
+      <template #footer>
+        <Button label="Tutup" severity="secondary" outlined @click="pdfPreviewVisible = false" />
+      </template>
     </Dialog>
   </div>
 </template>

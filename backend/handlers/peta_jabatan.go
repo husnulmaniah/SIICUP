@@ -251,7 +251,10 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 		Jumlah       int
 	}
 	var bRows []bRow
-	db.Model(&models.Pegawai{}).
+	// scopePegawaiAktifDinas: pegawai berstatus Pensiun/Mutasi tidak lagi
+	// dihitung sebagai Bezetting (B) -- permintaan pengguna, lihat komentar
+	// lengkap di handlers/pegawai.go.
+	scopePegawaiAktifDinas(db, db.Model(&models.Pegawai{})).
 		Select("id_jabatan, COALESCE(id_sub_jabatan, 0) AS id_sub_jabatan, COUNT(*) AS jumlah").
 		Where("id_unit_kerja = ? AND id_jabatan IS NOT NULL", idUnitKerja).
 		Group("id_jabatan, COALESCE(id_sub_jabatan, 0)").
@@ -412,7 +415,7 @@ func sinkronkanPetaJabatanSekolah(w http.ResponseWriter, r *http.Request, db *go
 	// Jabatan yang BENAR-BENAR dipegang pegawai pada sekolah ini SAAT INI --
 	// ditarik langsung dari data Jabatan & nama pegawai pada tabel pegawai.
 	var idJabatanDipegang []uint
-	db.Model(&models.Pegawai{}).
+	scopePegawaiAktifDinas(db, db.Model(&models.Pegawai{})).
 		Distinct("id_jabatan").
 		Where("id_unit_kerja = ? AND id_jabatan IS NOT NULL", idUnitKerja).
 		Pluck("id_jabatan", &idJabatanDipegang)
