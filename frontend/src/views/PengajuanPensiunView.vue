@@ -21,6 +21,7 @@ import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
 import TabPanels from 'primevue/tabpanels'
 import TabPanel from 'primevue/tabpanel'
+import PengajuanStepper from '../components/PengajuanStepper.vue'
 
 const toast = useToast()
 const confirm = useConfirm()
@@ -80,6 +81,26 @@ function openDetail(row) {
   catatan.value = ''
   detailDialog.value = true
 }
+
+// Progres Pengajuan Pensiun (stepper) -- 2 tahap: Diajukan -> Keputusan
+// Administrator (hanya satu tahap, tidak ada atasan di alur ini).
+const stepperSteps = computed(() => {
+  const row = detailRow.value
+  if (!row) return []
+  const steps = [{ label: 'Diajukan', state: 'done', actor: row.pegawai?.nama, timestamp: formatDateTime(row.created_at) }]
+  if (row.status === 'disetujui' || row.status === 'ditolak') {
+    steps.push({
+      label: 'Keputusan Administrator',
+      state: row.status === 'disetujui' ? 'done' : 'rejected',
+      actor: row.diputuskan_oleh,
+      timestamp: formatDateTime(row.tgl_keputusan),
+      note: row.catatan_admin,
+    })
+  } else {
+    steps.push({ label: 'Keputusan Administrator', state: 'current' })
+  }
+  return steps
+})
 
 async function doApprove() {
   processing.value = true
@@ -443,6 +464,9 @@ onMounted(() => {
           </div>
           <Tag :value="statusLabel(detailRow.status)" :severity="statusSeverity(detailRow.status)" />
         </div>
+
+        <div class="field-label">Progres Pengajuan</div>
+        <PengajuanStepper :steps="stepperSteps" />
 
         <Tag v-if="detailRow.is_pensiun_dini" value="Pengajuan Pensiun Dini" severity="help" style="margin-bottom: 0.75rem" />
 

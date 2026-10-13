@@ -23,6 +23,7 @@ import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
 import TabPanels from 'primevue/tabpanels'
 import TabPanel from 'primevue/tabpanel'
+import PengajuanStepper from '../components/PengajuanStepper.vue'
 
 const toast = useToast()
 
@@ -479,6 +480,7 @@ async function loadAlasanBaOptions() {
 }
 
 const pengajuanBaSayaList = ref([])
+const expandedBaRows = ref({})
 async function loadPengajuanBaSaya() {
   try {
     const { data } = await http.get('/pengajuan-berita-acara/saya')
@@ -717,6 +719,68 @@ function catatanBaTerkini(item) {
   if (item.status === 'dikembalikan_atasan') return item.catatan_atasan || '-'
   if (item.status === 'dikembalikan_admin' || item.status === 'ditolak') return item.catatan_admin || '-'
   return '-'
+}
+function formatWaktuBa(v) {
+  if (!v) return '-'
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return v
+  return d.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+// Progres Pengajuan Berita Acara (stepper) -- permintaan pengguna agar
+// pegawai dapat mentracking proses pengajuannya, bukan cuma lihat satu Tag
+// status. Alur: Diajukan -> Persetujuan Atasan -> Persetujuan Administrator.
+// "dikembalikan_atasan"/"dikembalikan_admin" bukan status akhir -- begitu
+// pegawai edit & ajukan ulang (lihat updatePengajuanBeritaAcara di backend),
+// statusnya balik ke "menunggu_atasan" (kalau dikembalikan atasan) atau
+// "menunggu_admin" (kalau dikembalikan admin, atasan tidak perlu menyetujui
+// ulang) -- jadi di sini ditampilkan sebagai tahap "rejected" sementara
+// pengajuan masih dalam kondisi "menunggu direvisi pegawai" itu.
+function stepperBaSteps(item) {
+  if (!item) return []
+  const steps = [{ label: 'Diajukan', state: 'done', actor: item.pegawai?.nama, timestamp: formatWaktuBa(item.created_at) }]
+  if (item.status === 'menunggu_atasan') {
+    steps.push({ label: 'Persetujuan Atasan', state: 'current' })
+    steps.push({ label: 'Persetujuan Administrator', state: 'pending' })
+    return steps
+  }
+  if (item.status === 'dikembalikan_atasan') {
+    steps.push({
+      label: 'Persetujuan Atasan',
+      state: 'rejected',
+      actor: item.atasan_approve_nama,
+      timestamp: formatWaktuBa(item.tgl_atasan_approve),
+      note: item.catatan_atasan,
+    })
+    steps.push({ label: 'Persetujuan Administrator', state: 'pending' })
+    return steps
+  }
+  steps.push({
+    label: 'Persetujuan Atasan',
+    state: 'done',
+    actor: item.atasan_approve_nama,
+    timestamp: formatWaktuBa(item.tgl_atasan_approve),
+  })
+  if (item.status === 'menunggu_admin') {
+    steps.push({ label: 'Persetujuan Administrator', state: 'current' })
+  } else if (item.status === 'dikembalikan_admin' || item.status === 'ditolak') {
+    steps.push({
+      label: 'Persetujuan Administrator',
+      state: 'rejected',
+      actor: item.admin_approve_nama,
+      timestamp: formatWaktuBa(item.tgl_admin_approve),
+      note: item.catatan_admin,
+    })
+  } else {
+    steps.push({
+      label: 'Persetujuan Administrator',
+      state: 'done',
+      actor: item.admin_approve_nama,
+      timestamp: formatWaktuBa(item.tgl_admin_approve),
+      note: item.catatan_admin,
+    })
+  }
+  return steps
 }
 
 // ============================================================
@@ -1674,7 +1738,20 @@ async function downloadDokumen(item) {
 
         <div v-if="pengajuanBaSayaList.length" class="pengajuan-saya-list">
           <h4>Pengajuan Berita Acara Saya</h4>
-          <DataTable :value="pengajuanBaSayaList" size="small" stripedRows responsiveLayout="scroll">
+          <DataTable
+            :value="pengajuanBaSayaList"
+            v-model:expandedRows="expandedBaRows"
+            dataKey="id"
+            size="small"
+            stripedRows
+            responsiveLayout="scroll"
+          >
+            <template #expansion="{ data }">
+              <div style="padding: 0.5rem 0.5rem 0.25rem">
+                <PengajuanStepper :steps="stepperBaSteps(data)" compact />
+              </div>
+            </template>
+            <Column expander style="width: 3rem" />
             <Column header="Tanggal Kejadian">
               <template #body="{ data }">{{ formatTanggal(data.tanggal_kejadian) }}</template>
             </Column>

@@ -21,6 +21,7 @@ import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
 import TabPanels from 'primevue/tabpanels'
 import TabPanel from 'primevue/tabpanel'
+import PengajuanStepper from '../components/PengajuanStepper.vue'
 
 // PetaJabatanView -- menu "Peta Jabatan" (dropdown Administrasi Kepegawaian
 // untuk administrator/admin, + menu langsung untuk pegawai & atasan). Lihat
@@ -564,6 +565,73 @@ const kpBisaDibatalkan = computed(
 const kpBisaDiprosesAtasan = computed(() => kpDetailRow.value?.status === 'menunggu_atasan' && auth.isAtasan)
 const kpBisaDiprosesAdmin = computed(() => kpDetailRow.value?.status === 'menunggu_admin' && auth.canManageMaster)
 
+// Progress bar/stepper untuk dialog Detail Pengajuan Kenaikan Pangkat --
+// permintaan pengguna agar pegawai dapat mentracking proses pengajuan,
+// bukan cuma lihat satu Tag status. Alur: Diajukan -> Atasan -> Administrator
+// -> (kalau disetujui) lanjut ke Perubahan Jabatan (upload SK, lihat
+// perubahanStepperSteps di bawah -- itu record yang BERBEDA/terpisah,
+// otomatis dibuat begitu tahap administrator di sini disetujui).
+const kpStepperSteps = computed(() => {
+  const row = kpDetailRow.value
+  if (!row) return []
+  const steps = [
+    {
+      label: 'Diajukan',
+      state: 'done',
+      actor: row.pegawai?.nama,
+      timestamp: formatTanggal(row.created_at),
+    },
+  ]
+  if (row.status === 'menunggu_atasan') {
+    steps.push({ label: 'Persetujuan Atasan', state: 'current' })
+    steps.push({ label: 'Persetujuan Administrator', state: 'pending' })
+  } else if (row.status === 'ditolak_atasan') {
+    steps.push({
+      label: 'Persetujuan Atasan',
+      state: 'rejected',
+      actor: row.atasan_approve?.nama,
+      timestamp: formatTanggal(row.tgl_atasan_approve),
+      note: row.catatan_atasan,
+    })
+    steps.push({ label: 'Persetujuan Administrator', state: 'pending' })
+  } else {
+    steps.push({
+      label: 'Persetujuan Atasan',
+      state: 'done',
+      actor: row.atasan_approve?.nama,
+      timestamp: formatTanggal(row.tgl_atasan_approve),
+      note: row.catatan_atasan,
+    })
+    if (row.status === 'menunggu_admin') {
+      steps.push({ label: 'Persetujuan Administrator', state: 'current' })
+    } else if (row.status === 'ditolak_admin') {
+      steps.push({
+        label: 'Persetujuan Administrator',
+        state: 'rejected',
+        actor: row.admin_approve?.nama || row.admin_approve?.username,
+        timestamp: formatTanggal(row.tgl_admin_approve),
+        note: row.catatan_admin,
+      })
+    } else {
+      steps.push({
+        label: 'Persetujuan Administrator',
+        state: 'done',
+        actor: row.admin_approve?.nama || row.admin_approve?.username,
+        timestamp: formatTanggal(row.tgl_admin_approve),
+        note: row.catatan_admin,
+      })
+      if (row.status === 'disetujui') {
+        steps.push({
+          label: 'Upload SK Jabatan Baru',
+          state: 'current',
+          note: 'Lanjutkan di tab Perubahan Jabatan',
+        })
+      }
+    }
+  }
+  return steps
+})
+
 async function openKpDetail(row) {
   kpDetailRow.value = row
   kpCatatan.value = ''
@@ -812,6 +880,67 @@ const perubahanDetailRow = ref(null)
 const perubahanCatatan = ref('')
 const perubahanIdPangkatGolBaru = ref(null)
 const perubahanProcessing = ref(false)
+
+// Progress bar/stepper untuk dialog Detail Perubahan Jabatan -- lanjutan
+// pipeline dari Pengajuan Kenaikan Pangkat (lihat kpStepperSteps di atas).
+// Catatan: "Kembalikan" oleh administrator di sini TIDAK membuat status
+// akhir "ditolak", melainkan mengembalikan status ke "menunggu_upload" agar
+// pegawai upload ulang (lihat rejectPerubahanJabatan di backend) -- makanya
+// kalau ada catatan_admin TAPI status sudah balik ke menunggu_upload, itu
+// berarti sedang upload ulang pasca-dikembalikan, bukan pengajuan baru.
+const perubahanStepperSteps = computed(() => {
+  const row = perubahanDetailRow.value
+  if (!row) return []
+  const pernahDikembalikan = row.status === 'menunggu_upload' && !!row.catatan_admin
+  const steps = [
+    {
+      label: 'Upload SK oleh Pegawai',
+      state: row.status === 'menunggu_upload' ? 'current' : 'done',
+      actor: row.pegawai?.nama,
+      note: pernahDikembalikan ? 'Upload ulang (dikembalikan administrator)' : undefined,
+    },
+  ]
+  if (row.status === 'menunggu_upload') {
+    steps.push(
+      pernahDikembalikan
+        ? {
+            label: 'Persetujuan Administrator',
+            state: 'rejected',
+            actor: row.diputuskan_oleh,
+            timestamp: formatTanggal(row.tgl_keputusan),
+            note: row.catatan_admin,
+          }
+        : { label: 'Persetujuan Administrator', state: 'pending' },
+    )
+    steps.push({ label: 'Diterapkan ke Data Pegawai', state: 'pending' })
+  } else if (row.status === 'menunggu_admin') {
+    steps.push({ label: 'Persetujuan Administrator', state: 'current' })
+    steps.push({ label: 'Diterapkan ke Data Pegawai', state: 'pending' })
+  } else if (row.status === 'ditolak') {
+    steps.push({
+      label: 'Persetujuan Administrator',
+      state: 'rejected',
+      actor: row.diputuskan_oleh,
+      timestamp: formatTanggal(row.tgl_keputusan),
+      note: row.catatan_admin,
+    })
+    steps.push({ label: 'Diterapkan ke Data Pegawai', state: 'pending' })
+  } else {
+    steps.push({
+      label: 'Persetujuan Administrator',
+      state: 'done',
+      actor: row.diputuskan_oleh,
+      timestamp: formatTanggal(row.tgl_keputusan),
+    })
+    steps.push({
+      label: 'Diterapkan ke Data Pegawai',
+      state: 'done',
+      note: 'Jabatan, SK terbaru, dan pangkat/golongan (jika ada) sudah diperbarui',
+    })
+  }
+  return steps
+})
+
 function openPerubahanDetail(row) {
   perubahanDetailRow.value = row
   perubahanCatatan.value = ''
@@ -1343,6 +1472,9 @@ onMounted(() => {
           </div>
         </div>
 
+        <div class="field-label">Progres Pengajuan</div>
+        <PengajuanStepper :steps="kpStepperSteps" />
+
         <Message v-if="kpDetailRow.tgl_atasan_approve" :severity="kpDetailRow.status === 'ditolak_atasan' ? 'danger' : 'success'" :closable="false" style="margin-bottom: 0.75rem">
           Tahap atasan: {{ kpDetailRow.atasan_approve?.nama || '-' }} pada {{ formatTanggal(kpDetailRow.tgl_atasan_approve) }}.
           <template v-if="kpDetailRow.catatan_atasan">Catatan: "{{ kpDetailRow.catatan_atasan }}"</template>
@@ -1440,6 +1572,9 @@ onMounted(() => {
           </div>
           <span v-else style="font-size: 0.85rem; color: var(--p-text-muted-color)">Belum diupload</span>
         </div>
+
+        <div class="field-label">Progres Pengajuan</div>
+        <PengajuanStepper :steps="perubahanStepperSteps" />
 
         <Message v-if="perubahanDetailRow.status === 'disetujui'" severity="success" :closable="false">
           Disetujui oleh {{ perubahanDetailRow.diputuskan_oleh || '-' }} pada {{ formatTanggal(perubahanDetailRow.tgl_keputusan) }}.

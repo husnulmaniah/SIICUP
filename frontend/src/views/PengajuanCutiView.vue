@@ -26,6 +26,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 import Tabs from 'primevue/tabs'
 import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
+import PengajuanStepper from '../components/PengajuanStepper.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -664,6 +665,46 @@ function ttdDoc() {
 function ttdDocOf(row) {
   return (row?.dokumen || []).find((d) => d.jenis === TTD_JENIS)
 }
+
+// Progres Pengajuan Cuti (stepper) -- permintaan pengguna agar pegawai bisa
+// mentracking proses, bukan cuma lihat satu Tag status. Alur: Diajukan ->
+// Persetujuan (atasan/administrator) -> (kalau disetujui) TTD Kepala Dinas,
+// disimpulkan dari ttdDoc() karena tahap ini bukan status enum tersendiri,
+// cuma keberadaan dokumen "ttd_formulir".
+const cutiStepperSteps = computed(() => {
+  const row = detailRow.value
+  if (!row) return []
+  const steps = [
+    { label: 'Diajukan', state: 'done', actor: row.pegawai?.nama, timestamp: formatDate(row.created_at) },
+  ]
+  if (row.status === 'pending') {
+    steps.push({ label: 'Persetujuan', state: 'current' })
+    return steps
+  }
+  const approver = row.atasan_approve?.nama || row.disetujui_oleh_username
+  if (row.status === 'dikembalikan') {
+    steps.push({
+      label: 'Persetujuan',
+      state: 'rejected',
+      actor: approver,
+      timestamp: formatDate(row.tgl_approval),
+      note: row.catatan_approval || 'Dikembalikan untuk diperbaiki',
+    })
+    return steps
+  }
+  if (row.status === 'ditolak') {
+    steps.push({ label: 'Persetujuan', state: 'rejected', actor: approver, timestamp: formatDate(row.tgl_approval), note: row.catatan_approval })
+    return steps
+  }
+  // disetujui
+  steps.push({ label: 'Persetujuan', state: 'done', actor: approver, timestamp: formatDate(row.tgl_approval), note: row.catatan_approval })
+  steps.push(
+    ttdDoc()
+      ? { label: 'TTD Kepala Dinas', state: 'done', note: 'Berkas bertanda tangan sudah diupload' }
+      : { label: 'TTD Kepala Dinas', state: 'current', note: 'Menunggu upload berkas bertanda tangan' },
+  )
+  return steps
+})
 // berkas kelengkapan pengajuan (yang diupload pegawai saat mengajukan),
 // dipisahkan dari berkas formulir bertanda tangan (ttd_formulir) yang punya
 // section sendiri di detail dialog.
@@ -1268,6 +1309,8 @@ onMounted(() => {
         <div><strong>Jenis Cuti:</strong> {{ detailRow.jenis_cuti?.jenis }}</div>
         <div><strong>Tanggal:</strong> {{ formatDate(detailRow.tgl_mulai) }} &ndash; {{ formatDate(detailRow.tgl_selesai) }} ({{ detailRow.jumlah_hari }} hari)</div>
         <div><strong>Status:</strong> <Tag :value="detailRow.status" :severity="statusSeverity(detailRow.status)" /></div>
+        <div style="font-weight: 600; margin-top: 0.25rem">Progres Pengajuan</div>
+        <PengajuanStepper :steps="cutiStepperSteps" />
         <div><strong>Alasan:</strong> {{ detailRow.alasan_cuti || '-' }}</div>
         <div><strong>Alamat Selama Cuti:</strong> {{ detailRow.alamat_selama_cuti || '-' }}</div>
         <div v-if="detailRow.catatan_approval"><strong>Catatan Atasan:</strong> {{ detailRow.catatan_approval }}</div>

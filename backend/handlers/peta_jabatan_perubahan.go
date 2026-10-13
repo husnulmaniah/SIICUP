@@ -241,8 +241,28 @@ func approvePerubahanJabatan(w http.ResponseWriter, r *http.Request, db *gorm.DB
 			"id_jabatan":     item.IDJabatanBaru,
 			"id_sub_jabatan": item.IDSubJabatanBaru,
 		}
+		// SK yang baru saja diupload pegawai (item.SkNamaFile/SkFile) ikut
+		// disalin ke data pegawai begitu disetujui administrator --
+		// permintaan pengguna: "SK terbaru" pegawai harus ikut otomatis
+		// ter-update di sini, bukan cuma tersimpan di baris
+		// PerubahanJabatanPegawai ini yang riwayatnya gampang tidak
+		// terlihat lagi dari profil pegawai. Disalin ke SkTerakhirNama/File
+		// (SK terbaru apa pun jenisnya), dan kalau kenaikan ini JUGA diikuti
+		// perubahan pangkat/golongan (IDPangkatGolBaru terisi), sekaligus
+		// ke SkPangkatNama/File (SK yang menjadi dasar pangkat saat ini --
+		// pola yang sama dipakai alur PerubahanDataPegawai) serta
+		// TglKenaikanPangkatTerakhir.
+		if len(item.SkFile) > 0 {
+			updates["sk_terakhir_nama"] = item.SkNamaFile
+			updates["sk_terakhir_file"] = item.SkFile
+		}
 		if p.IDPangkatGolBaru != nil {
 			updates["id_pangkat_gol"] = *p.IDPangkatGolBaru
+			updates["tgl_kenaikan_pangkat_terakhir"] = now
+			if len(item.SkFile) > 0 {
+				updates["sk_pangkat_nama"] = item.SkNamaFile
+				updates["sk_pangkat_file"] = item.SkFile
+			}
 		}
 		if err := tx.Model(&models.Pegawai{}).Where("id = ?", item.IDPegawai).Updates(updates).Error; err != nil {
 			return err
@@ -257,7 +277,7 @@ func approvePerubahanJabatan(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		utils.Error(w, http.StatusInternalServerError, "gagal menerapkan perubahan jabatan: "+err.Error())
 		return
 	}
-	utils.Success(w, "perubahan jabatan disetujui & diterapkan ke data pegawai", nil)
+	utils.Success(w, "perubahan jabatan disetujui & diterapkan ke data pegawai (jabatan, SK terbaru, dan pangkat/golongan jika ada perubahan)", nil)
 }
 
 // rejectPerubahanJabatan: mengembalikan status ke "menunggu_upload" (BUKAN
