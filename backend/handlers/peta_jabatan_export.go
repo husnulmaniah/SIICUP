@@ -352,24 +352,30 @@ func buildPetaJabatanExcel(peta *petaJabatanSekolahOut, signers petaJabatanSigne
 	row++
 	qrRow := row
 
+	// QR dicetak 120x120px (~90pt/1,25" pada 96dpi bawaan excelize) --
+	// diperbesar dari 80px sebelumnya supaya mudah discan (keluhan pengguna:
+	// QR terlalu kecil). 7 baris x 13pt (=91pt) disediakan di bawahnya
+	// supaya QR tidak menimpa baris nama/NIP berikutnya.
+	const qrPxExcel = 120
+	const qrRowsExcel = 7
 	dinasQuery := fmt.Sprintf("Kepala Dinas %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
 		signers.DinasNama, signers.DinasNip, signers.DinasJabatan, peta.UnitKerja.Unit, dicetakStr)
-	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(dinasQuery), qrcode.Medium, 80); err == nil {
+	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(dinasQuery), qrcode.Medium, qrPxExcel); err == nil {
 		_ = f.AddPictureFromBytes(sheet, cellRef("C", qrRow), &excelize.Picture{
 			Extension: ".png", File: qrPng, Format: &excelize.GraphicOptions{AltText: "QR Tanda Tangan Kepala Dinas"},
 		})
 	}
 	kepsekQuery := fmt.Sprintf("Kepala Sekolah %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
 		signers.KepsekNama, signers.KepsekNip, signers.KepsekJabatan, peta.UnitKerja.Unit, dicetakStr)
-	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, 80); err == nil {
+	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, qrPxExcel); err == nil {
 		_ = f.AddPictureFromBytes(sheet, cellRef("I", qrRow), &excelize.Picture{
 			Extension: ".png", File: qrPng, Format: &excelize.GraphicOptions{AltText: "QR Tanda Tangan Kepala Sekolah"},
 		})
 	}
-	for i := 0; i < 6; i++ {
+	for i := 0; i < qrRowsExcel; i++ {
 		f.SetRowHeight(sheet, qrRow+i, 13)
 	}
-	row = qrRow + 6
+	row = qrRow + qrRowsExcel
 
 	f.SetCellValue(sheet, cellRef("A", row), signers.DinasNama)
 	f.MergeCell(sheet, cellRef("A", row), cellRef("E", row))
@@ -588,8 +594,10 @@ func buildPetaJabatanSekolahExportPDF(peta *petaJabatanSekolahOut, uk *models.Un
 
 	// ---- budget vertikal: sisakan ruang untuk REKAPITULASI + Keterangan +
 	// tanda tangan + footer, supaya tabel tidak sampai tumpang tindih
-	// (lihat rincian estimasi pada komentar fungsi ini). ----
-	const reserveBawah = 300.0
+	// (lihat rincian estimasi pada komentar fungsi ini). Nilai ini naik
+	// bersamaan dengan qrSide di bawah (delta yang sama) supaya jarak sisa
+	// sebelum footer tetap konsisten walau QR diperbesar. ----
+	const reserveBawah = 340.0
 	yMaxTable := pageH - reserveBawah
 
 	fungsional, pelaksana := splitPetaJabatanByJenis(peta.Rows)
@@ -672,7 +680,11 @@ func buildPetaJabatanSekolahExportPDF(peta *petaJabatanSekolahOut, uk *models.Un
 	signColW := (rightX - marginX - 20) / 2
 	leftSignCenterX := marginX + signColW/2
 	rightSignCenterX := rightX - signColW/2
-	qrSide := 50.0
+	// qrSide diperbesar dari 50pt -- terlalu kecil untuk discan dengan
+	// mudah (keluhan pengguna) -- jadi 90pt (~1,25"). reserveBawah di atas
+	// sudah dinaikkan dengan delta yang sama (40pt) supaya tidak menabrak
+	// footer.
+	qrSide := 90.0
 
 	p.SetFont(false, 9)
 	p.TextCentered(leftSignCenterX, y, "Mengetahui,")
@@ -685,14 +697,14 @@ func buildPetaJabatanSekolahExportPDF(peta *petaJabatanSekolahOut, uk *models.Un
 
 	dinasQuery := fmt.Sprintf("Kepala Dinas %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
 		signers.DinasNama, signers.DinasNip, signers.DinasJabatan, unitKerjaNama, dicetakStr)
-	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(dinasQuery), qrcode.Medium, 180); err == nil {
+	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(dinasQuery), qrcode.Medium, 320); err == nil {
 		if err := doc.RegisterImage("ttd_qr_peta_jabatan_export_dinas", qrPng); err == nil {
 			p.Image("ttd_qr_peta_jabatan_export_dinas", leftSignCenterX-qrSide/2, qrY, qrSide, qrSide)
 		}
 	}
 	kepsekQuery := fmt.Sprintf("Kepala Sekolah %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
 		signers.KepsekNama, signers.KepsekNip, signers.KepsekJabatan, unitKerjaNama, dicetakStr)
-	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, 180); err == nil {
+	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, 320); err == nil {
 		if err := doc.RegisterImage("ttd_qr_peta_jabatan_export_kepsek", qrPng); err == nil {
 			p.Image("ttd_qr_peta_jabatan_export_kepsek", rightSignCenterX-qrSide/2, qrY, qrSide, qrSide)
 		}
