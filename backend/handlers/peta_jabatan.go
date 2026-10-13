@@ -64,6 +64,7 @@ func RegisterPetaJabatanRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/peta-jabatan/sub-jabatan/{id}", kelola(func(w http.ResponseWriter, r *http.Request) { updateSubJabatanHandler(w, r, db) }))
 	mux.Handle("DELETE /api/peta-jabatan/sub-jabatan/{id}", kelola(func(w http.ResponseWriter, r *http.Request) { deleteSubJabatanHandler(w, r, db) }))
 
+	mux.Handle("PUT /api/peta-jabatan/jabatan/{id}/kelas-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { updateJabatanKJHandler(w, r, db) }))
 	mux.Handle("PUT /api/peta-jabatan/formasi", kelola(func(w http.ResponseWriter, r *http.Request) { setFormasiJabatanHandler(w, r, db) }))
 	mux.Handle("PUT /api/peta-jabatan/pegawai/{id}/sub-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { setPegawaiSubJabatanHandler(w, r, db) }))
 
@@ -562,6 +563,39 @@ func updateSubJabatanHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB
 		return
 	}
 	var p subJabatanUpdatePayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+		return
+	}
+	if err := db.Model(&item).Update("kelas_jabatan", p.KelasJabatan).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan kelas jabatan: "+err.Error())
+		return
+	}
+	item.KelasJabatan = p.KelasJabatan
+	utils.Success(w, "kelas jabatan (KJ) berhasil disimpan", item)
+}
+
+// jabatanKJPayload payload untuk updateJabatanKJHandler.
+type jabatanKJPayload struct {
+	KelasJabatan *int `json:"kelas_jabatan"`
+}
+
+// updateJabatanKJHandler mengubah KJ (Kelas Jabatan) langsung dari kolom "KJ"
+// pada tabel Peta Jabatan Sekolah (sebelum kolom "B", permintaan pengguna --
+// sebelumnya KJ di level Jabatan hanya bisa diisi lewat Master Data Jabatan
+// yang khusus administrator). Dibuka untuk administrator/admin/atasan sama
+// seperti aksi "kelola" lain di halaman ini. PENTING: Jabatan.KelasJabatan
+// bersifat GLOBAL (lihat komentar models.Jabatan.KelasJabatan) -- tidak ada
+// pengecekan kepemilikan sekolah di sini karena Jabatan memang tidak terikat
+// satu sekolah tertentu.
+func updateJabatanKJHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	var item models.Jabatan
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "jabatan tidak ditemukan")
+		return
+	}
+	var p jabatanKJPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
 		return

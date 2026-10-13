@@ -163,6 +163,45 @@ async function unduhPetaJabatan(jenis) {
 const expandedRows = ref({})
 
 // ============================================================
+// KJ (Kelas Jabatan) -- kolom "KJ" sebelum "B" pada tabel Peta Jabatan
+// Sekolah utama (permintaan pengguna: bisa diedit langsung di tabel,
+// bukan cuma lewat Master Data Jabatan / dialog Kelola Sub-Jabatan).
+// Jabatan: PUT /peta-jabatan/jabatan/{id}/kelas-jabatan (field GLOBAL per
+// Jabatan, lihat komentar models.Jabatan.KelasJabatan).
+// SubJabatan: reuse PUT /peta-jabatan/sub-jabatan/{id} yang sama dengan
+// dialog "Kelola Sub-Jabatan", tapi state loading terpisah (key beda
+// sumber data) supaya tidak bentrok dengan subJabatanKJSaving dialog itu.
+// ============================================================
+const jabatanKJSaving = ref({})
+async function ubahKJJabatan(row) {
+  jabatanKJSaving.value = { ...jabatanKJSaving.value, [row.id_jabatan]: true }
+  try {
+    await http.put(`/peta-jabatan/jabatan/${row.id_jabatan}/kelas-jabatan`, { kelas_jabatan: row.kj })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `KJ "${row.jabatan}" disimpan`, life: 2500 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan KJ', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    const copy = { ...jabatanKJSaving.value }
+    delete copy[row.id_jabatan]
+    jabatanKJSaving.value = copy
+  }
+}
+const subJabatanKJSavingPeta = ref({})
+async function ubahKJSubPeta(s) {
+  subJabatanKJSavingPeta.value = { ...subJabatanKJSavingPeta.value, [s.id]: true }
+  try {
+    await http.put(`/peta-jabatan/sub-jabatan/${s.id}`, { kelas_jabatan: s.kj })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `KJ "${s.nama}" disimpan`, life: 2500 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menyimpan KJ', detail: e.response?.data?.message || e.message, life: 4000 })
+  } finally {
+    const copy = { ...subJabatanKJSavingPeta.value }
+    delete copy[s.id]
+    subJabatanKJSavingPeta.value = copy
+  }
+}
+
+// ============================================================
 // dialog "Kelola Sub-Jabatan" -- tambah/hapus pecahan SubJabatan untuk SATU
 // Jabatan pada sekolah yang sedang dilihat.
 // ============================================================
@@ -979,6 +1018,22 @@ onMounted(() => {
                   </template>
                   <Column expander style="width: 3rem" />
                   <Column field="jabatan" header="Jabatan" />
+                  <Column header="KJ" style="width: 90px">
+                    <template #body="{ data }">
+                      <InputNumber
+                        v-if="bolehKelola"
+                        v-model="data.kj"
+                        placeholder="-"
+                        :min="1"
+                        :max="17"
+                        :disabled="jabatanKJSaving[data.id_jabatan]"
+                        style="width: 5.5rem"
+                        inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
+                        @update:modelValue="ubahKJJabatan(data)"
+                      />
+                      <span v-else>{{ data.kj ?? '-' }}</span>
+                    </template>
+                  </Column>
                   <Column header="B" style="width: 80px">
                     <template #body="{ data }">
                       <span class="clickable-count" title="Lihat daftar pegawai" @click="openPegawaiList(data, null)">{{ data.b }}</span>
@@ -1019,6 +1074,7 @@ onMounted(() => {
                         <thead>
                           <tr>
                             <th>Sub-Jabatan</th>
+                            <th style="width: 90px">KJ</th>
                             <th style="width: 70px">B</th>
                             <th style="width: 70px">K</th>
                             <th style="width: 80px">+/-</th>
@@ -1028,6 +1084,20 @@ onMounted(() => {
                         <tbody>
                           <tr v-for="s in data.sub_jabatan" :key="s.id">
                             <td>{{ s.nama }}</td>
+                            <td>
+                              <InputNumber
+                                v-if="bolehKelola"
+                                v-model="s.kj"
+                                placeholder="-"
+                                :min="1"
+                                :max="17"
+                                :disabled="subJabatanKJSavingPeta[s.id]"
+                                style="width: 5.5rem"
+                                inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
+                                @update:modelValue="ubahKJSubPeta(s)"
+                              />
+                              <span v-else>{{ s.kj ?? '-' }}</span>
+                            </td>
                             <td><span class="clickable-count" title="Lihat daftar pegawai" @click="openPegawaiList(data, s)">{{ s.b }}</span></td>
                             <td><span class="clickable-count" title="Lihat daftar pegawai" @click="openPegawaiList(data, s)">{{ s.k }}</span></td>
                             <td><Tag :value="signed(s.selisih)" :severity="selisihSeverity(s.selisih)" /></td>

@@ -36,9 +36,18 @@ type Jabatan struct {
 	// belum diisi administrator.
 	JenisJabatan string `json:"jenis_jabatan" gorm:"column:jenis_jabatan;size:20;not null;default:'pelaksana'"`
 	// KelasJabatan ("KJ", 1-17 ala ASN): OPSIONAL, diisi administrator lewat
-	// Master Data Jabatan -- murni ditampilkan di dokumen cetak Peta Jabatan
-	// Sekolah (kolom "KJ", lihat handlers/peta_jabatan_export.go), tidak
-	// dipakai logika apa pun di sistem ini. nil/belum diisi ditampilkan "-".
+	// Master Data Jabatan ATAU langsung dari tabel Peta Jabatan Sekolah
+	// (kolom "KJ" sebelum "B", administrator/admin/atasan -- lihat
+	// updateJabatanKJHandler di handlers/peta_jabatan.go) -- murni
+	// ditampilkan di dokumen cetak Peta Jabatan Sekolah (kolom "KJ", lihat
+	// handlers/peta_jabatan_export.go), tidak dipakai logika apa pun di
+	// sistem ini. CATATAN: field ini GLOBAL per Jabatan (bukan per sekolah),
+	// jadi mengubahnya dari tabel satu sekolah ikut berubah untuk sekolah
+	// lain yang memakai Jabatan yang sama -- wajar untuk jabatan yang
+	// kelasnya memang standar (mis. Kepala Tata Usaha), sedangkan jabatan
+	// fungsional yang kelasnya berjenjang (mis. Guru) semestinya dipecah
+	// lewat SubJabatan.KelasJabatan di bawah, bukan di sini. nil/belum diisi
+	// ditampilkan "-".
 	KelasJabatan *int `json:"kelas_jabatan" gorm:"column:kelas_jabatan"`
 }
 

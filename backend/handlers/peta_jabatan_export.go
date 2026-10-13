@@ -330,7 +330,11 @@ func buildPetaJabatanExcel(peta *petaJabatanSekolahOut, signers petaJabatanSigne
 	}
 	row += 2 // jarak sebelum blok tanda tangan
 
-	// ---- tanda tangan QR: Kepala Sekolah (kiri) & Kepala Dinas (kanan) ----
+	// ---- tanda tangan QR: Kepala Dinas (kiri, "Mengetahui,") & Kepala
+	// Sekolah (kanan, "Kolonodale, <tanggal>") -- Kepala Dinas yang
+	// "mengetahui"/mengesahkan dokumen ini sebagai atasan, Kepala Sekolah
+	// yang membuat & menerbitkan dokumennya (permintaan pengguna: posisi
+	// ditukar dari versi sebelumnya yang menaruh Kepala Sekolah di kiri).
 	dicetakStr := formatDateID(absensiNow())
 	f.SetCellValue(sheet, cellRef("A", row), "Mengetahui,")
 	f.MergeCell(sheet, cellRef("A", row), cellRef("E", row))
@@ -339,27 +343,27 @@ func buildPetaJabatanExcel(peta *petaJabatanSekolahOut, signers petaJabatanSigne
 	f.MergeCell(sheet, cellRef("G", row), cellRef("K", row))
 	f.SetCellStyle(sheet, cellRef("G", row), cellRef("K", row), signPlainStyle)
 	row++
-	f.SetCellValue(sheet, cellRef("A", row), signers.KepsekJabatan)
+	f.SetCellValue(sheet, cellRef("A", row), "Kepala Dinas Pendidikan dan Kebudayaan")
 	f.MergeCell(sheet, cellRef("A", row), cellRef("E", row))
 	f.SetCellStyle(sheet, cellRef("A", row), cellRef("E", row), signBoldStyle)
-	f.SetCellValue(sheet, cellRef("G", row), "Kepala Dinas Pendidikan dan Kebudayaan")
+	f.SetCellValue(sheet, cellRef("G", row), signers.KepsekJabatan)
 	f.MergeCell(sheet, cellRef("G", row), cellRef("K", row))
 	f.SetCellStyle(sheet, cellRef("G", row), cellRef("K", row), signBoldStyle)
 	row++
 	qrRow := row
 
-	kepsekQuery := fmt.Sprintf("Kepala Sekolah %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
-		signers.KepsekNama, signers.KepsekNip, signers.KepsekJabatan, peta.UnitKerja.Unit, dicetakStr)
-	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, 80); err == nil {
-		_ = f.AddPictureFromBytes(sheet, cellRef("C", qrRow), &excelize.Picture{
-			Extension: ".png", File: qrPng, Format: &excelize.GraphicOptions{AltText: "QR Tanda Tangan Kepala Sekolah"},
-		})
-	}
 	dinasQuery := fmt.Sprintf("Kepala Dinas %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
 		signers.DinasNama, signers.DinasNip, signers.DinasJabatan, peta.UnitKerja.Unit, dicetakStr)
 	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(dinasQuery), qrcode.Medium, 80); err == nil {
-		_ = f.AddPictureFromBytes(sheet, cellRef("I", qrRow), &excelize.Picture{
+		_ = f.AddPictureFromBytes(sheet, cellRef("C", qrRow), &excelize.Picture{
 			Extension: ".png", File: qrPng, Format: &excelize.GraphicOptions{AltText: "QR Tanda Tangan Kepala Dinas"},
+		})
+	}
+	kepsekQuery := fmt.Sprintf("Kepala Sekolah %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
+		signers.KepsekNama, signers.KepsekNip, signers.KepsekJabatan, peta.UnitKerja.Unit, dicetakStr)
+	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, 80); err == nil {
+		_ = f.AddPictureFromBytes(sheet, cellRef("I", qrRow), &excelize.Picture{
+			Extension: ".png", File: qrPng, Format: &excelize.GraphicOptions{AltText: "QR Tanda Tangan Kepala Sekolah"},
 		})
 	}
 	for i := 0; i < 6; i++ {
@@ -367,17 +371,17 @@ func buildPetaJabatanExcel(peta *petaJabatanSekolahOut, signers petaJabatanSigne
 	}
 	row = qrRow + 6
 
-	f.SetCellValue(sheet, cellRef("A", row), signers.KepsekNama)
+	f.SetCellValue(sheet, cellRef("A", row), signers.DinasNama)
 	f.MergeCell(sheet, cellRef("A", row), cellRef("E", row))
 	f.SetCellStyle(sheet, cellRef("A", row), cellRef("E", row), signBoldStyle)
-	f.SetCellValue(sheet, cellRef("G", row), signers.DinasNama)
+	f.SetCellValue(sheet, cellRef("G", row), signers.KepsekNama)
 	f.MergeCell(sheet, cellRef("G", row), cellRef("K", row))
 	f.SetCellStyle(sheet, cellRef("G", row), cellRef("K", row), signBoldStyle)
 	row++
-	f.SetCellValue(sheet, cellRef("A", row), "NIP. "+signers.KepsekNip)
+	f.SetCellValue(sheet, cellRef("A", row), "NIP. "+signers.DinasNip)
 	f.MergeCell(sheet, cellRef("A", row), cellRef("E", row))
 	f.SetCellStyle(sheet, cellRef("A", row), cellRef("E", row), signPlainStyle)
-	f.SetCellValue(sheet, cellRef("G", row), "NIP. "+signers.DinasNip)
+	f.SetCellValue(sheet, cellRef("G", row), "NIP. "+signers.KepsekNip)
 	f.MergeCell(sheet, cellRef("G", row), cellRef("K", row))
 	f.SetCellStyle(sheet, cellRef("G", row), cellRef("K", row), signPlainStyle)
 
@@ -530,7 +534,9 @@ func buildPetaJabatanSekolahExportPDF(peta *petaJabatanSekolahOut, uk *models.Un
 	dicetakStr := formatDateID(absensiNow())
 
 	// ---- kop sekolah + judul ----
-	y := drawLetterheadUnitKerjaKustom(doc, p, marginX, rightX, unitKerjaNama, uk) + 10
+	// jarak garis kop ke judul "PETA JABATAN SEKOLAH" dilebarkan (dulu 10pt
+	// -- mepet dengan garis, keluhan pengguna).
+	y := drawLetterheadUnitKerjaKustom(doc, p, marginX, rightX, unitKerjaNama, uk) + 20
 	p.SetFont(true, 14)
 	p.TextCentered(centerX, y, "PETA JABATAN SEKOLAH")
 	y += 16
@@ -658,7 +664,11 @@ func buildPetaJabatanSekolahExportPDF(peta *petaJabatanSekolahOut, uk *models.Un
 	}
 	y += 12
 
-	// ---- tanda tangan QR: Kepala Sekolah (kiri) & Kepala Dinas (kanan) ----
+	// ---- tanda tangan QR: Kepala Dinas (kiri, "Mengetahui,") & Kepala
+	// Sekolah (kanan, "Kolonodale, <tanggal>") -- Kepala Dinas yang
+	// "mengetahui"/mengesahkan dokumen ini sebagai atasan, Kepala Sekolah
+	// yang membuat & menerbitkan dokumennya (permintaan pengguna: posisi
+	// ditukar dari versi sebelumnya yang menaruh Kepala Sekolah di kiri).
 	signColW := (rightX - marginX - 20) / 2
 	leftSignCenterX := marginX + signColW/2
 	rightSignCenterX := rightX - signColW/2
@@ -669,30 +679,30 @@ func buildPetaJabatanSekolahExportPDF(peta *petaJabatanSekolahOut, uk *models.Un
 	p.TextCentered(rightSignCenterX, y, "Kolonodale, "+dicetakStr)
 	y += 13
 	p.SetFont(true, 9)
-	p.TextCentered(leftSignCenterX, y, signers.KepsekJabatan)
-	p.TextCentered(rightSignCenterX, y, "Kepala Dinas Pendidikan dan Kebudayaan")
+	p.TextCentered(leftSignCenterX, y, "Kepala Dinas Pendidikan dan Kebudayaan")
+	p.TextCentered(rightSignCenterX, y, signers.KepsekJabatan)
 	qrY := y + 6
 
-	kepsekQuery := fmt.Sprintf("Kepala Sekolah %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
-		signers.KepsekNama, signers.KepsekNip, signers.KepsekJabatan, unitKerjaNama, dicetakStr)
-	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, 180); err == nil {
-		if err := doc.RegisterImage("ttd_qr_peta_jabatan_export_kepsek", qrPng); err == nil {
-			p.Image("ttd_qr_peta_jabatan_export_kepsek", leftSignCenterX-qrSide/2, qrY, qrSide, qrSide)
-		}
-	}
 	dinasQuery := fmt.Sprintf("Kepala Dinas %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
 		signers.DinasNama, signers.DinasNip, signers.DinasJabatan, unitKerjaNama, dicetakStr)
 	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(dinasQuery), qrcode.Medium, 180); err == nil {
 		if err := doc.RegisterImage("ttd_qr_peta_jabatan_export_dinas", qrPng); err == nil {
-			p.Image("ttd_qr_peta_jabatan_export_dinas", rightSignCenterX-qrSide/2, qrY, qrSide, qrSide)
+			p.Image("ttd_qr_peta_jabatan_export_dinas", leftSignCenterX-qrSide/2, qrY, qrSide, qrSide)
+		}
+	}
+	kepsekQuery := fmt.Sprintf("Kepala Sekolah %s NIP %s Jabatan %s -- Peta Jabatan Sekolah %s dicetak %s",
+		signers.KepsekNama, signers.KepsekNip, signers.KepsekJabatan, unitKerjaNama, dicetakStr)
+	if qrPng, err := qrcode.Encode("https://www.google.com/search?q="+neturl.QueryEscape(kepsekQuery), qrcode.Medium, 180); err == nil {
+		if err := doc.RegisterImage("ttd_qr_peta_jabatan_export_kepsek", qrPng); err == nil {
+			p.Image("ttd_qr_peta_jabatan_export_kepsek", rightSignCenterX-qrSide/2, qrY, qrSide, qrSide)
 		}
 	}
 	p.SetFont(true, 9)
-	p.TextCentered(leftSignCenterX, qrY+qrSide+13, signers.KepsekNama)
-	p.TextCentered(rightSignCenterX, qrY+qrSide+13, signers.DinasNama)
+	p.TextCentered(leftSignCenterX, qrY+qrSide+13, signers.DinasNama)
+	p.TextCentered(rightSignCenterX, qrY+qrSide+13, signers.KepsekNama)
 	p.SetFont(false, 8.5)
-	p.TextCentered(leftSignCenterX, qrY+qrSide+25, "NIP. "+signers.KepsekNip)
-	p.TextCentered(rightSignCenterX, qrY+qrSide+25, "NIP. "+signers.DinasNip)
+	p.TextCentered(leftSignCenterX, qrY+qrSide+25, "NIP. "+signers.DinasNip)
+	p.TextCentered(rightSignCenterX, qrY+qrSide+25, "NIP. "+signers.KepsekNip)
 
 	// ---- footer ----
 	p.SetFont(false, 7.5)
@@ -719,7 +729,7 @@ func drawPetaJabatanPDFColumn(p *utils.PDFPage, colX, yTop, colW float64, rows [
 		kW      = 22.0
 		selW    = 30.0
 		rowH    = 13.0
-		headerH = 15.0
+		headerH = 18.0
 	)
 	xKJ := colX + labelW + kjW/2
 	xB := colX + labelW + kjW + bW/2
@@ -733,9 +743,11 @@ func drawPetaJabatanPDFColumn(p *utils.PDFPage, colX, yTop, colW float64, rows [
 	p.TextCentered(xB, y, "B")
 	p.TextCentered(xK, y, "K")
 	p.TextCentered(xSel, y, "+/-")
-	y += 3
+	// jarak teks header ke garis (dulu cuma 3pt -- mepet, keluhan pengguna)
+	// dan garis ke baris data pertama dibuat lebih lega.
+	y += 8
 	p.Line(colX, y, colX+colW, y)
-	y += headerH - 3
+	y += headerH - 8
 
 	// totalB/totalK dihitung dari SELURUH rows (sama seperti sumBK yang
 	// dipakai REKAPITULASI) supaya baris "Jumlah Kebutuhan .." di bawah tabel
