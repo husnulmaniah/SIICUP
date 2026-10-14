@@ -128,6 +128,49 @@ function namaBulanTahun(statistik) {
   return `${NAMA_BULAN[statistik.bulan] || ''} ${statistik.tahun}`
 }
 
+// ------------------------------------------------------------
+// Dashboard administrator/admin -- ringkasan SEMUA menu penting
+// (permintaan pengguna: "buat seinformatif mungkin"). Setiap kartu domain
+// di bawah (Data Pegawai, Pengajuan Cuti, Rekap Absensi Hari Ini, Pengajuan
+// Pensiun, Peta Jabatan, KP4, Menu Lainnya) punya judul yang bisa diklik
+// untuk langsung membuka menu terkait -- lihat ringkasanLainnyaItems untuk
+// daftar menu "lainnya" yang belum punya kartu statistik sendiri.
+// ------------------------------------------------------------
+function pjSelisihSeverity(selisih) {
+  if (selisih > 0) return 'success'
+  if (selisih < 0) return 'danger'
+  return 'info'
+}
+function pjSelisihText(selisih) {
+  if (selisih > 0) return `+${selisih} (kelebihan)`
+  if (selisih < 0) return `${selisih} (kekurangan)`
+  return '0 (pas)'
+}
+
+// cincin persentase generik (dipakai kartu KP4 di bawah) -- pola warna SAMA
+// dengan kelengkapanRingClass di atas (hijau/kuning/merah).
+function ringClass(persen) {
+  if (persen >= 100) return 'kelengkapan-ring-hijau'
+  if (persen >= 60) return 'kelengkapan-ring-kuning'
+  return 'kelengkapan-ring-merah'
+}
+
+// ringkasanLainnyaItems: daftar baris kartu "Menu Lainnya" -- gabungan
+// beberapa menu yang masing-masing SUDAH punya alur persetujuan sendiri
+// tapi belum punya kartu statistik besar sendiri di dashboard (data
+// mentahnya dari ringkasan_lainnya, lihat handlers/dashboard.go).
+const ringkasanLainnyaItems = computed(() => {
+  const l = data.value?.ringkasan_lainnya
+  if (!l) return []
+  return [
+    { label: 'Kenaikan Pangkat Menunggu Admin', count: l.kenaikan_pangkat_pending, icon: 'pi-arrow-up', aksi: '/peta-jabatan' },
+    { label: 'Perubahan Data Menunggu Persetujuan', count: l.perubahan_data_pending, icon: 'pi-user-edit', aksi: '/perubahan-data' },
+    { label: 'Berita Acara Menunggu Admin', count: l.berita_acara_pending, icon: 'pi-file-edit', aksi: '/berita-acara' },
+    { label: 'Surat Kolektif Menunggu Verifikasi', count: l.surat_kolektif_pending, icon: 'pi-file-check', aksi: '/rekap-absen' },
+    { label: 'Permintaan SK TPP Menunggu Pegawai', count: l.permintaan_sk_pending, icon: 'pi-upload', aksi: '/penerima-tpp' },
+  ]
+})
+
 // warna cincin persentase pada kartu "Kelengkapan Data Pegawai" -- hijau
 // kalau sudah lengkap/mendekati, kuning di tengah, merah kalau masih jauh.
 const kelengkapanRingClass = computed(() => {
@@ -161,24 +204,186 @@ onMounted(() => {
     <template v-else-if="data">
       <!-- administrator / admin -->
       <template v-if="['administrator', 'admin'].includes(data.role)">
-        <div class="stat-grid">
-          <div class="stat-card tile-teal">
-            <div class="stat-icon-badge"><i class="pi pi-users"></i></div>
-            <div class="stat-body"><div class="stat-value">{{ data.total_pegawai }}</div><div class="stat-label">Total Pegawai</div></div>
+        <div class="dashboard-admin-grid">
+          <!-- Data Pegawai -->
+          <div class="card domain-card">
+            <div class="domain-card-title" @click="router.push('/master/pegawai')">
+              <i class="pi pi-users"></i><span>Data Pegawai</span><i class="pi pi-arrow-up-right domain-card-link-icon"></i>
+            </div>
+            <div class="stat-grid stat-grid-compact">
+              <div class="stat-card tile-teal">
+                <div class="stat-icon-badge"><i class="pi pi-users"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pegawai?.total ?? data.total_pegawai }}</div><div class="stat-label">Total Pegawai</div></div>
+              </div>
+              <div class="stat-card tile-green">
+                <div class="stat-icon-badge"><i class="pi pi-check-circle"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pegawai?.aktif }}</div><div class="stat-label">Aktif</div></div>
+              </div>
+              <div class="stat-card tile-sky">
+                <div class="stat-icon-badge"><i class="pi pi-building-columns"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pegawai?.dinas }}</div><div class="stat-label">Dinas/Kantor</div></div>
+              </div>
+              <div class="stat-card tile-purple">
+                <div class="stat-icon-badge"><i class="pi pi-graduation-cap"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pegawai?.sekolah }}</div><div class="stat-label">Sekolah</div></div>
+              </div>
+              <div class="stat-card tile-slate">
+                <div class="stat-icon-badge"><i class="pi pi-user-minus"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pegawai?.pensiun }}</div><div class="stat-label">Pensiun</div></div>
+              </div>
+              <div class="stat-card tile-orange">
+                <div class="stat-icon-badge"><i class="pi pi-arrow-right-arrow-left"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pegawai?.mutasi }}</div><div class="stat-label">Mutasi</div></div>
+              </div>
+            </div>
           </div>
-          <div class="stat-card tile-amber">
-            <div class="stat-icon-badge"><i class="pi pi-clock"></i></div>
-            <div class="stat-body"><div class="stat-value">{{ data.total_pending }}</div><div class="stat-label">Pengajuan Menunggu</div></div>
+
+          <!-- Pengajuan Cuti -->
+          <div class="card domain-card">
+            <div class="domain-card-title" @click="router.push('/pengajuan-cuti')">
+              <i class="pi pi-calendar"></i><span>Pengajuan Cuti</span><i class="pi pi-arrow-up-right domain-card-link-icon"></i>
+            </div>
+            <div class="stat-grid stat-grid-compact">
+              <div class="stat-card tile-amber">
+                <div class="stat-icon-badge"><i class="pi pi-clock"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_cuti?.pending ?? data.total_pending }}</div><div class="stat-label">Menunggu</div></div>
+              </div>
+              <div class="stat-card tile-green">
+                <div class="stat-icon-badge"><i class="pi pi-check-circle"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_cuti?.disetujui ?? data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
+              </div>
+              <div class="stat-card tile-red">
+                <div class="stat-icon-badge"><i class="pi pi-times-circle"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_cuti?.ditolak ?? data.total_ditolak }}</div><div class="stat-label">Ditolak</div></div>
+              </div>
+              <div class="stat-card tile-sky">
+                <div class="stat-icon-badge"><i class="pi pi-calendar-plus"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_cuti?.diajukan_bulan_ini }}</div><div class="stat-label">Diajukan Bulan Ini</div></div>
+              </div>
+            </div>
           </div>
-          <div class="stat-card tile-green">
-            <div class="stat-icon-badge"><i class="pi pi-check-circle"></i></div>
-            <div class="stat-body"><div class="stat-value">{{ data.total_disetujui }}</div><div class="stat-label">Disetujui</div></div>
+
+          <!-- Rekap Absensi Hari Ini -->
+          <div class="card domain-card">
+            <div class="domain-card-title" @click="router.push('/rekap-absen')">
+              <i class="pi pi-id-card"></i><span>Rekap Absensi Hari Ini</span><i class="pi pi-arrow-up-right domain-card-link-icon"></i>
+            </div>
+            <p v-if="data.rekap_absensi_hari_ini?.wajib_hadir === 0" class="page-subtitle" style="margin-top: -0.4rem">
+              Hari ini libur untuk seluruh pegawai (akhir pekan/tanggal merah).
+            </p>
+            <div class="stat-grid stat-grid-compact">
+              <div class="stat-card tile-slate">
+                <div class="stat-icon-badge"><i class="pi pi-users"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.rekap_absensi_hari_ini?.wajib_hadir }}</div><div class="stat-label">Wajib Hadir</div></div>
+              </div>
+              <div class="stat-card tile-green">
+                <div class="stat-icon-badge"><i class="pi pi-check"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.rekap_absensi_hari_ini?.hadir }}</div><div class="stat-label">Hadir</div></div>
+              </div>
+              <div class="stat-card tile-orange">
+                <div class="stat-icon-badge"><i class="pi pi-stopwatch"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.rekap_absensi_hari_ini?.terlambat }}</div><div class="stat-label">Terlambat</div></div>
+              </div>
+              <div class="stat-card tile-amber">
+                <div class="stat-icon-badge"><i class="pi pi-heart"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.rekap_absensi_hari_ini?.sakit }}</div><div class="stat-label">Sakit</div></div>
+              </div>
+              <div class="stat-card tile-sky">
+                <div class="stat-icon-badge"><i class="pi pi-info-circle"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.rekap_absensi_hari_ini?.izin }}</div><div class="stat-label">Izin</div></div>
+              </div>
+              <div class="stat-card tile-purple">
+                <div class="stat-icon-badge"><i class="pi pi-calendar"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.rekap_absensi_hari_ini?.cuti }}</div><div class="stat-label">Cuti</div></div>
+              </div>
+              <div class="stat-card tile-red">
+                <div class="stat-icon-badge"><i class="pi pi-ban"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.rekap_absensi_hari_ini?.belum_absen }}</div><div class="stat-label">Belum Absen</div></div>
+              </div>
+            </div>
           </div>
-          <div class="stat-card tile-red">
-            <div class="stat-icon-badge"><i class="pi pi-times-circle"></i></div>
-            <div class="stat-body"><div class="stat-value">{{ data.total_ditolak }}</div><div class="stat-label">Ditolak</div></div>
+
+          <!-- Pengajuan Pensiun -->
+          <div class="card domain-card">
+            <div class="domain-card-title" @click="router.push('/pengajuan-pensiun')">
+              <i class="pi pi-user-minus"></i><span>Pengajuan Pensiun</span><i class="pi pi-arrow-up-right domain-card-link-icon"></i>
+            </div>
+            <div class="stat-grid stat-grid-compact">
+              <div class="stat-card tile-amber">
+                <div class="stat-icon-badge"><i class="pi pi-clock"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pensiun?.pending }}</div><div class="stat-label">Menunggu</div></div>
+              </div>
+              <div class="stat-card tile-green">
+                <div class="stat-icon-badge"><i class="pi pi-check-circle"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pensiun?.disetujui_tahun_ini }}</div><div class="stat-label">Disetujui Tahun Ini</div></div>
+              </div>
+              <div class="stat-card tile-red">
+                <div class="stat-icon-badge"><i class="pi pi-times-circle"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pensiun?.ditolak }}</div><div class="stat-label">Ditolak</div></div>
+              </div>
+              <div class="stat-card tile-rose">
+                <div class="stat-icon-badge"><i class="pi pi-exclamation-triangle"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_pensiun?.akan_pensiun_1_tahun }}</div><div class="stat-label">Akan Pensiun &lt; 1 Tahun</div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Peta Jabatan -->
+          <div class="card domain-card">
+            <div class="domain-card-title" @click="router.push('/peta-jabatan')">
+              <i class="pi pi-sitemap"></i><span>Peta Jabatan</span><i class="pi pi-arrow-up-right domain-card-link-icon"></i>
+            </div>
+            <p class="page-subtitle" style="margin-top: -0.4rem">Ringkasan seluruh Sekolah &amp; Dinas/Kantor</p>
+            <div class="stat-grid stat-grid-compact">
+              <div class="stat-card tile-sky">
+                <div class="stat-icon-badge"><i class="pi pi-briefcase"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_peta_jabatan?.total_kebutuhan }}</div><div class="stat-label">Total Kebutuhan</div></div>
+              </div>
+              <div class="stat-card tile-teal">
+                <div class="stat-icon-badge"><i class="pi pi-users"></i></div>
+                <div class="stat-body"><div class="stat-value">{{ data.ringkasan_peta_jabatan?.total_terisi }}</div><div class="stat-label">Total Terisi</div></div>
+              </div>
+              <div class="stat-card" :class="(data.ringkasan_peta_jabatan?.selisih ?? 0) < 0 ? 'tile-red' : 'tile-green'">
+                <div class="stat-icon-badge"><i class="pi pi-equals"></i></div>
+                <div class="stat-body">
+                  <div class="stat-value" style="font-size: 1.2rem">{{ pjSelisihText(data.ringkasan_peta_jabatan?.selisih ?? 0) }}</div>
+                  <div class="stat-label">Selisih Kebutuhan vs Terisi</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KP4 -->
+          <div class="card domain-card">
+            <div class="domain-card-title" @click="router.push('/kp4-admin')">
+              <i class="pi pi-id-card"></i><span>KP4</span><i class="pi pi-arrow-up-right domain-card-link-icon"></i>
+            </div>
+            <div style="display: flex; align-items: center; gap: 1rem; margin-top: 0.5rem">
+              <div class="kelengkapan-ring" :class="ringClass(data.ringkasan_kp4?.persentase ?? 0)">{{ data.ringkasan_kp4?.persentase ?? 0 }}%</div>
+              <div style="flex: 1; min-width: 0">
+                <div><strong>{{ data.ringkasan_kp4?.sudah_isi }}</strong> pegawai sudah mengisi KP4</div>
+                <div class="page-subtitle" style="margin: 0.15rem 0 0 0"><strong>{{ data.ringkasan_kp4?.belum_isi }}</strong> pegawai belum mengisi KP4</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Menu Lainnya -->
+          <div class="card domain-card">
+            <div class="domain-card-title" style="cursor: default">
+              <i class="pi pi-th-large"></i><span>Menu Lainnya Menunggu Tindakan</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem">
+              <div v-for="(item, idx) in ringkasanLainnyaItems" :key="idx" class="kelengkapan-kategori-row" style="cursor: pointer" @click="router.push(item.aksi)">
+                <div style="display: flex; align-items: center; gap: 0.6rem; min-width: 0">
+                  <i :class="`pi ${item.icon}`" style="color: var(--p-text-muted-color)"></i>
+                  <strong>{{ item.label }}</strong>
+                </div>
+                <Tag :value="String(item.count)" :severity="item.count > 0 ? 'warn' : 'secondary'" />
+              </div>
+            </div>
           </div>
         </div>
+
         <div class="card">
           <h3 style="margin-top: 0">Pengajuan Cuti Terbaru</h3>
           <div class="responsive-table-wrap">
@@ -566,6 +771,71 @@ onMounted(() => {
   --tile-bg: #f8fafc;
   --tile-accent: #475569;
   --tile-icon-bg: rgba(71, 85, 105, 0.12);
+}
+.tile-rose {
+  --tile-bg: #fff1f2;
+  --tile-accent: #be123c;
+  --tile-icon-bg: rgba(190, 18, 60, 0.12);
+}
+
+/* ============================================================
+   Dashboard administrator/admin -- kartu per MENU (Data Pegawai,
+   Pengajuan Cuti, Rekap Absensi Hari Ini, Pengajuan Pensiun, Peta Jabatan,
+   KP4, Menu Lainnya), permintaan pengguna: "dashboard menampilkan statistik
+   dari semua menu penting ... buat seinformatif mungkin". Dua kolom di
+   layar lebar, satu kolom di HP (auto-fit) -- setiap kartu "domain-card"
+   punya judul yang bisa diklik untuk membuka menu terkait langsung dari
+   dashboard, dan isi stat-grid-compact-nya sendiri (ukuran lebih kecil dari
+   stat-grid biasa supaya banyak kartu domain tetap muat tanpa membuat
+   halaman kepanjangan).
+   ============================================================ */
+.dashboard-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  align-items: start;
+}
+
+.domain-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  color: #0f172a;
+}
+
+.domain-card-title:hover {
+  color: var(--p-primary-color, #0d9488);
+}
+
+.domain-card-link-icon {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  margin-left: auto;
+}
+
+.stat-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0;
+}
+.stat-grid-compact .stat-card {
+  padding: 0.75rem 0.85rem;
+  gap: 0.6rem;
+}
+.stat-grid-compact .stat-icon-badge {
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  font-size: 0.95rem;
+  border-radius: 10px;
+}
+.stat-grid-compact .stat-value {
+  font-size: 1.35rem;
 }
 
 .stat-grid-absensi {

@@ -33,6 +33,15 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		var recent []models.PengajuanCuti
 		db.Preload("Pegawai", func(tx *gorm.DB) *gorm.DB { return tx.Omit(dokumenFileFields...) }).Preload("JenisCuti").Order("created_at desc").Limit(8).Find(&recent)
 
+		// ringkasanPegawai/rekapAbsensiHariIni/ringkasanPensiun/
+		// ringkasanPetaJabatan/ringkasanKp4/ringkasanLainnya: permintaan
+		// pengguna -- dashboard administrator/admin menampilkan statistik
+		// dari SEMUA menu penting (Data Pegawai, Pengajuan Cuti, Rekap
+		// Absensi, Pengajuan Pensiun, Peta Jabatan, KP4, dan menu lain),
+		// bukan cuma Pengajuan Cuti seperti sebelumnya. Lihat masing-masing
+		// fungsi di bawah untuk detail perhitungannya.
+		ringkasanPegawai, rekapAbsensiHariIni := ringkasanPegawaiDanAbsensiHariIniAdmin(db)
+
 		utils.Success(w, "ok", map[string]interface{}{
 			"role":              claims.RoleName,
 			"total_pegawai":     totalPegawai,
@@ -40,6 +49,14 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			"total_disetujui":   totalDisetujui,
 			"total_ditolak":     totalDitolak,
 			"pengajuan_terbaru": recent,
+
+			"ringkasan_pegawai":      ringkasanPegawai,
+			"ringkasan_cuti":         ringkasanCutiAdmin(db, totalPending, totalDisetujui, totalDitolak, currentYear),
+			"rekap_absensi_hari_ini": rekapAbsensiHariIni,
+			"ringkasan_pensiun":      ringkasanPensiunAdmin(db, currentYear),
+			"ringkasan_peta_jabatan": ringkasanPetaJabatanAdmin(db),
+			"ringkasan_kp4":          ringkasanKp4Admin(db),
+			"ringkasan_lainnya":      ringkasanLainnyaAdmin(db),
 		})
 
 	case "atasan":
@@ -373,4 +390,281 @@ func hitungKelengkapanDashboard(db *gorm.DB, idPegawai uint) kelengkapanDashboar
 		Lengkap:    missing == 0,
 		Kategori:   kategori,
 	}
+}
+
+// ============================================================
+// Dashboard administrator/admin -- ringkasan SEMUA menu penting (permintaan
+// pengguna: "dashboard menampilkan statistik dari semua menu penting seperti
+// data pegawai, pengajuan cuti, rekapan absensi, pengajuan pensiun, peta
+// jabatan, kp4 dan menu penting lainnya, buat seinformatif mungkin").
+// Masing-masing fungsi di bawah SENGAJA berdiri sendiri (bukan satu query
+// raksasa) supaya mudah ditelusuri/diubah per menu, mengikuti gaya file ini
+// -- hanya ringkasanPegawaiDanAbsensiHariIniAdmin yang menggabungkan DUA
+// ringkasan sekaligus (Data Pegawai & Rekap Absensi Hari Ini) karena
+// keduanya butuh baris Pegawai aktif yang SAMA, supaya tidak query dua kali.
+// ============================================================
+
+// ringkasanPegawaiAdminOut adalah kartu "Data Pegawai" pada dashboard.
+type ringkasanPegawaiAdminOut struct {
+	Total   int64 `json:"total"`
+	Aktif   int64 `json:"aktif"`
+	Sekolah int64 `json:"sekolah"`
+	Dinas   int64 `json:"dinas"`
+	Pensiun int64 `json:"pensiun"`
+	Mutasi  int64 `json:"mutasi"`
+}
+
+// rekapAbsensiHariIniAdminOut adalah kartu "Rekap Absensi Hari Ini" pada
+// dashboard -- ringkasan kehadiran SELURUH pegawai aktif (dinas & sekolah
+// sekaligus, masing-masing dengan pola hari kerjanya sendiri, lihat
+// sixDayWeekForPegawai) untuk HARI INI saja, bukan satu bulan penuh seperti
+// statistikAbsensiBulanIni (itu punya pegawai, ini punya administrator).
+// WajibHadir bisa 0 kalau hari ini libur untuk SEMUA pegawai (Minggu, atau
+// tanggal merah) -- itulah sebabnya tidak ada flag "hari_libur" terpisah,
+// kartu di frontend cukup menampilkan apa adanya kalau wajib_hadir == 0.
+type rekapAbsensiHariIniAdminOut struct {
+	Tanggal    string `json:"tanggal"`
+	WajibHadir int    `json:"wajib_hadir"`
+	Hadir      int    `json:"hadir"`
+	Terlambat  int    `json:"terlambat"`
+	Sakit      int    `json:"sakit"`
+	Izin       int    `json:"izin"`
+	Cuti       int    `json:"cuti"`
+	BelumAbsen int    `json:"belum_absen"`
+}
+
+// ringkasanPegawaiDanAbsensiHariIniAdmin menghitung kartu "Data Pegawai" &
+// "Rekap Absensi Hari Ini" SEKALIGUS dari satu daftar pegawai aktif yang
+// sama (scopePegawaiAktifDinas) -- pegawai Pensiun/Mutasi tetap dihitung
+// terpisah di Total vs Aktif, tapi TIDAK ikut Rekap Absensi Hari Ini (sudah
+// tidak lagi bertugas).
+func ringkasanPegawaiDanAbsensiHariIniAdmin(db *gorm.DB) (ringkasanPegawaiAdminOut, rekapAbsensiHariIniAdminOut) {
+	var pegawai ringkasanPegawaiAdminOut
+	db.Model(&models.Pegawai{}).Count(&pegawai.Total)
+	// ILIKE tanpa wildcard (persis seperti statusNonaktifIDs di
+	// handlers/pegawai.go) -- pencocokan EXACT nama status, cuma case-
+	// insensitive, bukan substring, supaya status lain yang kebetulan
+	// mengandung kata "pensiun"/"mutasi" (kalau ada) tidak ikut terhitung.
+	var idsPensiun, idsMutasi []uint
+	db.Model(&models.Status{}).Where("status ILIKE ?", "pensiun").Pluck("id", &idsPensiun)
+	db.Model(&models.Status{}).Where("status ILIKE ?", "mutasi").Pluck("id", &idsMutasi)
+	if len(idsPensiun) > 0 {
+		db.Model(&models.Pegawai{}).Where("id_status IN (?)", idsPensiun).Count(&pegawai.Pensiun)
+	}
+	if len(idsMutasi) > 0 {
+		db.Model(&models.Pegawai{}).Where("id_status IN (?)", idsMutasi).Count(&pegawai.Mutasi)
+	}
+
+	var aktifRows []models.Pegawai
+	scopePegawaiAktifDinas(db, db.Preload("UnitKerja", func(tx *gorm.DB) *gorm.DB { return tx.Select("id", "tempat_kerja") }).
+		Select("id", "id_unit_kerja", "tempat_tgs", "id_status")).Find(&aktifRows)
+	pegawai.Aktif = int64(len(aktifRows))
+
+	today := absensiToday()
+	holidaySet := holidaySetInRange(db, today, today)
+	wajibSekolahHariIni := len(workingDaysWithHolidaySet(today, today, true, holidaySet)) > 0
+	wajibDinasHariIni := len(workingDaysWithHolidaySet(today, today, false, holidaySet)) > 0
+
+	allIDs := make([]uint, 0, len(aktifRows))
+	wajibByID := map[uint]bool{}
+	for _, p := range aktifRows {
+		allIDs = append(allIDs, p.ID)
+		sekolah := isSekolahPegawai(p)
+		if sekolah {
+			pegawai.Sekolah++
+		} else {
+			pegawai.Dinas++
+		}
+		if sekolah && wajibSekolahHariIni {
+			wajibByID[p.ID] = true
+		} else if !sekolah && wajibDinasHariIni {
+			wajibByID[p.ID] = true
+		}
+	}
+
+	rekap := rekapAbsensiHariIniAdminOut{Tanggal: today.Format("2006-01-02"), WajibHadir: len(wajibByID)}
+	if len(allIDs) == 0 || rekap.WajibHadir == 0 {
+		return pegawai, rekap
+	}
+
+	var absensiRows []models.Absensi
+	db.Where("id_pegawai IN (?) AND tanggal = ?", allIDs, today).Find(&absensiRows)
+	absenByID := map[uint]models.Absensi{}
+	for _, a := range absensiRows {
+		absenByID[a.IDPegawai] = a
+	}
+
+	var dokumenRows []models.AbsensiDokumen
+	db.Omit("file").Where("id_pegawai IN (?) AND tanggal = ?", allIDs, today).Find(&dokumenRows)
+	jenisLookup := jenisSuratLookup(db)
+	dokumenByID := map[uint]models.AbsensiDokumen{}
+	for _, d := range dokumenRows {
+		dokumenByID[d.IDPegawai] = d
+	}
+
+	var cutiRows []models.PengajuanCuti
+	db.Where("id_pegawai IN (?) AND status = ? AND tgl_mulai <= ? AND tgl_selesai >= ?", allIDs, models.StatusDisetuju, today, today).Find(&cutiRows)
+	cutiByID := map[uint]bool{}
+	for _, c := range cutiRows {
+		cutiByID[c.IDPegawai] = true
+	}
+
+	for id := range wajibByID {
+		if a, ada := absenByID[id]; ada && a.JamMasuk != nil {
+			rekap.Hadir++
+			if a.TerlambatMenit > 0 {
+				rekap.Terlambat++
+			}
+			continue
+		}
+		if dok, ada := dokumenByID[id]; ada {
+			switch kodeUntukJenis(jenisLookup, dok.Jenis) {
+			case "S":
+				rekap.Sakit++
+			case "I":
+				rekap.Izin++
+			}
+			continue
+		}
+		if cutiByID[id] {
+			rekap.Cuti++
+			continue
+		}
+		rekap.BelumAbsen++
+	}
+	return pegawai, rekap
+}
+
+// ringkasanCutiAdminOut adalah kartu "Pengajuan Cuti" pada dashboard --
+// Pending/Disetujui/Ditolak dihitung SEKALI di dashboardHandler (dipakai
+// juga oleh field total_pending/total_disetujui/total_ditolak lama di level
+// atas supaya tidak berubah/pecah kompatibilitas), DiajukanBulanIni dihitung
+// khusus di sini.
+type ringkasanCutiAdminOut struct {
+	Pending          int64 `json:"pending"`
+	Disetujui        int64 `json:"disetujui"`
+	Ditolak          int64 `json:"ditolak"`
+	DiajukanBulanIni int64 `json:"diajukan_bulan_ini"`
+}
+
+func ringkasanCutiAdmin(db *gorm.DB, pending, disetujui, ditolak int64, tahun int) ringkasanCutiAdminOut {
+	out := ringkasanCutiAdminOut{Pending: pending, Disetujui: disetujui, Ditolak: ditolak}
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	db.Model(&models.PengajuanCuti{}).Where("created_at >= ?", start).Count(&out.DiajukanBulanIni)
+	return out
+}
+
+// ringkasanPensiunAdminOut adalah kartu "Pengajuan Pensiun" pada dashboard.
+// AkanPensiun1Tahun: PERINGATAN DINI -- pegawai aktif yang akan mencapai
+// usia pensiun standar (usiaPensiunPegawai, berbeda Pelaksana/Struktural vs
+// Fungsional) dalam 1 tahun ke depan ATAU SUDAH lewat tapi belum diajukan
+// pensiunnya -- supaya administrator bisa menyiapkan berkasnya lebih awal,
+// bukan cuma menunggu pegawai/atasan mengajukan sendiri.
+type ringkasanPensiunAdminOut struct {
+	Pending           int64 `json:"pending"`
+	DisetujuiTahunIni int64 `json:"disetujui_tahun_ini"`
+	Ditolak           int64 `json:"ditolak"`
+	AkanPensiun1Tahun int64 `json:"akan_pensiun_1_tahun"`
+}
+
+func ringkasanPensiunAdmin(db *gorm.DB, tahun int) ringkasanPensiunAdminOut {
+	var out ringkasanPensiunAdminOut
+	db.Model(&models.PengajuanPensiun{}).Where("status = ?", models.StatusPending).Count(&out.Pending)
+	db.Model(&models.PengajuanPensiun{}).
+		Where("status = ? AND EXTRACT(YEAR FROM tgl_keputusan) = ?", models.StatusDisetuju, tahun).
+		Count(&out.DisetujuiTahunIni)
+	db.Model(&models.PengajuanPensiun{}).Where("status = ?", models.StatusDitolak).Count(&out.Ditolak)
+
+	pengaturan, err := getPengaturanPensiunRow(db)
+	if err != nil {
+		return out
+	}
+	var pegawaiRows []models.Pegawai
+	scopePegawaiAktifDinas(db, db.Preload("Jabatan").Select("id", "id_jabatan", "tgl_lahir").Where("tgl_lahir IS NOT NULL")).Find(&pegawaiRows)
+	now := time.Now()
+	batas := now.AddDate(1, 0, 0)
+	for _, p := range pegawaiRows {
+		if p.TglLahir == nil {
+			continue
+		}
+		usia := usiaPensiunPegawai(p, pengaturan)
+		tglPensiun := p.TglLahir.AddDate(usia, 0, 0)
+		if !tglPensiun.After(batas) {
+			out.AkanPensiun1Tahun++
+		}
+	}
+	return out
+}
+
+// ringkasanPetaJabatanAdminOut adalah kartu "Peta Jabatan" pada dashboard --
+// ringkasan GLOBAL (seluruh Sekolah + Dinas sekaligus) dari Kebutuhan (K,
+// SUM seluruh baris FormasiJabatan) vs Terisi (B, jumlah pegawai aktif yang
+// sudah punya Jabatan & Unit Kerja) -- SENGAJA dihitung lewat dua query
+// agregat langsung (bukan memanggil hitungPetaJabatanSekolah per unit kerja
+// satu-satu, yang bisa jadi puluhan/ratusan query kalau sekolahnya banyak)
+// supaya kartu dashboard ini tetap ringan tanpa N+1 query.
+type ringkasanPetaJabatanAdminOut struct {
+	TotalKebutuhan int64 `json:"total_kebutuhan"`
+	TotalTerisi    int64 `json:"total_terisi"`
+	Selisih        int64 `json:"selisih"`
+}
+
+func ringkasanPetaJabatanAdmin(db *gorm.DB) ringkasanPetaJabatanAdminOut {
+	var out ringkasanPetaJabatanAdminOut
+	db.Model(&models.FormasiJabatan{}).Select("COALESCE(SUM(kebutuhan), 0)").Row().Scan(&out.TotalKebutuhan)
+	scopePegawaiAktifDinas(db, db.Model(&models.Pegawai{}).Where("id_jabatan IS NOT NULL AND id_unit_kerja IS NOT NULL")).Count(&out.TotalTerisi)
+	out.Selisih = out.TotalTerisi - out.TotalKebutuhan
+	return out
+}
+
+// ringkasanKp4AdminOut adalah kartu "KP4" pada dashboard -- persentase
+// pegawai aktif yang SUDAH mengisi data KP4-nya (punya baris Kp4Data sendiri,
+// lihat models.Kp4Data) dari seluruh pegawai aktif. Ringkasan cepat org-wide,
+// BUKAN pengecekan kelengkapan field satu-satu (itu punya hitungKelengkapanKp4,
+// dipakai per pegawai di menu KP4 & dashboard pegawai sendiri -- memanggilnya
+// untuk SETIAP pegawai di sini akan jadi N+1 query untuk kartu yang cuma
+// butuh satu angka ringkas).
+type ringkasanKp4AdminOut struct {
+	SudahIsi   int64 `json:"sudah_isi"`
+	BelumIsi   int64 `json:"belum_isi"`
+	Persentase int   `json:"persentase"`
+}
+
+func ringkasanKp4Admin(db *gorm.DB) ringkasanKp4AdminOut {
+	var out ringkasanKp4AdminOut
+	var totalAktif int64
+	scopePegawaiAktifDinas(db, db.Model(&models.Pegawai{})).Count(&totalAktif)
+	subQuery := scopePegawaiAktifDinas(db, db.Model(&models.Pegawai{})).Select("id")
+	db.Model(&models.Kp4Data{}).Where("id_pegawai IN (?)", subQuery).Count(&out.SudahIsi)
+	out.BelumIsi = totalAktif - out.SudahIsi
+	if totalAktif > 0 {
+		out.Persentase = int(out.SudahIsi * 100 / totalAktif)
+	}
+	return out
+}
+
+// ringkasanLainnyaAdminOut adalah kartu "Menu Lainnya" pada dashboard --
+// jumlah pengajuan yang SAAT INI menunggu tindakan administrator/admin pada
+// menu-menu lain yang belum punya kartu statistik sendiri di atas. Masing-
+// masing dihitung pada tahap antrean administrator SAJA (bukan tahap atasan
+// yang bukan tanggung jawab administrator), KECUALI PermintaanSkPending
+// yang memang menunggu PEGAWAI (upload SK Terakhir Penerima TPP) -- tetap
+// ditampilkan supaya administrator tahu berapa yang masih belum direspons.
+type ringkasanLainnyaAdminOut struct {
+	KenaikanPangkatPending int64 `json:"kenaikan_pangkat_pending"`
+	PerubahanDataPending   int64 `json:"perubahan_data_pending"`
+	BeritaAcaraPending     int64 `json:"berita_acara_pending"`
+	SuratKolektifPending   int64 `json:"surat_kolektif_pending"`
+	PermintaanSkPending    int64 `json:"permintaan_sk_pending"`
+}
+
+func ringkasanLainnyaAdmin(db *gorm.DB) ringkasanLainnyaAdminOut {
+	var out ringkasanLainnyaAdminOut
+	db.Model(&models.PerubahanJabatanPegawai{}).Where("status = ?", models.PerubahanJabatanMenungguAdmin).Count(&out.KenaikanPangkatPending)
+	db.Model(&models.PerubahanDataPegawai{}).Where("status = ?", models.StatusPending).Count(&out.PerubahanDataPending)
+	db.Model(&models.PengajuanBeritaAcara{}).Where("status = ?", models.PengajuanBeritaAcaraMenungguAdmin).Count(&out.BeritaAcaraPending)
+	db.Model(&models.PengajuanSuratKolektif{}).Where("status = ?", models.PengajuanSuratKolektifMenunggu).Count(&out.SuratKolektifPending)
+	db.Model(&models.PermintaanSk{}).Where("status = ?", models.StatusPermintaanSkMenunggu).Count(&out.PermintaanSkPending)
+	return out
 }
