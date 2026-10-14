@@ -90,6 +90,13 @@ const defaultPetaTab = computed(() => (canSeeSekolahTab.value ? 'sekolah' : 'din
 const dinasTree = ref(null)
 const dinasLoading = ref(false)
 const dinasBolehKelola = computed(() => !!dinasTree.value?.boleh_kelola)
+// dinasBolehCetak: permintaan pengguna -- tombol "Cetak Excel"/"Cetak PDF"
+// dimatikan KHUSUS untuk pegawai Dinas (administrator/admin/atasan tetap
+// boleh mengunduh), SAMA PERSIS dengan hak akses endpoint export di
+// backend (closure "lihatCetak", BUKAN "lihat", lihat
+// backend/handlers/peta_jabatan_dinas_export.go) supaya tombol yang
+// tampil selalu konsisten dengan apa yang benar-benar diizinkan server.
+const dinasBolehCetak = computed(() => !auth.isPegawai)
 
 async function loadDinasTree() {
   dinasLoading.value = true
@@ -101,6 +108,21 @@ async function loadDinasTree() {
     toast.add({ severity: 'error', summary: 'Gagal memuat Peta Jabatan Dinas', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
     dinasLoading.value = false
+  }
+}
+
+// onDinasTreeChanged: dipanggil setiap event "changed" dari PetaJabatanDinasNode
+// (tambah/ubah/hapus struktur, ubah kepala, ATAU -- permintaan pengguna --
+// menambah/mengeluarkan pegawai biasa langsung dari kartu unit itu sendiri)
+// -- SELALU memuat ulang pohon, DAN (administrator saja, sama seperti
+// pemuatan awal di onMounted) memuat ulang daftar "Pegawai Dinas Belum
+// Ditempatkan" supaya tetap sinkron: menambahkan pegawai ke suatu unit
+// menghilangkannya dari daftar itu, mengeluarkannya dari suatu unit
+// mengembalikannya ke daftar itu.
+async function onDinasTreeChanged() {
+  await loadDinasTree()
+  if (auth.isAdministrator) {
+    loadDinasBelumDitempatkan()
   }
 }
 
@@ -1198,6 +1220,7 @@ onMounted(() => {
                 <i class="pi pi-building" style="margin-right: 0.4rem"></i>{{ dinasTree?.root?.unit || 'Peta Jabatan Dinas' }}
               </div>
               <Button
+                v-if="dinasBolehCetak"
                 label="Cetak Excel"
                 icon="pi pi-file-excel"
                 size="small"
@@ -1208,13 +1231,14 @@ onMounted(() => {
                 @click="unduhPetaJabatanDinas('excel')"
               />
               <Button
+                v-if="dinasBolehCetak"
                 label="Cetak PDF"
                 icon="pi pi-file-pdf"
                 size="small"
                 severity="danger"
                 outlined
                 :loading="dinasCetakPdfSubmitting"
-                title="Unduh organogram & tabel B/K Peta Jabatan Dinas sebagai PDF"
+                title="Unduh organogram Peta Jabatan Dinas (KJ/B/K/+- setiap jabatan) sebagai PDF"
                 @click="unduhPetaJabatanDinas('pdf')"
               />
             </div>
@@ -1233,7 +1257,9 @@ onMounted(() => {
               :node="dinasTree.root"
               :boleh-kelola="dinasBolehKelola"
               :pegawai-options="dinasPegawaiOptions"
-              @changed="loadDinasTree"
+              :pegawai-belum-ditempatkan="dinasBelumDitempatkan"
+              :jabatan-options="jabatanOptions"
+              @changed="onDinasTreeChanged"
             />
           </div>
 

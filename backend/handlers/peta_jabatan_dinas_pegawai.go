@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"cuti-app/middleware"
 	"cuti-app/models"
@@ -26,6 +27,7 @@ func RegisterPetaJabatanDinasPegawaiRoutes(mux *http.ServeMux, db *gorm.DB) {
 		return middleware.Chain(h, middleware.Auth, middleware.RequireActiveUser(db), middleware.RequireRole("administrator"))
 	}
 	mux.Handle("GET /api/peta-jabatan/dinas/pegawai/belum-ditempatkan", kelola(func(w http.ResponseWriter, r *http.Request) { listPegawaiDinasBelumDitempatkan(w, r, db) }))
+	mux.Handle("GET /api/peta-jabatan/dinas/pegawai/di-unit/{id}", kelola(func(w http.ResponseWriter, r *http.Request) { listPegawaiDiUnitDinasHandler(w, r, db) }))
 	mux.Handle("PUT /api/peta-jabatan/dinas/pegawai/{id}/unit-kerja", kelola(func(w http.ResponseWriter, r *http.Request) { setPegawaiUnitKerjaDinasHandler(w, r, db) }))
 }
 
@@ -84,6 +86,65 @@ func listPegawaiDinasBelumDitempatkan(w http.ResponseWriter, r *http.Request, db
 			ID: p.ID, NIP: p.NIP, Nama: p.Nama, Jabatan: jabatan, TempatTgs: p.TempatTgs,
 			IDUnitKerjaSaatIni: p.IDUnitKerja, UnitKerjaSaatIni: unitSaatIni,
 		})
+	}
+	utils.Success(w, "ok", out)
+}
+
+// ============================================================
+// daftar pegawai yang SAAT INI ada di SATU unit struktur (permintaan
+// pengguna: bisa mengedit "pegawai masuk bidang/seksi mana" LANGSUNG dari
+// kartu unit itu sendiri, persis alur "Ubah Kepala" pada unit yang sama)
+// ============================================================
+
+type pegawaiDiUnitDinasOut struct {
+	ID      uint   `json:"id"`
+	NIP     string `json:"nip"`
+	Nama    string `json:"nama"`
+	Jabatan string `json:"jabatan"`
+}
+
+// listPegawaiDiUnitDinasHandler menangani GET
+// /api/peta-jabatan/dinas/pegawai/di-unit/{id}[?jabatan=...] -- daftar
+// pegawai yang SAAT INI bertugas (Pegawai.IDUnitKerja) persis di SATU unit
+// struktur Dinas ini (Bidang/Seksi/Sekretariat/Sub Bagian, BUKAN gabungan
+// anak-anaknya) -- dipakai dialog "Kelola Pegawai Unit Ini" per node pada
+// PetaJabatanDinasNode.vue, supaya administrator bisa melihat & mengeluarkan
+// anggota unit ini LANGSUNG dari kartu unit itu sendiri, tanpa perlu
+// berpindah ke tabel "Pegawai Dinas Belum Ditempatkan" di bagian bawah
+// halaman.
+//
+// Query opsional "jabatan" (permintaan pengguna): kalau diisi, daftar
+// disaring HANYA ke pegawai yang Jabatan-nya PERSIS sama dengan nilai ini --
+// dibandingkan TANPA memandang huruf besar/kecil (strings.EqualFold, BUKAN
+// perbandingan id_jabatan) supaya baris Jabatan master data yang namanya
+// sama tapi beda huruf besar/kecil tetap dianggap jabatan yang SAMA. Dipakai
+// kolom "B" pada tabel KJ/B/K/+- per unit untuk menampilkan "siapa saja
+// pegawai yang masuk dalam jabatan tersebut", bukan daftar seluruh pegawai
+// unit ini.
+func listPegawaiDiUnitDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	var uk models.UnitKerja
+	if err := db.Select("id", "tempat_kerja").First(&uk, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "unit kerja tidak ditemukan")
+		return
+	}
+	if uk.TempatKerja == nil || *uk.TempatKerja != models.TempatKerjaDinas {
+		utils.Error(w, http.StatusBadRequest, "unit ini bukan bagian struktur Peta Jabatan Dinas")
+		return
+	}
+	filterJabatan := strings.TrimSpace(r.URL.Query().Get("jabatan"))
+	var rows []models.Pegawai
+	db.Preload("Jabatan").Where("id_unit_kerja = ?", uk.ID).Order("nama asc").Find(&rows)
+	out := make([]pegawaiDiUnitDinasOut, 0, len(rows))
+	for _, p := range rows {
+		jabatan := "-"
+		if p.Jabatan != nil {
+			jabatan = p.Jabatan.Jabatan
+		}
+		if filterJabatan != "" && !strings.EqualFold(jabatan, filterJabatan) {
+			continue
+		}
+		out = append(out, pegawaiDiUnitDinasOut{ID: p.ID, NIP: p.NIP, Nama: p.Nama, Jabatan: jabatan})
 	}
 	utils.Success(w, "ok", out)
 }

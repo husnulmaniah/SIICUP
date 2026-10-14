@@ -33,6 +33,19 @@ const props = defineProps({
   node: { type: Object, required: true },
   bolehKelola: { type: Boolean, default: false },
   pegawaiOptions: { type: Array, default: () => [] },
+  // pegawaiBelumDitempatkan: daftar pegawai Dinas yang BELUM punya unit
+  // struktur sama sekali (dari PetaJabatanView.vue, endpoint
+  // /peta-jabatan/dinas/pegawai/belum-ditempatkan) -- dipakai sebagai opsi
+  // pada dialog "Kelola Pegawai Unit Ini" di bawah, supaya pegawai yang
+  // belum punya Bidang/Seksi bisa LANGSUNG ditambahkan dari kartu unit ini
+  // juga (permintaan pengguna), tidak hanya lewat tabel terpisah di bagian
+  // bawah halaman.
+  pegawaiBelumDitempatkan: { type: Array, default: () => [] },
+  // jabatanOptions: daftar SELURUH jabatan master data (dari PetaJabatanView.vue,
+  // endpoint /ref/jabatan) -- dipakai dialog "Tambah Jabatan" di bawah supaya
+  // administrator bisa menambahkan jabatan baru yang BELUM ada pada unit ini
+  // (permintaan pengguna).
+  jabatanOptions: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['changed'])
 
@@ -88,6 +101,23 @@ function signed(n) {
 function selisihSeverity(n) {
   return n < 0 ? 'danger' : n > 0 ? 'warn' : 'success'
 }
+
+// ============================================================
+// permintaan pengguna: bedakan posisi Jabatan Pelaksana vs Jabatan
+// Fungsional pada tabel KJ/B/K/+- unit ini, PERSIS gaya gambar referensi
+// ("JABATAN PELAKSANA" & "JABATAN FUNGSIONAL" sebagai pita kelompok +
+// baris "Jumlah Kebutuhan .." masing-masing) -- konsisten dengan
+// pengelompokan yang sama pada PDF (drawDinasChartGroup) & Excel
+// (writeDinasJabatanGroupExcel) di backend. Kelompok yang kosong tidak
+// dirender sama sekali (lihat v-if pada template).
+// ============================================================
+const pelaksanaRows = computed(() => props.node.rows.filter((r) => r.jenis_jabatan !== 'fungsional'))
+const fungsionalRows = computed(() => props.node.rows.filter((r) => r.jenis_jabatan === 'fungsional'))
+function sumBK(rows) {
+  return rows.reduce((acc, r) => ({ b: acc.b + r.b, k: acc.k + r.k }), { b: 0, k: 0 })
+}
+const pelaksanaSum = computed(() => sumBK(pelaksanaRows.value))
+const fungsionalSum = computed(() => sumBK(fungsionalRows.value))
 
 // ============================================================
 // Tambah Unit Anak
@@ -200,6 +230,203 @@ async function simpanKepala() {
 }
 
 // ============================================================
+// Kelola Pegawai Unit Ini -- permintaan pengguna: mengedit pegawai mana
+// yang masuk ke Bidang/Seksi (dst) apa dapat LANGSUNG diedit dari kartu
+// unit itu sendiri, persis alur "Ubah Kepala" di atas (dialog per node),
+// bukan hanya lewat tabel terpisah "Pegawai Dinas Belum Ditempatkan" di
+// bagian bawah halaman. Dialog ini menampilkan DUA hal: (1) roster pegawai
+// yang SAAT INI ada di unit ini (GET .../pegawai/di-unit/{id}, bisa
+// dikeluarkan satu per satu), (2) Select untuk menambahkan pegawai yang
+// BELUM punya Bidang/Seksi (prop pegawaiBelumDitempatkan) ke unit ini --
+// keduanya memakai ULANG endpoint PUT .../pegawai/{id}/unit-kerja yang sama
+// dengan tabel "belum ditempatkan" di PetaJabatanView.vue (mengosongkan =
+// id_unit_kerja null, menambahkan = id_unit_kerja id unit ini), supaya
+// tidak ada logika penempatan ganda yang bisa tidak sinkron.
+// ============================================================
+const pegawaiDialog = ref(false)
+const pegawaiDiUnit = ref([])
+const pegawaiDiUnitLoading = ref(false)
+const tambahPegawaiId = ref(null)
+const tambahPegawaiSubmitting = ref(false)
+const keluarkanSubmitting = ref({})
+
+const pegawaiBelumOptions = computed(() =>
+  props.pegawaiBelumDitempatkan.map((p) => ({ label: `${p.nama} (${p.nip})`, value: p.id })),
+)
+
+async function loadPegawaiDiUnit() {
+  pegawaiDiUnitLoading.value = true
+  try {
+    const { data } = await http.get(`/peta-jabatan/dinas/pegawai/di-unit/${props.node.id}`)
+    pegawaiDiUnit.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    pegawaiDiUnitLoading.value = false
+  }
+}
+function openPegawaiDialog() {
+  tambahPegawaiId.value = null
+  pegawaiDialog.value = true
+  loadPegawaiDiUnit()
+}
+async function tambahPegawaiKeUnit() {
+  if (!tambahPegawaiId.value) return
+  tambahPegawaiSubmitting.value = true
+  try {
+    await http.put(`/peta-jabatan/dinas/pegawai/${tambahPegawaiId.value}/unit-kerja`, { id_unit_kerja: props.node.id })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pegawai ditambahkan ke unit ini', life: 3000 })
+    tambahPegawaiId.value = null
+    await loadPegawaiDiUnit()
+    emit('changed')
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menambahkan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    tambahPegawaiSubmitting.value = false
+  }
+}
+async function keluarkanDariUnit(p) {
+  keluarkanSubmitting.value = { ...keluarkanSubmitting.value, [p.id]: true }
+  try {
+    await http.put(`/peta-jabatan/dinas/pegawai/${p.id}/unit-kerja`, { id_unit_kerja: null })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `${p.nama} dikeluarkan dari unit ini`, life: 3000 })
+    await loadPegawaiDiUnit()
+    emit('changed')
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengeluarkan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    const copy = { ...keluarkanSubmitting.value }
+    delete copy[p.id]
+    keluarkanSubmitting.value = copy
+  }
+}
+
+// ============================================================
+// Roster per-jabatan (kolom "B") -- permintaan pengguna: "pada kolom B
+// dapat di lihat siapa saja pegawai yang masuk dalam jabatan tersebut".
+// Beda dari dialog "Kelola Pegawai Unit Ini" di atas (yang menampilkan
+// SEMUA pegawai unit ini apa pun jabatannya) -- dialog ini DISARING ke
+// SATU jabatan saja (query "jabatan" pada endpoint yang sama, dibandingkan
+// TANPA memandang huruf besar/kecil oleh backend, lihat
+// listPegawaiDiUnitDinasHandler). Pilihan "tambahkan" juga DISARING ke
+// pegawai yang Jabatan-nya PERSIS sama (case-insensitive, dihitung DI SINI
+// di frontend dari props.pegawaiBelumDitempatkan yang sudah dimuat --
+// permintaan pengguna: "munculkan hanya pegawai dengan jabatan yang sesuai
+// ... walaupun penulisannya menggunakan huruf besar maupun huruf kecil"),
+// jadi TIDAK perlu panggilan API baru untuk sisi "tambah"-nya.
+// ============================================================
+const rosterDialog = ref(false)
+const rosterRow = ref(null)
+const rosterPegawai = ref([])
+const rosterLoading = ref(false)
+const rosterTambahId = ref(null)
+const rosterTambahSubmitting = ref(false)
+const rosterKeluarkanSubmitting = ref({})
+
+const rosterTambahOptions = computed(() => {
+  const jab = (rosterRow.value?.jabatan || '').trim().toLowerCase()
+  if (!jab) return []
+  return props.pegawaiBelumDitempatkan
+    .filter((p) => (p.jabatan || '').trim().toLowerCase() === jab)
+    .map((p) => ({ label: `${p.nama} (${p.nip})`, value: p.id }))
+})
+
+async function loadRoster() {
+  if (!rosterRow.value) return
+  rosterLoading.value = true
+  try {
+    const { data } = await http.get(`/peta-jabatan/dinas/pegawai/di-unit/${props.node.id}`, {
+      params: { jabatan: rosterRow.value.jabatan },
+    })
+    rosterPegawai.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    rosterLoading.value = false
+  }
+}
+function openRosterDialog(row) {
+  rosterRow.value = row
+  rosterTambahId.value = null
+  rosterDialog.value = true
+  loadRoster()
+}
+async function rosterTambahKeUnit() {
+  if (!rosterTambahId.value) return
+  rosterTambahSubmitting.value = true
+  try {
+    await http.put(`/peta-jabatan/dinas/pegawai/${rosterTambahId.value}/unit-kerja`, { id_unit_kerja: props.node.id })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pegawai ditambahkan ke unit ini', life: 3000 })
+    rosterTambahId.value = null
+    await loadRoster()
+    emit('changed')
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menambahkan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    rosterTambahSubmitting.value = false
+  }
+}
+async function rosterKeluarkan(p) {
+  rosterKeluarkanSubmitting.value = { ...rosterKeluarkanSubmitting.value, [p.id]: true }
+  try {
+    await http.put(`/peta-jabatan/dinas/pegawai/${p.id}/unit-kerja`, { id_unit_kerja: null })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `${p.nama} dikeluarkan dari unit ini`, life: 3000 })
+    await loadRoster()
+    emit('changed')
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengeluarkan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    const copy = { ...rosterKeluarkanSubmitting.value }
+    delete copy[p.id]
+    rosterKeluarkanSubmitting.value = copy
+  }
+}
+
+// ============================================================
+// Tambah Jabatan -- permintaan pengguna: "tambahkan agar administrator
+// dapat menambahkan jabatan baru pada bidang atau seksi yang
+// membutuhkan". TIDAK perlu endpoint baru -- PUT /peta-jabatan/dinas/formasi
+// (dipakai ULANG, sama persis dengan yang dipanggil ubahK di bawah) SUDAH
+// membuat baris FormasiJabatan baru kalau belum ada (lihat
+// upsertFormasiJabatan di backend), jadi jabatan baru ini otomatis muncul
+// pada tabel begitu pohon dimuat ulang (emit 'changed').
+// ============================================================
+const tambahJabatanDialog = ref(false)
+const tambahJabatanSubmitting = ref(false)
+const tambahJabatanForm = ref({ id_jabatan: null, k: 0 })
+
+const tambahJabatanOptions = computed(() => {
+  const existingIds = new Set(props.node.rows.map((r) => r.id_jabatan))
+  return props.jabatanOptions.filter((j) => !existingIds.has(j.value))
+})
+
+function openTambahJabatanDialog() {
+  tambahJabatanForm.value = { id_jabatan: null, k: 0 }
+  tambahJabatanDialog.value = true
+}
+async function simpanTambahJabatan() {
+  if (!tambahJabatanForm.value.id_jabatan) {
+    toast.add({ severity: 'warn', summary: 'Pilih jabatan', detail: '', life: 3000 })
+    return
+  }
+  tambahJabatanSubmitting.value = true
+  try {
+    await http.put('/peta-jabatan/dinas/formasi', {
+      id_unit_kerja: props.node.id,
+      id_jabatan: tambahJabatanForm.value.id_jabatan,
+      kebutuhan: tambahJabatanForm.value.k || 0,
+    })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Jabatan baru ditambahkan ke unit ini', life: 3000 })
+    tambahJabatanDialog.value = false
+    emit('changed')
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menambahkan jabatan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    tambahJabatanSubmitting.value = false
+  }
+}
+
+// ============================================================
 // KJ (Jabatan.KelasJabatan, global) & K (FormasiJabatan) -- inline langsung
 // pada tabel, tanpa dialog terpisah (beda dari Peta Jabatan Sekolah yang
 // butuh dialog "Atur K" karena harus menangani pecahan Sub-Jabatan -- Dinas
@@ -253,6 +480,8 @@ async function ubahK(row) {
       </div>
       <div v-if="bolehKelola" class="table-actions">
         <Button v-if="!isRoot" icon="pi pi-user-edit" size="small" severity="secondary" outlined title="Ubah Kepala Unit" @click="openKepalaDialog" />
+        <Button v-if="!isRoot" icon="pi pi-users" size="small" severity="secondary" outlined title="Kelola Pegawai Unit Ini" @click="openPegawaiDialog" />
+        <Button v-if="!isRoot" icon="pi pi-briefcase" size="small" severity="secondary" outlined title="Tambah Jabatan" @click="openTambahJabatanDialog" />
         <Button v-if="canHaveChildren" icon="pi pi-plus" size="small" severity="secondary" outlined title="Tambah Unit Anak" @click="openTambahDialog" />
         <Button v-if="!isRoot" icon="pi pi-pencil" size="small" severity="secondary" outlined title="Ubah Nama Unit" @click="openRenameDialog" />
         <Button
@@ -280,37 +509,98 @@ async function ubahK(row) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in node.rows" :key="row.id_jabatan">
-            <td>{{ row.jabatan }}</td>
-            <td>
-              <InputNumber
-                v-if="bolehKelola"
-                v-model="row.kj"
-                placeholder="-"
-                :min="1"
-                :max="17"
-                :disabled="kjSaving[row.id_jabatan]"
-                style="width: 5.5rem"
-                inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
-                @update:modelValue="ubahKJ(row)"
-              />
-              <span v-else>{{ row.kj ?? '-' }}</span>
-            </td>
-            <td>{{ row.b }}</td>
-            <td>
-              <InputNumber
-                v-if="bolehKelola"
-                v-model="row.k"
-                :min="0"
-                :disabled="kSaving[row.id_jabatan]"
-                style="width: 5.5rem"
-                inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
-                @update:modelValue="ubahK(row)"
-              />
-              <span v-else>{{ row.k }}</span>
-            </td>
-            <td><Tag :value="signed(row.selisih)" :severity="selisihSeverity(row.selisih)" /></td>
-          </tr>
+          <template v-if="pelaksanaRows.length">
+            <tr class="dinas-group-bar dinas-group-bar--pelaksana">
+              <td colspan="5">JABATAN PELAKSANA</td>
+            </tr>
+            <tr v-for="row in pelaksanaRows" :key="`pel-${row.id_jabatan}`">
+              <td>{{ row.jabatan }}</td>
+              <td>
+                <InputNumber
+                  v-if="bolehKelola"
+                  v-model="row.kj"
+                  placeholder="-"
+                  :min="1"
+                  :max="17"
+                  :disabled="kjSaving[row.id_jabatan]"
+                  style="width: 5.5rem"
+                  inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
+                  @update:modelValue="ubahKJ(row)"
+                />
+                <span v-else>{{ row.kj ?? '-' }}</span>
+              </td>
+              <td>
+                <button v-if="bolehKelola" type="button" class="dinas-b-link" title="Lihat pegawai dengan jabatan ini" @click="openRosterDialog(row)">{{ row.b }}</button>
+                <span v-else>{{ row.b }}</span>
+              </td>
+              <td>
+                <InputNumber
+                  v-if="bolehKelola"
+                  v-model="row.k"
+                  :min="0"
+                  :disabled="kSaving[row.id_jabatan]"
+                  style="width: 5.5rem"
+                  inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
+                  @update:modelValue="ubahK(row)"
+                />
+                <span v-else>{{ row.k }}</span>
+              </td>
+              <td><Tag :value="signed(row.selisih)" :severity="selisihSeverity(row.selisih)" /></td>
+            </tr>
+            <tr class="dinas-group-subtotal">
+              <td>Jumlah Kebutuhan JP</td>
+              <td></td>
+              <td>{{ pelaksanaSum.b }}</td>
+              <td>{{ pelaksanaSum.k }}</td>
+              <td><Tag :value="signed(pelaksanaSum.b - pelaksanaSum.k)" :severity="selisihSeverity(pelaksanaSum.b - pelaksanaSum.k)" /></td>
+            </tr>
+          </template>
+          <template v-if="fungsionalRows.length">
+            <tr class="dinas-group-bar dinas-group-bar--fungsional">
+              <td colspan="5">JABATAN FUNGSIONAL</td>
+            </tr>
+            <tr v-for="row in fungsionalRows" :key="`fun-${row.id_jabatan}`">
+              <td>{{ row.jabatan }}</td>
+              <td>
+                <InputNumber
+                  v-if="bolehKelola"
+                  v-model="row.kj"
+                  placeholder="-"
+                  :min="1"
+                  :max="17"
+                  :disabled="kjSaving[row.id_jabatan]"
+                  style="width: 5.5rem"
+                  inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
+                  @update:modelValue="ubahKJ(row)"
+                />
+                <span v-else>{{ row.kj ?? '-' }}</span>
+              </td>
+              <td>
+                <button v-if="bolehKelola" type="button" class="dinas-b-link" title="Lihat pegawai dengan jabatan ini" @click="openRosterDialog(row)">{{ row.b }}</button>
+                <span v-else>{{ row.b }}</span>
+              </td>
+              <td>
+                <InputNumber
+                  v-if="bolehKelola"
+                  v-model="row.k"
+                  :min="0"
+                  :disabled="kSaving[row.id_jabatan]"
+                  style="width: 5.5rem"
+                  inputStyle="width: 2.5rem; padding: 0.25rem 0.4rem"
+                  @update:modelValue="ubahK(row)"
+                />
+                <span v-else>{{ row.k }}</span>
+              </td>
+              <td><Tag :value="signed(row.selisih)" :severity="selisihSeverity(row.selisih)" /></td>
+            </tr>
+            <tr class="dinas-group-subtotal">
+              <td>Jumlah Kebutuhan JF</td>
+              <td></td>
+              <td>{{ fungsionalSum.b }}</td>
+              <td>{{ fungsionalSum.k }}</td>
+              <td><Tag :value="signed(fungsionalSum.b - fungsionalSum.k)" :severity="selisihSeverity(fungsionalSum.b - fungsionalSum.k)" /></td>
+            </tr>
+          </template>
         </tbody>
       </table>
       <div v-else style="font-size: 0.8rem; color: var(--p-text-muted-color); padding: 0.25rem 0">
@@ -325,6 +615,8 @@ async function ubahK(row) {
         :node="anak"
         :boleh-kelola="bolehKelola"
         :pegawai-options="pegawaiOptions"
+        :pegawai-belum-ditempatkan="pegawaiBelumDitempatkan"
+        :jabatan-options="jabatanOptions"
         @changed="$emit('changed')"
       />
     </div>
@@ -369,6 +661,119 @@ async function ubahK(row) {
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="kepalaDialog = false" />
         <Button label="Simpan" :loading="kepalaSubmitting" @click="simpanKepala" />
+      </template>
+    </Dialog>
+
+    <!-- dialog Kelola Pegawai Unit Ini -->
+    <Dialog v-model:visible="pegawaiDialog" modal :header="`Kelola Pegawai -- ${node.unit}`" style="width: 32rem; max-width: 95vw">
+      <div class="field-label">Pegawai di unit ini</div>
+      <div v-if="pegawaiDiUnitLoading" style="padding: 0.5rem 0; font-size: 0.82rem; color: var(--p-text-muted-color)">Memuat...</div>
+      <div v-else-if="!pegawaiDiUnit.length" style="padding: 0.25rem 0 0.75rem; font-size: 0.82rem; color: var(--p-text-muted-color)">
+        Belum ada pegawai yang ditempatkan di unit ini.
+      </div>
+      <ul v-else style="list-style: none; padding: 0; margin: 0.35rem 0 0.9rem; display: flex; flex-direction: column; gap: 0.4rem">
+        <li v-for="p in pegawaiDiUnit" :key="p.id" style="display: flex; align-items: center; gap: 0.6rem">
+          <div style="flex: 1; font-size: 0.82rem">
+            <div style="font-weight: 600">{{ p.nama }}</div>
+            <div style="color: var(--p-text-muted-color)">{{ p.nip }} -- {{ p.jabatan }}</div>
+          </div>
+          <Button
+            icon="pi pi-sign-out"
+            size="small"
+            severity="danger"
+            outlined
+            title="Keluarkan dari unit ini"
+            :loading="keluarkanSubmitting[p.id]"
+            @click="keluarkanDariUnit(p)"
+          />
+        </li>
+      </ul>
+      <div class="field-label" style="margin-top: 0.5rem">Tambahkan pegawai (belum punya Bidang/Seksi)</div>
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.3rem">
+        <Select
+          v-model="tambahPegawaiId"
+          :options="pegawaiBelumOptions"
+          optionLabel="label"
+          optionValue="value"
+          filter
+          placeholder="Pilih pegawai"
+          style="flex: 1"
+        />
+        <Button label="Tambahkan" :disabled="!tambahPegawaiId" :loading="tambahPegawaiSubmitting" @click="tambahPegawaiKeUnit" />
+      </div>
+      <p v-if="!pegawaiBelumOptions.length" style="font-size: 0.78rem; color: var(--p-text-muted-color); margin: 0.5rem 0 0">
+        Semua pegawai Dinas sudah ditempatkan ke salah satu unit struktur.
+      </p>
+      <template #footer>
+        <Button label="Tutup" severity="secondary" outlined @click="pegawaiDialog = false" />
+      </template>
+    </Dialog>
+
+    <!-- dialog roster per-jabatan (klik kolom B) -->
+    <Dialog v-model:visible="rosterDialog" modal :header="`Pegawai -- ${rosterRow?.jabatan || ''}`" style="width: 32rem; max-width: 95vw">
+      <div class="field-label">Pegawai dengan jabatan ini di unit "{{ node.unit }}"</div>
+      <div v-if="rosterLoading" style="padding: 0.5rem 0; font-size: 0.82rem; color: var(--p-text-muted-color)">Memuat...</div>
+      <div v-else-if="!rosterPegawai.length" style="padding: 0.25rem 0 0.75rem; font-size: 0.82rem; color: var(--p-text-muted-color)">
+        Belum ada pegawai dengan jabatan ini di unit ini.
+      </div>
+      <ul v-else style="list-style: none; padding: 0; margin: 0.35rem 0 0.9rem; display: flex; flex-direction: column; gap: 0.4rem">
+        <li v-for="p in rosterPegawai" :key="p.id" style="display: flex; align-items: center; gap: 0.6rem">
+          <div style="flex: 1; font-size: 0.82rem">
+            <div style="font-weight: 600">{{ p.nama }}</div>
+            <div style="color: var(--p-text-muted-color)">{{ p.nip }}</div>
+          </div>
+          <Button
+            icon="pi pi-sign-out"
+            size="small"
+            severity="danger"
+            outlined
+            title="Keluarkan dari unit ini"
+            :loading="rosterKeluarkanSubmitting[p.id]"
+            @click="rosterKeluarkan(p)"
+          />
+        </li>
+      </ul>
+      <div class="field-label" style="margin-top: 0.5rem">Tambahkan pegawai dengan jabatan "{{ rosterRow?.jabatan }}"</div>
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.3rem">
+        <Select
+          v-model="rosterTambahId"
+          :options="rosterTambahOptions"
+          optionLabel="label"
+          optionValue="value"
+          filter
+          placeholder="Pilih pegawai"
+          style="flex: 1"
+        />
+        <Button label="Tambahkan" :disabled="!rosterTambahId" :loading="rosterTambahSubmitting" @click="rosterTambahKeUnit" />
+      </div>
+      <p v-if="!rosterTambahOptions.length" style="font-size: 0.78rem; color: var(--p-text-muted-color); margin: 0.5rem 0 0">
+        Tidak ada pegawai belum ditempatkan dengan jabatan ini (perbandingan jabatan tidak memandang huruf besar/kecil).
+      </p>
+      <template #footer>
+        <Button label="Tutup" severity="secondary" outlined @click="rosterDialog = false" />
+      </template>
+    </Dialog>
+
+    <!-- dialog Tambah Jabatan -->
+    <Dialog v-model:visible="tambahJabatanDialog" modal :header="`Tambah Jabatan -- ${node.unit}`" style="width: 28rem; max-width: 95vw">
+      <div class="field-label">Jabatan</div>
+      <Select
+        v-model="tambahJabatanForm.id_jabatan"
+        :options="tambahJabatanOptions"
+        optionLabel="label"
+        optionValue="value"
+        filter
+        placeholder="Pilih jabatan"
+        style="width: 100%"
+      />
+      <div class="field-label" style="margin-top: 0.75rem">Kebutuhan (K)</div>
+      <InputNumber v-model="tambahJabatanForm.k" :min="0" style="width: 100%" inputStyle="width: 100%" />
+      <p v-if="!tambahJabatanOptions.length" style="font-size: 0.78rem; color: var(--p-text-muted-color); margin: 0.6rem 0 0">
+        Seluruh jabatan master data sudah ada pada unit ini.
+      </p>
+      <template #footer>
+        <Button label="Batal" severity="secondary" outlined @click="tambahJabatanDialog = false" />
+        <Button label="Simpan" :disabled="!tambahJabatanForm.id_jabatan" :loading="tambahJabatanSubmitting" @click="simpanTambahJabatan" />
       </template>
     </Dialog>
   </div>
@@ -424,6 +829,38 @@ async function ubahK(row) {
 .dinas-row-table td {
   padding: 0.3rem 0.5rem;
   border-bottom: 1px solid var(--p-content-border-color, #f1f5f9);
+}
+/* permintaan pengguna: bedakan posisi "JABATAN PELAKSANA" vs "JABATAN
+   FUNGSIONAL", warna PERSIS sama dengan dinasGroupBarColor pada PDF &
+   pelaksanaBarStyle/fungsionalBarStyle pada Excel (biru tua utk Pelaksana,
+   abu-abu utk Fungsional), supaya ketiga tampilan tetap konsisten. */
+.dinas-group-bar td {
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  padding: 0.3rem 0.5rem;
+}
+.dinas-group-bar--pelaksana td {
+  background: #266399;
+}
+.dinas-group-bar--fungsional td {
+  background: #6b7280;
+}
+.dinas-group-subtotal td {
+  font-weight: 700;
+  background: var(--p-content-background-alt, #f8fafc);
+}
+.dinas-b-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  color: var(--p-primary-color, #2563eb);
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
 }
 .field-label {
   font-weight: 600;
