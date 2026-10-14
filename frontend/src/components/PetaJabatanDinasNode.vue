@@ -47,6 +47,15 @@ const props = defineProps({
   // administrator bisa menambahkan jabatan baru yang BELUM ada pada unit ini
   // (permintaan pengguna).
   jabatanOptions: { type: Array, default: () => [] },
+  // sayaIdUnitKerja / sayaIdJabatan: id unit kerja & id jabatan milik
+  // PEGAWAI YANG SEDANG LOGIN SENDIRI (dari petaJabatanDinasOut.saya_id_unit_kerja
+  // / saya_id_jabatan, backend/handlers/peta_jabatan_dinas.go) -- dipakai untuk
+  // menandai kartu unit & baris jabatan milik pegawai itu sendiri di pohon ini,
+  // supaya pegawai tahu posisi mereka sendiri dalam peta jabatan (permintaan
+  // pengguna). null bila pengguna yang login bukan pegawai Dinas / belum
+  // tertaut ke data pegawai.
+  sayaIdUnitKerja: { type: [Number, String], default: null },
+  sayaIdJabatan: { type: [Number, String], default: null },
 })
 const emit = defineEmits(['changed'])
 
@@ -114,6 +123,15 @@ function selisihSeverity(n) {
 // ============================================================
 const pelaksanaRows = computed(() => props.node.rows.filter((r) => r.jenis_jabatan !== 'fungsional'))
 const fungsionalRows = computed(() => props.node.rows.filter((r) => r.jenis_jabatan === 'fungsional'))
+
+// isMyUnit / isMyRow -- menandai unit & baris jabatan milik pegawai yang
+// sedang login sendiri (lihat props.sayaIdUnitKerja/sayaIdJabatan di atas).
+// Pakai == (bukan ===) karena id bisa datang sebagai Number dari JSON atau
+// String dari atribut Vue, keduanya harus dianggap sama.
+const isMyUnit = computed(() => props.sayaIdUnitKerja != null && props.node.id == props.sayaIdUnitKerja)
+function isMyRow(row) {
+  return isMyUnit.value && props.sayaIdJabatan != null && row.id_jabatan == props.sayaIdJabatan
+}
 function sumBK(rows) {
   return rows.reduce((acc, r) => ({ b: acc.b + r.b, k: acc.k + r.k }), { b: 0, k: 0 })
 }
@@ -493,6 +511,32 @@ function konfirmasiHapusJabatan(row) {
 }
 
 // ============================================================
+// Pindahkan Jabatan ke Atas/Bawah -- permintaan pengguna: "buat agar
+// administrator dapat memindahkan jabatan ke atas atau ke bawah". HANYA
+// bisa bertukar posisi DI DALAM kelompoknya sendiri (Jabatan Pelaksana
+// ATAU Jabatan Fungsional, lihat pelaksanaRows/fungsionalRows di atas) --
+// tombol "ke atas" pada baris pertama & "ke bawah" pada baris terakhir
+// kelompoknya masing-masing SENGAJA dinonaktifkan (lihat :disabled pada
+// template), backend (geserJabatanDinasHandler) juga menolak permintaan
+// yang sudah di posisi paling ujung. Sukses memancarkan 'changed' supaya
+// tabel dimuat ulang dengan urutan barunya.
+// ============================================================
+const geserSubmitting = ref({})
+async function geserJabatan(row, arah) {
+  geserSubmitting.value = { ...geserSubmitting.value, [row.id_jabatan]: true }
+  try {
+    await http.put(`/peta-jabatan/dinas/formasi/${props.node.id}/${row.id_jabatan}/geser`, { arah })
+    emit('changed')
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memindahkan jabatan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    const copy = { ...geserSubmitting.value }
+    delete copy[row.id_jabatan]
+    geserSubmitting.value = copy
+  }
+}
+
+// ============================================================
 // KJ (Jabatan.KelasJabatan, global) & K (FormasiJabatan) -- inline langsung
 // pada tabel, tanpa dialog terpisah (beda dari Peta Jabatan Sekolah yang
 // butuh dialog "Atur K" karena harus menangani pecahan Sub-Jabatan -- Dinas
@@ -533,11 +577,12 @@ async function ubahK(row) {
 </script>
 
 <template>
-  <div class="dinas-node" :class="`dinas-node--${node.tipe}`">
+  <div class="dinas-node" :class="[`dinas-node--${node.tipe}`, { 'dinas-node--saya': isMyUnit }]">
     <div class="dinas-node-header">
       <div class="dinas-node-title">
         <Tag :value="tipeLabel" :severity="tipeSeverity" />
         <span class="dinas-node-unit">{{ node.unit }}</span>
+        <Tag v-if="isMyUnit" value="Posisi Anda" severity="warn" icon="pi pi-map-marker" />
       </div>
       <div class="dinas-node-kepala">
         <i class="pi pi-user" style="margin-right: 0.3rem"></i>
@@ -572,7 +617,7 @@ async function ubahK(row) {
             <th style="width: 70px">B</th>
             <th style="width: 90px">K</th>
             <th style="width: 80px">+/-</th>
-            <th v-if="bolehKelola" style="width: 60px">Aksi</th>
+            <th v-if="bolehKelola" style="width: 120px">Aksi</th>
           </tr>
         </thead>
         <tbody>
@@ -580,8 +625,8 @@ async function ubahK(row) {
             <tr class="dinas-group-bar dinas-group-bar--pelaksana">
               <td :colspan="bolehKelola ? 6 : 5">JABATAN PELAKSANA</td>
             </tr>
-            <tr v-for="row in pelaksanaRows" :key="`pel-${row.id_jabatan}`">
-              <td>{{ row.jabatan }}</td>
+            <tr v-for="(row, idx) in pelaksanaRows" :key="`pel-${row.id_jabatan}`" :class="{ 'dinas-row--saya': isMyRow(row) }">
+              <td>{{ row.jabatan }} <Tag v-if="isMyRow(row)" value="Anda" severity="warn" style="margin-left: 0.35rem" /></td>
               <td>
                 <InputNumber
                   v-if="bolehKelola"
@@ -613,7 +658,27 @@ async function ubahK(row) {
                 <span v-else>{{ row.k }}</span>
               </td>
               <td><Tag :value="signed(row.selisih)" :severity="selisihSeverity(row.selisih)" /></td>
-              <td v-if="bolehKelola">
+              <td v-if="bolehKelola" class="dinas-aksi-cell">
+                <Button
+                  icon="pi pi-arrow-up"
+                  size="small"
+                  severity="secondary"
+                  outlined
+                  title="Pindahkan ke Atas"
+                  :disabled="idx === 0"
+                  :loading="geserSubmitting[row.id_jabatan]"
+                  @click="geserJabatan(row, 'atas')"
+                />
+                <Button
+                  icon="pi pi-arrow-down"
+                  size="small"
+                  severity="secondary"
+                  outlined
+                  title="Pindahkan ke Bawah"
+                  :disabled="idx === pelaksanaRows.length - 1"
+                  :loading="geserSubmitting[row.id_jabatan]"
+                  @click="geserJabatan(row, 'bawah')"
+                />
                 <Button
                   icon="pi pi-trash"
                   size="small"
@@ -638,8 +703,8 @@ async function ubahK(row) {
             <tr class="dinas-group-bar dinas-group-bar--fungsional">
               <td :colspan="bolehKelola ? 6 : 5">JABATAN FUNGSIONAL</td>
             </tr>
-            <tr v-for="row in fungsionalRows" :key="`fun-${row.id_jabatan}`">
-              <td>{{ row.jabatan }}</td>
+            <tr v-for="(row, idx) in fungsionalRows" :key="`fun-${row.id_jabatan}`" :class="{ 'dinas-row--saya': isMyRow(row) }">
+              <td>{{ row.jabatan }} <Tag v-if="isMyRow(row)" value="Anda" severity="warn" style="margin-left: 0.35rem" /></td>
               <td>
                 <InputNumber
                   v-if="bolehKelola"
@@ -671,7 +736,27 @@ async function ubahK(row) {
                 <span v-else>{{ row.k }}</span>
               </td>
               <td><Tag :value="signed(row.selisih)" :severity="selisihSeverity(row.selisih)" /></td>
-              <td v-if="bolehKelola">
+              <td v-if="bolehKelola" class="dinas-aksi-cell">
+                <Button
+                  icon="pi pi-arrow-up"
+                  size="small"
+                  severity="secondary"
+                  outlined
+                  title="Pindahkan ke Atas"
+                  :disabled="idx === 0"
+                  :loading="geserSubmitting[row.id_jabatan]"
+                  @click="geserJabatan(row, 'atas')"
+                />
+                <Button
+                  icon="pi pi-arrow-down"
+                  size="small"
+                  severity="secondary"
+                  outlined
+                  title="Pindahkan ke Bawah"
+                  :disabled="idx === fungsionalRows.length - 1"
+                  :loading="geserSubmitting[row.id_jabatan]"
+                  @click="geserJabatan(row, 'bawah')"
+                />
                 <Button
                   icon="pi pi-trash"
                   size="small"
@@ -708,6 +793,8 @@ async function ubahK(row) {
         :pegawai-options="pegawaiOptions"
         :pegawai-belum-ditempatkan="pegawaiBelumDitempatkan"
         :jabatan-options="jabatanOptions"
+        :saya-id-unit-kerja="sayaIdUnitKerja"
+        :saya-id-jabatan="sayaIdJabatan"
         @changed="$emit('changed')"
       />
     </div>
@@ -894,6 +981,18 @@ async function ubahK(row) {
   border-width: 2px;
   border-color: #dc2626;
 }
+.dinas-node--saya {
+  border-width: 2px;
+  border-color: #d97706;
+  background: #fffbeb;
+  box-shadow: 0 0 0 1px #fde68a inset;
+}
+.dinas-row--saya {
+  background: #fffbeb;
+}
+.dinas-row--saya > td {
+  font-weight: 600;
+}
 .dinas-node-header {
   display: flex;
   flex-wrap: wrap;
@@ -953,6 +1052,17 @@ async function ubahK(row) {
 .dinas-group-subtotal td {
   font-weight: 700;
   background: var(--p-content-background-alt, #f8fafc);
+}
+.dinas-aksi-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: nowrap;
+}
+.dinas-aksi-cell :deep(.p-button) {
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
 }
 .dinas-b-link {
   border: none;

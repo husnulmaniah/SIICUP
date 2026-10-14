@@ -97,6 +97,16 @@ const dinasBolehKelola = computed(() => !!dinasTree.value?.boleh_kelola)
 // backend/handlers/peta_jabatan_dinas_export.go) supaya tombol yang
 // tampil selalu konsisten dengan apa yang benar-benar diizinkan server.
 const dinasBolehCetak = computed(() => !auth.isPegawai)
+// dinasSayaIdUnitKerja/dinasSayaIdJabatan: permintaan pengguna -- "beri
+// tanda jika nama pegawai berada di posisi yang mana agar masing-masing
+// pegawai dapat mengetahui posisi mereka dalam peta jabatan". Posisi akun
+// yang SEDANG LOGIN (unit + jabatan), dikirim backend lewat
+// saya_id_unit_kerja/saya_id_jabatan (lihat getPetaJabatanDinas) --
+// diteruskan sebagai prop ke PetaJabatanDinasNode.vue supaya kartu
+// unit & baris jabatan milik akun ini sendiri disorot, nil kalau akun
+// ini tidak terhubung ke baris Pegawai manapun.
+const dinasSayaIdUnitKerja = computed(() => dinasTree.value?.saya_id_unit_kerja ?? null)
+const dinasSayaIdJabatan = computed(() => dinasTree.value?.saya_id_jabatan ?? null)
 
 async function loadDinasTree() {
   dinasLoading.value = true
@@ -1259,6 +1269,8 @@ onMounted(() => {
               :pegawai-options="dinasPegawaiOptions"
               :pegawai-belum-ditempatkan="dinasBelumDitempatkan"
               :jabatan-options="jabatanOptions"
+              :saya-id-unit-kerja="dinasSayaIdUnitKerja"
+              :saya-id-jabatan="dinasSayaIdJabatan"
               @changed="onDinasTreeChanged"
             />
           </div>

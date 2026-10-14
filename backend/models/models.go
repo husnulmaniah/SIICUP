@@ -1743,7 +1743,17 @@ type FormasiJabatan struct {
 	IDSubJabatan *uint       `json:"id_sub_jabatan" gorm:"column:id_sub_jabatan;uniqueIndex:idx_formasi_jabatan_unik,priority:3"`
 	SubJabatan   *SubJabatan `json:"sub_jabatan,omitempty" gorm:"foreignKey:IDSubJabatan;references:ID"`
 	Kebutuhan    int         `json:"kebutuhan" gorm:"column:kebutuhan;not null;default:0"`
-	UpdatedAt    time.Time   `json:"updated_at" gorm:"autoUpdateTime"`
+	// Urutan: permintaan pengguna -- administrator Peta Jabatan Dinas bisa
+	// memindahkan posisi SATU jabatan ke atas/bawah di dalam kartu unitnya
+	// (lihat geserJabatanDinasHandler, handlers/peta_jabatan_dinas.go).
+	// Default 0 untuk SEMUA baris yang belum pernah digeser -- termasuk
+	// SELURUH baris Peta Jabatan Sekolah yang TIDAK memakai fitur ini sama
+	// sekali -- jadi hitungPetaJabatanSekolah (handlers/peta_jabatan.go)
+	// tetap jatuh ke urutan ABJAD seperti sebelumnya selama Urutan masih 0
+	// semua (lihat sort.Slice di sana, Urutan hanya dipakai sebagai kunci
+	// utama KALAU sudah pernah diisi beda dari 0).
+	Urutan    int       `json:"urutan" gorm:"column:urutan;not null;default:0"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (FormasiJabatan) TableName() string { return "formasi_jabatan" }

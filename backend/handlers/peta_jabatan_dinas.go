@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"cuti-app/middleware"
@@ -83,6 +84,7 @@ func RegisterPetaJabatanDinasRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("PUT /api/peta-jabatan/dinas/jabatan/{id}/kelas-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { updateJabatanKJDinasHandler(w, r, db) }))
 	mux.Handle("PUT /api/peta-jabatan/dinas/formasi", kelola(func(w http.ResponseWriter, r *http.Request) { setFormasiJabatanDinasHandler(w, r, db) }))
 	mux.Handle("DELETE /api/peta-jabatan/dinas/formasi/{idUnit}/{idJabatan}", kelola(func(w http.ResponseWriter, r *http.Request) { hapusFormasiJabatanDinasHandler(w, r, db) }))
+	mux.Handle("PUT /api/peta-jabatan/dinas/formasi/{idUnit}/{idJabatan}/geser", kelola(func(w http.ResponseWriter, r *http.Request) { geserJabatanDinasHandler(w, r, db) }))
 }
 
 // ============================================================
@@ -113,6 +115,21 @@ type nodeDinasOut struct {
 type petaJabatanDinasOut struct {
 	BolehKelola bool         `json:"boleh_kelola"`
 	Root        nodeDinasOut `json:"root"`
+	// SayaIDUnitKerja/SayaIDJabatan: permintaan pengguna -- "beri tanda
+	// jika nama pegawai berada di posisi yang mana agar masing-masing
+	// pegawai dapat mengetahui posisi mereka dalam peta jabatan". Posisi
+	// (unit + jabatan) akun yang SEDANG LOGIN SAAT INI (claims.IDPegawai
+	// pada token, lihat getPetaJabatanDinas) -- BUKAN daftar seluruh
+	// pegawai di setiap unit (itu tetap HANYA lewat endpoint
+	// administrator-only di peta_jabatan_dinas_pegawai.go, demi privasi
+	// pegawai lain). Frontend memakai dua nilai ini untuk menyorot SATU
+	// kartu unit & SATU baris jabatan milik akun ini sendiri --
+	// PetaJabatanDinasNode.vue membandingkan node.id/row.id_jabatan
+	// terhadap nilai ini. nil kalau akun ini tidak terhubung ke baris
+	// Pegawai manapun, ATAU unit kerjanya saat ini bukan bagian dari
+	// pohon struktur ini (tidak ada yang disorot, bukan error).
+	SayaIDUnitKerja *uint `json:"saya_id_unit_kerja"`
+	SayaIDJabatan   *uint `json:"saya_id_jabatan"`
 }
 
 // kepalaDinasDariPegawai: bentuk keluaran kepalaDinasOut dari satu baris
@@ -193,9 +210,23 @@ func getPetaJabatanDinas(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal memuat struktur: "+err.Error())
 		return
 	}
+
+	// posisi akun yang sedang login -- lihat komentar field
+	// SayaIDUnitKerja/SayaIDJabatan pada petaJabatanDinasOut.
+	var sayaIDUnitKerja, sayaIDJabatan *uint
+	if claims != nil && claims.IDPegawai != nil {
+		var saya models.Pegawai
+		if err := db.Select("id", "id_unit_kerja", "id_jabatan").First(&saya, "id = ?", *claims.IDPegawai).Error; err == nil {
+			sayaIDUnitKerja = saya.IDUnitKerja
+			sayaIDJabatan = saya.IDJabatan
+		}
+	}
+
 	utils.Success(w, "ok", petaJabatanDinasOut{
-		BolehKelola: claims != nil && claims.RoleName == "administrator",
-		Root:        *out,
+		BolehKelola:     claims != nil && claims.RoleName == "administrator",
+		Root:            *out,
+		SayaIDUnitKerja: sayaIDUnitKerja,
+		SayaIDJabatan:   sayaIDJabatan,
 	})
 }
 
@@ -459,6 +490,37 @@ func resolveKepalaPegawaiIDDinas(db *gorm.DB, uk models.UnitKerja) *uint {
 	return &id
 }
 
+// kepalaPegawaiIDsDinas: kumpulan SELURUH id Pegawai yang SAAT INI
+// menjabat sebagai kepala MANA PUN node pada pohon struktur Peta Jabatan
+// Dinas -- akar (Kepala Dinas/Plt. Kepala Dinas, diresolusi dari NIP pada
+// PengaturanSurat) maupun Sekretaris/Kepala Bidang/Kepala Seksi/Kepala Sub
+// Bagian (UnitKerja.IDAtasanLangsung), lihat resolveKepalaPegawaiIDDinas
+// untuk logika resolusi tiap tipe node.
+//
+// Dipakai listPegawaiDinasBelumDitempatkan (handlers/
+// peta_jabatan_dinas_pegawai.go) -- permintaan pengguna: "hilangkan
+// nama-nama yang sudah termasuk plt kepala dinas/kepala dinas, sekretaris,
+// kepala bidang, kepala seksi dan kasubag kepegawaian" dari daftar
+// "Pegawai Dinas Belum Ditempatkan" -- kelima jabatan kepala ini (PERSIS
+// kelima tipe node StrukturDinas* yang ada) sudah terwakili lewat pita
+// judul kartu unitnya masing-masing, jadi tidak perlu lagi muncul di
+// daftar "pekerjaan rumah" penempatan staf itu, SEKALIPUN Pegawai.
+// IDUnitKerja mereka sendiri kebetulan belum/tidak menunjuk ke unit mana
+// pun pada pohon struktur baru ini.
+func kepalaPegawaiIDsDinas(db *gorm.DB) map[uint]bool {
+	ids := map[uint]bool{}
+	var unitRows []models.UnitKerja
+	db.Select("id", "tipe_struktur_dinas", "id_atasan_langsung").
+		Where("tempat_kerja = ? AND tipe_struktur_dinas IS NOT NULL AND tipe_struktur_dinas <> ?", models.TempatKerjaDinas, "").
+		Find(&unitRows)
+	for _, uk := range unitRows {
+		if idKepala := resolveKepalaPegawaiIDDinas(db, uk); idKepala != nil {
+			ids[*idKepala] = true
+		}
+	}
+	return ids
+}
+
 type kepalaDinasPayload struct {
 	IDPegawai *uint `json:"id_pegawai"`
 }
@@ -680,4 +742,122 @@ func hapusFormasiJabatanDinasHandler(w http.ResponseWriter, r *http.Request, db 
 		return
 	}
 	utils.Success(w, fmt.Sprintf("jabatan \"%s\" dihapus dari unit ini", jab.Jabatan), nil)
+}
+
+type geserJabatanDinasPayload struct {
+	Arah string `json:"arah"` // "atas" atau "bawah"
+}
+
+// geserJabatanDinasHandler menangani PUT
+// /api/peta-jabatan/dinas/formasi/{idUnit}/{idJabatan}/geser -- permintaan
+// pengguna: "buat agar administrator dapat memindahkan jabatan ke atas
+// atau ke bawah" pada tabel KJ/B/K/+- satu kartu unit.
+//
+// Perpindahan HANYA berlaku DI DALAM kelompoknya sendiri (Jabatan
+// Pelaksana ATAU Jabatan Fungsional, lihat splitPetaJabatanByJenis &
+// drawDinasChartGroup) -- posisi kelompok itu sendiri (Pelaksana SELALU di
+// atas Fungsional, lihat PetaJabatanDinasNode.vue) tidak pernah berubah,
+// hanya urutan baris DI DALAM satu kelompok yang sama.
+//
+// Memakai ulang hitungPetaJabatanSekolah (fungsi generik yang sama dipakai
+// tabel di layar/PDF/Excel) untuk mendapatkan urutan TAMPIL SAAT INI, SUPAYA
+// baris yang Urutan-nya masih default 0 (belum pernah digeser sama sekali,
+// termasuk baris yang baru saja ditambah lewat "Tambah Jabatan") tetap
+// mendapat posisi yang BENAR (abjad) sebagai titik awal sebelum ditukar.
+// Setiap kali dipanggil, SELURUH baris pada kelompok yang sama dinormalkan
+// ulang jadi kelipatan 10 sesuai urutan tampil itu (lihat
+// setFormasiJabatanUrutan), lalu Urutan baris yang digeser & tetangganya
+// ditukar -- supaya hasilnya konsisten tidak peduli baris mana yang sudah/
+// belum pernah disimpan Urutan-nya sebelumnya.
+func geserJabatanDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	idUnitStr := r.PathValue("idUnit")
+	idJabatanStr := r.PathValue("idJabatan")
+
+	var p geserJabatanDinasPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+		return
+	}
+	if p.Arah != "atas" && p.Arah != "bawah" {
+		utils.Error(w, http.StatusBadRequest, "arah wajib \"atas\" atau \"bawah\"")
+		return
+	}
+
+	var uk models.UnitKerja
+	if err := db.Select("id", "tempat_kerja").First(&uk, "id = ?", idUnitStr).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "unit kerja tidak ditemukan")
+		return
+	}
+	if uk.TempatKerja == nil || *uk.TempatKerja != models.TempatKerjaDinas {
+		utils.Error(w, http.StatusBadRequest, "unit ini bukan bagian struktur Peta Jabatan Dinas")
+		return
+	}
+	idJabatan64, err := strconv.ParseUint(idJabatanStr, 10, 64)
+	if err != nil {
+		utils.Error(w, http.StatusBadRequest, "id jabatan tidak valid")
+		return
+	}
+	idJabatan := uint(idJabatan64)
+
+	peta, err := hitungPetaJabatanSekolah(db, uk.ID)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
+	fungsional, pelaksana := splitPetaJabatanByJenis(peta.Rows)
+	kelompok := pelaksana
+	ketemu := false
+	for _, row := range kelompok {
+		if row.IDJabatan == idJabatan {
+			ketemu = true
+			break
+		}
+	}
+	if !ketemu {
+		kelompok = fungsional
+		for _, row := range kelompok {
+			if row.IDJabatan == idJabatan {
+				ketemu = true
+				break
+			}
+		}
+	}
+	if !ketemu {
+		utils.Error(w, http.StatusNotFound, "jabatan ini tidak ditemukan pada unit ini")
+		return
+	}
+
+	idx := -1
+	for i, row := range kelompok {
+		if row.IDJabatan == idJabatan {
+			idx = i
+			break
+		}
+	}
+	target := idx - 1
+	posisi := "paling atas"
+	if p.Arah == "bawah" {
+		target = idx + 1
+		posisi = "paling bawah"
+	}
+	if target < 0 || target >= len(kelompok) {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf(
+			"jabatan \"%s\" sudah berada di posisi %s pada kelompoknya", kelompok[idx].Jabatan, posisi))
+		return
+	}
+
+	urutanBaru := make([]int, len(kelompok))
+	for i := range kelompok {
+		urutanBaru[i] = (i + 1) * 10
+	}
+	urutanBaru[idx], urutanBaru[target] = urutanBaru[target], urutanBaru[idx]
+
+	for i, row := range kelompok {
+		if err := setFormasiJabatanUrutan(db, uk.ID, row.IDJabatan, urutanBaru[i]); err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan urutan: "+err.Error())
+			return
+		}
+	}
+	utils.Success(w, fmt.Sprintf("jabatan \"%s\" dipindahkan", kelompok[idx].Jabatan), nil)
 }

@@ -60,14 +60,26 @@ type pegawaiDinasBelumDitempatkanOut struct {
 // baik karena belum punya unit kerja sama sekali, maupun karena masih
 // menunjuk ke baris Unit Kerja lama di luar pohon baru ini. Administrator
 // memakai daftar ini sebagai "pekerjaan rumah" penempatan.
+//
+// Permintaan pengguna: pegawai yang SAAT INI menjabat sebagai kepala MANA
+// PUN node pada pohon (Plt. Kepala Dinas/Kepala Dinas, Sekretaris, Kepala
+// Bidang, Kepala Seksi, Kasubag Kepegawaian -- lihat kepalaPegawaiIDsDinas)
+// TIDAK ikut muncul di daftar ini walau Pegawai.IDUnitKerja mereka sendiri
+// kebetulan belum/tidak menunjuk unit pada pohon baru -- nama & jabatan
+// mereka sudah tampil lewat pita judul kartu unitnya masing-masing,
+// sehingga tidak perlu lagi "ditempatkan" sebagai staf biasa.
 func listPegawaiDinasBelumDitempatkan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var pegawaiRows []models.Pegawai
 	scopePegawaiAktifDinas(db, db.Preload("UnitKerja").Preload("Jabatan")).
 		Order("nama asc").Find(&pegawaiRows)
+	kepalaIDs := kepalaPegawaiIDsDinas(db)
 
 	out := make([]pegawaiDinasBelumDitempatkanOut, 0)
 	for _, p := range pegawaiRows {
 		if isSekolahPegawai(p) {
+			continue
+		}
+		if kepalaIDs[p.ID] {
 			continue
 		}
 		sudahDiStrukturDinas := p.UnitKerja != nil && p.UnitKerja.TipeStrukturDinas != nil && *p.UnitKerja.TipeStrukturDinas != ""

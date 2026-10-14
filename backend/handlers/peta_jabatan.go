@@ -213,6 +213,14 @@ type jabatanPetaOut struct {
 	// JABATAN PELAKSANA") & menampilkan kolom KJ, TANPA perlu query ulang.
 	JenisJabatan string `json:"jenis_jabatan"`
 	KJ           *int   `json:"kj"`
+	// Urutan: lihat models.FormasiJabatan.Urutan -- dipakai SEBAGAI KUNCI
+	// URUT UTAMA baris ini (lihat sort.Slice di hitungPetaJabatanSekolah).
+	// SENGAJA TIDAK diekspos ke JSON (json:"-") -- frontend cukup memakai
+	// urutan ARRAY hasil API ini apa adanya (array sudah terurut benar),
+	// nilai mentahnya hanya dipakai INTERNAL oleh geserJabatanDinasHandler
+	// (handlers/peta_jabatan_dinas.go, memanggil ulang
+	// hitungPetaJabatanSekolah langsung di Go, bukan lewat JSON).
+	Urutan int `json:"-"`
 }
 
 type petaJabatanSekolahOut struct {
@@ -280,6 +288,13 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 	var formasiRows []models.FormasiJabatan
 	db.Where("id_unit_kerja = ?", idUnitKerja).Find(&formasiRows)
 	kPerSub := map[uint]map[uint]int{} // [idJabatan][idSubJabatan-or-0] -> kebutuhan
+	// urutanPerJabatan: lihat models.FormasiJabatan.Urutan -- dibaca dari
+	// baris ber-IDSubJabatan NULL (Dinas tidak pernah memakai SubJabatan,
+	// lihat komentar atas peta_jabatan_dinas.go, jadi ini SELALU baris yang
+	// relevan untuk Dinas); default 0 kalau belum ada baris FormasiJabatan
+	// sama sekali untuk jabatan ini (mis. baris yang hanya muncul karena
+	// B>0, belum pernah diatur K/digeser).
+	urutanPerJabatan := map[uint]int{}
 	for _, f := range formasiRows {
 		subID := uint(0)
 		if f.IDSubJabatan != nil {
@@ -289,6 +304,9 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 			kPerSub[f.IDJabatan] = map[uint]int{}
 		}
 		kPerSub[f.IDJabatan][subID] = f.Kebutuhan
+		if f.IDSubJabatan == nil {
+			urutanPerJabatan[f.IDJabatan] = f.Urutan
+		}
 	}
 
 	jabatanIDSet := map[uint]bool{}
@@ -356,9 +374,21 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 			SubJabatan:      subOut,
 			JenisJabatan:    jenisJabatan,
 			KJ:              kjPerJabatan[idJabatan],
+			Urutan:          urutanPerJabatan[idJabatan],
 		})
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Jabatan < rows[j].Jabatan })
+	// Urutan ASLINYA (Peta Jabatan Sekolah, yang tidak memakai fitur geser
+	// sama sekali) selalu 0 utk SEMUA baris -- sort.Slice jatuh ke abjad
+	// nama jabatan persis seperti sebelum Urutan ada. Peta Jabatan Dinas
+	// (permintaan pengguna: "memindahkan jabatan ke atas atau ke bawah",
+	// lihat geserJabatanDinasHandler) memakai Urutan sebagai kunci utama
+	// begitu administrator pernah menggeser salah satu baris pada unit itu.
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Urutan != rows[j].Urutan {
+			return rows[i].Urutan < rows[j].Urutan
+		}
+		return rows[i].Jabatan < rows[j].Jabatan
+	})
 
 	return &petaJabatanSekolahOut{
 		UnitKerja: sekolahPetaJabatanOut{ID: uk.ID, Unit: uk.Unit},
@@ -713,6 +743,33 @@ func upsertFormasiJabatan(db *gorm.DB, idUnitKerja, idJabatan uint, idSubJabatan
 		return nil, err
 	}
 	return &item, nil
+}
+
+// setFormasiJabatanUrutan: helper khusus kolom Urutan (BEDA dari
+// upsertFormasiJabatan yang hanya mengubah Kebutuhan) -- dipakai
+// geserJabatanDinasHandler (handlers/peta_jabatan_dinas.go) menormalkan
+// ulang Urutan SELURUH baris sekelompok (Jabatan Pelaksana ATAU Jabatan
+// Fungsional) pada satu unit sekaligus setiap kali administrator
+// memindahkan satu jabatan ke atas/bawah. Selalu idSubJabatan NULL (Dinas
+// tidak pernah memakai SubJabatan). Kalau baris FormasiJabatan untuk
+// (idUnitKerja, idJabatan) belum ada sama sekali (mis. jabatan ini baru
+// muncul di tabel karena ada pegawai yang menjabatnya, B>0, TANPA baris K
+// pernah diatur), baris baru dibuat dengan Kebutuhan 0 supaya Urutan tetap
+// bisa tersimpan tanpa menimpa K yang memang belum pernah diisi siapa pun.
+func setFormasiJabatanUrutan(db *gorm.DB, idUnitKerja, idJabatan uint, urutan int) error {
+	var item models.FormasiJabatan
+	err := db.Where("id_unit_kerja = ? AND id_jabatan = ? AND id_sub_jabatan IS NULL", idUnitKerja, idJabatan).First(&item).Error
+	if err != nil {
+		if err != gorm.ErrRecordNotFound {
+			return err
+		}
+		item = models.FormasiJabatan{IDUnitKerja: idUnitKerja, IDJabatan: idJabatan, Kebutuhan: 0, Urutan: urutan}
+		return db.Create(&item).Error
+	}
+	if item.Urutan == urutan {
+		return nil
+	}
+	return db.Model(&item).Update("urutan", urutan).Error
 }
 
 // ============================================================
