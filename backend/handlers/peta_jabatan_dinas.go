@@ -82,6 +82,7 @@ func RegisterPetaJabatanDinasRoutes(mux *http.ServeMux, db *gorm.DB) {
 
 	mux.Handle("PUT /api/peta-jabatan/dinas/jabatan/{id}/kelas-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { updateJabatanKJDinasHandler(w, r, db) }))
 	mux.Handle("PUT /api/peta-jabatan/dinas/formasi", kelola(func(w http.ResponseWriter, r *http.Request) { setFormasiJabatanDinasHandler(w, r, db) }))
+	mux.Handle("DELETE /api/peta-jabatan/dinas/formasi/{idUnit}/{idJabatan}", kelola(func(w http.ResponseWriter, r *http.Request) { hapusFormasiJabatanDinasHandler(w, r, db) }))
 }
 
 // ============================================================
@@ -626,4 +627,57 @@ func setFormasiJabatanDinasHandler(w http.ResponseWriter, r *http.Request, db *g
 		return
 	}
 	utils.Success(w, "kebutuhan (K) berhasil disimpan", item)
+}
+
+// hapusFormasiJabatanDinasHandler menangani DELETE
+// /api/peta-jabatan/dinas/formasi/{idUnit}/{idJabatan} -- permintaan
+// pengguna: "buat agar administrator dapat menghapus jabatan yang tidak
+// diperlukan" (baris KJ/B/K/+- pada kartu unit, lihat tombol hapus di
+// PetaJabatanDinasNode.vue). Menghapus baris FormasiJabatan (unit, jabatan)
+// supaya jabatan ini TIDAK LAGI muncul pada tabel unit ini sama sekali --
+// hitungPetaJabatanSekolah (dipakai bersama Sekolah & Dinas) menyertakan
+// sebuah jabatan pada tabel kalau SALAH SATU dari: ada pegawai yang
+// menjabatnya di unit ini (B), ADA baris FormasiJabatan (K, walau K=0), atau
+// ada SubJabatan (Dinas tidak pernah memakai SubJabatan) -- jadi menghapus
+// baris FormasiJabatan SAJA baru benar-benar menghilangkan jabatan ini dari
+// tabel KALAU tidak ada pegawai (B=0) yang masih menjabatnya di unit ini.
+// DITOLAK (400) kalau B>0 -- SENGAJA TIDAK memindahkan/mengeluarkan pegawai
+// itu secara otomatis (beda jenis aksi, bisa tidak disengaja) -- administrator
+// diminta mengeluarkan pegawai itu dulu lewat dialog "Kelola Pegawai Unit
+// Ini"/klik kolom B, baru jabatan ini bisa dihapus dari unit.
+func hapusFormasiJabatanDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	idUnit := r.PathValue("idUnit")
+	idJabatan := r.PathValue("idJabatan")
+
+	var uk models.UnitKerja
+	if err := db.Select("id", "tempat_kerja").First(&uk, "id = ?", idUnit).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "unit kerja tidak ditemukan")
+		return
+	}
+	if uk.TempatKerja == nil || *uk.TempatKerja != models.TempatKerjaDinas {
+		utils.Error(w, http.StatusBadRequest, "unit ini bukan bagian struktur Peta Jabatan Dinas")
+		return
+	}
+	var jab models.Jabatan
+	if err := db.Select("id", "jabatan").First(&jab, "id = ?", idJabatan).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "jabatan tidak ditemukan")
+		return
+	}
+
+	var jumlahPegawai int64
+	scopePegawaiAktifDinas(db, db.Model(&models.Pegawai{})).
+		Where("id_unit_kerja = ? AND id_jabatan = ?", uk.ID, jab.ID).
+		Count(&jumlahPegawai)
+	if jumlahPegawai > 0 {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf(
+			"tidak bisa menghapus \"%s\" -- masih ada %d pegawai dengan jabatan ini di unit ini, keluarkan dulu lewat \"Kelola Pegawai Unit Ini\" atau klik kolom B jabatan ini",
+			jab.Jabatan, jumlahPegawai))
+		return
+	}
+
+	if err := db.Where("id_unit_kerja = ? AND id_jabatan = ?", uk.ID, jab.ID).Delete(&models.FormasiJabatan{}).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menghapus jabatan: "+err.Error())
+		return
+	}
+	utils.Success(w, fmt.Sprintf("jabatan \"%s\" dihapus dari unit ini", jab.Jabatan), nil)
 }

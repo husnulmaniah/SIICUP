@@ -9,6 +9,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
+import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 
 // PetaJabatanDinasNode -- SATU node pohon struktur "Peta Jabatan Dinas"
@@ -246,7 +247,9 @@ async function simpanKepala() {
 const pegawaiDialog = ref(false)
 const pegawaiDiUnit = ref([])
 const pegawaiDiUnitLoading = ref(false)
-const tambahPegawaiId = ref(null)
+// tambahPegawaiIds: ARRAY (permintaan pengguna -- bisa menambahkan LEBIH
+// DARI SATU pegawai sekaligus, tidak hanya satu per satu).
+const tambahPegawaiIds = ref([])
 const tambahPegawaiSubmitting = ref(false)
 const keluarkanSubmitting = ref({})
 
@@ -266,21 +269,35 @@ async function loadPegawaiDiUnit() {
   }
 }
 function openPegawaiDialog() {
-  tambahPegawaiId.value = null
+  tambahPegawaiIds.value = []
   pegawaiDialog.value = true
   loadPegawaiDiUnit()
 }
+// tambahPegawaiKeUnit: permintaan pengguna -- bisa menambahkan LEBIH DARI
+// SATU pegawai sekaligus. Backend TIDAK punya endpoint "batch" tersendiri,
+// jadi tiap pegawai terpilih dikirim lewat PUT .../unit-kerja yang sama
+// (SEJAJAR lewat Promise.allSettled supaya satu pegawai gagal tidak
+// membatalkan pegawai lain yang berhasil), baru SEKALI muat ulang roster +
+// pancarkan 'changed' di akhir.
 async function tambahPegawaiKeUnit() {
-  if (!tambahPegawaiId.value) return
+  if (!tambahPegawaiIds.value.length) return
   tambahPegawaiSubmitting.value = true
   try {
-    await http.put(`/peta-jabatan/dinas/pegawai/${tambahPegawaiId.value}/unit-kerja`, { id_unit_kerja: props.node.id })
-    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pegawai ditambahkan ke unit ini', life: 3000 })
-    tambahPegawaiId.value = null
+    const ids = [...tambahPegawaiIds.value]
+    const hasil = await Promise.allSettled(
+      ids.map((id) => http.put(`/peta-jabatan/dinas/pegawai/${id}/unit-kerja`, { id_unit_kerja: props.node.id })),
+    )
+    const gagal = hasil.filter((h) => h.status === 'rejected').length
+    const berhasil = ids.length - gagal
+    if (berhasil > 0) {
+      toast.add({ severity: 'success', summary: 'Berhasil', detail: `${berhasil} pegawai ditambahkan ke unit ini`, life: 3000 })
+    }
+    if (gagal > 0) {
+      toast.add({ severity: 'error', summary: 'Sebagian gagal', detail: `${gagal} dari ${ids.length} pegawai gagal ditambahkan`, life: 5000 })
+    }
+    tambahPegawaiIds.value = []
     await loadPegawaiDiUnit()
     emit('changed')
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal menambahkan', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
     tambahPegawaiSubmitting.value = false
   }
@@ -319,7 +336,9 @@ const rosterDialog = ref(false)
 const rosterRow = ref(null)
 const rosterPegawai = ref([])
 const rosterLoading = ref(false)
-const rosterTambahId = ref(null)
+// rosterTambahIds: ARRAY (permintaan pengguna -- bisa menambahkan LEBIH
+// DARI SATU pegawai sekaligus, tidak hanya satu per satu).
+const rosterTambahIds = ref([])
 const rosterTambahSubmitting = ref(false)
 const rosterKeluarkanSubmitting = ref({})
 
@@ -347,21 +366,33 @@ async function loadRoster() {
 }
 function openRosterDialog(row) {
   rosterRow.value = row
-  rosterTambahId.value = null
+  rosterTambahIds.value = []
   rosterDialog.value = true
   loadRoster()
 }
+// rosterTambahKeUnit: permintaan pengguna -- bisa menambahkan LEBIH DARI
+// SATU pegawai sekaligus ke jabatan ini (sama persis pola
+// tambahPegawaiKeUnit di atas -- Promise.allSettled supaya satu pegawai
+// gagal tidak membatalkan pegawai lain yang berhasil).
 async function rosterTambahKeUnit() {
-  if (!rosterTambahId.value) return
+  if (!rosterTambahIds.value.length) return
   rosterTambahSubmitting.value = true
   try {
-    await http.put(`/peta-jabatan/dinas/pegawai/${rosterTambahId.value}/unit-kerja`, { id_unit_kerja: props.node.id })
-    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Pegawai ditambahkan ke unit ini', life: 3000 })
-    rosterTambahId.value = null
+    const ids = [...rosterTambahIds.value]
+    const hasil = await Promise.allSettled(
+      ids.map((id) => http.put(`/peta-jabatan/dinas/pegawai/${id}/unit-kerja`, { id_unit_kerja: props.node.id })),
+    )
+    const gagal = hasil.filter((h) => h.status === 'rejected').length
+    const berhasil = ids.length - gagal
+    if (berhasil > 0) {
+      toast.add({ severity: 'success', summary: 'Berhasil', detail: `${berhasil} pegawai ditambahkan ke unit ini`, life: 3000 })
+    }
+    if (gagal > 0) {
+      toast.add({ severity: 'error', summary: 'Sebagian gagal', detail: `${gagal} dari ${ids.length} pegawai gagal ditambahkan`, life: 5000 })
+    }
+    rosterTambahIds.value = []
     await loadRoster()
     emit('changed')
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Gagal menambahkan', detail: e.response?.data?.message || e.message, life: 5000 })
   } finally {
     rosterTambahSubmitting.value = false
   }
@@ -424,6 +455,41 @@ async function simpanTambahJabatan() {
   } finally {
     tambahJabatanSubmitting.value = false
   }
+}
+
+// ============================================================
+// Hapus Jabatan -- permintaan pengguna: "buat agar administrator dapat
+// menghapus jabatan yang tidak diperlukan" (mis. baris jabatan dobel
+// akibat salah ketik huruf besar/kecil pada data master, atau jabatan yang
+// memang tidak dipakai unit ini). Backend (hapusFormasiJabatanDinasHandler)
+// MENOLAK (400) kalau B (bezetting) jabatan ini di unit ini masih > 0 --
+// pesan errornya ditampilkan apa adanya supaya administrator tahu harus
+// mengeluarkan pegawainya dulu lewat dialog roster (klik kolom B).
+// ============================================================
+const hapusJabatanSubmitting = ref({})
+function konfirmasiHapusJabatan(row) {
+  confirm.require({
+    message: `Hapus jabatan "${row.jabatan}" dari unit "${props.node.unit}"? Baris KJ/B/K/+- jabatan ini akan hilang dari tabel.`,
+    header: 'Konfirmasi Hapus Jabatan',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Ya, Hapus',
+    rejectLabel: 'Batal',
+    acceptProps: { severity: 'danger' },
+    accept: async () => {
+      hapusJabatanSubmitting.value = { ...hapusJabatanSubmitting.value, [row.id_jabatan]: true }
+      try {
+        await http.delete(`/peta-jabatan/dinas/formasi/${props.node.id}/${row.id_jabatan}`)
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: `Jabatan "${row.jabatan}" dihapus dari unit ini`, life: 3000 })
+        emit('changed')
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal menghapus jabatan', detail: e.response?.data?.message || e.message, life: 6000 })
+      } finally {
+        const copy = { ...hapusJabatanSubmitting.value }
+        delete copy[row.id_jabatan]
+        hapusJabatanSubmitting.value = copy
+      }
+    },
+  })
 }
 
 // ============================================================
@@ -506,12 +572,13 @@ async function ubahK(row) {
             <th style="width: 70px">B</th>
             <th style="width: 90px">K</th>
             <th style="width: 80px">+/-</th>
+            <th v-if="bolehKelola" style="width: 60px">Aksi</th>
           </tr>
         </thead>
         <tbody>
           <template v-if="pelaksanaRows.length">
             <tr class="dinas-group-bar dinas-group-bar--pelaksana">
-              <td colspan="5">JABATAN PELAKSANA</td>
+              <td :colspan="bolehKelola ? 6 : 5">JABATAN PELAKSANA</td>
             </tr>
             <tr v-for="row in pelaksanaRows" :key="`pel-${row.id_jabatan}`">
               <td>{{ row.jabatan }}</td>
@@ -546,6 +613,17 @@ async function ubahK(row) {
                 <span v-else>{{ row.k }}</span>
               </td>
               <td><Tag :value="signed(row.selisih)" :severity="selisihSeverity(row.selisih)" /></td>
+              <td v-if="bolehKelola">
+                <Button
+                  icon="pi pi-trash"
+                  size="small"
+                  severity="danger"
+                  outlined
+                  title="Hapus Jabatan Ini dari Unit"
+                  :loading="hapusJabatanSubmitting[row.id_jabatan]"
+                  @click="konfirmasiHapusJabatan(row)"
+                />
+              </td>
             </tr>
             <tr class="dinas-group-subtotal">
               <td>Jumlah Kebutuhan JP</td>
@@ -553,11 +631,12 @@ async function ubahK(row) {
               <td>{{ pelaksanaSum.b }}</td>
               <td>{{ pelaksanaSum.k }}</td>
               <td><Tag :value="signed(pelaksanaSum.b - pelaksanaSum.k)" :severity="selisihSeverity(pelaksanaSum.b - pelaksanaSum.k)" /></td>
+              <td v-if="bolehKelola"></td>
             </tr>
           </template>
           <template v-if="fungsionalRows.length">
             <tr class="dinas-group-bar dinas-group-bar--fungsional">
-              <td colspan="5">JABATAN FUNGSIONAL</td>
+              <td :colspan="bolehKelola ? 6 : 5">JABATAN FUNGSIONAL</td>
             </tr>
             <tr v-for="row in fungsionalRows" :key="`fun-${row.id_jabatan}`">
               <td>{{ row.jabatan }}</td>
@@ -592,6 +671,17 @@ async function ubahK(row) {
                 <span v-else>{{ row.k }}</span>
               </td>
               <td><Tag :value="signed(row.selisih)" :severity="selisihSeverity(row.selisih)" /></td>
+              <td v-if="bolehKelola">
+                <Button
+                  icon="pi pi-trash"
+                  size="small"
+                  severity="danger"
+                  outlined
+                  title="Hapus Jabatan Ini dari Unit"
+                  :loading="hapusJabatanSubmitting[row.id_jabatan]"
+                  @click="konfirmasiHapusJabatan(row)"
+                />
+              </td>
             </tr>
             <tr class="dinas-group-subtotal">
               <td>Jumlah Kebutuhan JF</td>
@@ -599,6 +689,7 @@ async function ubahK(row) {
               <td>{{ fungsionalSum.b }}</td>
               <td>{{ fungsionalSum.k }}</td>
               <td><Tag :value="signed(fungsionalSum.b - fungsionalSum.k)" :severity="selisihSeverity(fungsionalSum.b - fungsionalSum.k)" /></td>
+              <td v-if="bolehKelola"></td>
             </tr>
           </template>
         </tbody>
@@ -689,23 +780,29 @@ async function ubahK(row) {
         </li>
       </ul>
       <div class="field-label" style="margin-top: 0.5rem">Tambahkan pegawai (belum punya Bidang/Seksi)</div>
-      <div style="display: flex; gap: 0.5rem; margin-top: 0.3rem">
-        <Select
-          v-model="tambahPegawaiId"
-          :options="pegawaiBelumOptions"
-          optionLabel="label"
-          optionValue="value"
-          filter
-          placeholder="Pilih pegawai"
-          style="flex: 1"
-        />
-        <Button label="Tambahkan" :disabled="!tambahPegawaiId" :loading="tambahPegawaiSubmitting" @click="tambahPegawaiKeUnit" />
-      </div>
+      <MultiSelect
+        v-model="tambahPegawaiIds"
+        :options="pegawaiBelumOptions"
+        optionLabel="label"
+        optionValue="value"
+        filter
+        display="chip"
+        filterPlaceholder="Ketik nama / NIP"
+        placeholder="Pilih satu atau beberapa pegawai"
+        style="width: 100%; margin-top: 0.3rem"
+      />
       <p v-if="!pegawaiBelumOptions.length" style="font-size: 0.78rem; color: var(--p-text-muted-color); margin: 0.5rem 0 0">
         Semua pegawai Dinas sudah ditempatkan ke salah satu unit struktur.
       </p>
       <template #footer>
         <Button label="Tutup" severity="secondary" outlined @click="pegawaiDialog = false" />
+        <Button
+          :label="tambahPegawaiIds.length ? `Tambahkan (${tambahPegawaiIds.length})` : 'Tambahkan'"
+          icon="pi pi-user-plus"
+          :disabled="!tambahPegawaiIds.length"
+          :loading="tambahPegawaiSubmitting"
+          @click="tambahPegawaiKeUnit"
+        />
       </template>
     </Dialog>
 
@@ -734,23 +831,29 @@ async function ubahK(row) {
         </li>
       </ul>
       <div class="field-label" style="margin-top: 0.5rem">Tambahkan pegawai dengan jabatan "{{ rosterRow?.jabatan }}"</div>
-      <div style="display: flex; gap: 0.5rem; margin-top: 0.3rem">
-        <Select
-          v-model="rosterTambahId"
-          :options="rosterTambahOptions"
-          optionLabel="label"
-          optionValue="value"
-          filter
-          placeholder="Pilih pegawai"
-          style="flex: 1"
-        />
-        <Button label="Tambahkan" :disabled="!rosterTambahId" :loading="rosterTambahSubmitting" @click="rosterTambahKeUnit" />
-      </div>
+      <MultiSelect
+        v-model="rosterTambahIds"
+        :options="rosterTambahOptions"
+        optionLabel="label"
+        optionValue="value"
+        filter
+        display="chip"
+        filterPlaceholder="Ketik nama / NIP"
+        placeholder="Pilih satu atau beberapa pegawai"
+        style="width: 100%; margin-top: 0.3rem"
+      />
       <p v-if="!rosterTambahOptions.length" style="font-size: 0.78rem; color: var(--p-text-muted-color); margin: 0.5rem 0 0">
         Tidak ada pegawai belum ditempatkan dengan jabatan ini (perbandingan jabatan tidak memandang huruf besar/kecil).
       </p>
       <template #footer>
         <Button label="Tutup" severity="secondary" outlined @click="rosterDialog = false" />
+        <Button
+          :label="rosterTambahIds.length ? `Tambahkan (${rosterTambahIds.length})` : 'Tambahkan'"
+          icon="pi pi-user-plus"
+          :disabled="!rosterTambahIds.length"
+          :loading="rosterTambahSubmitting"
+          @click="rosterTambahKeUnit"
+        />
       </template>
     </Dialog>
 
