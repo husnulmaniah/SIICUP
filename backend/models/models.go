@@ -79,6 +79,29 @@ const (
 	TempatKerjaSekolah = "sekolah"
 )
 
+// StrukturDinas...: nilai kolom UnitKerja.TipeStrukturDinas -- tipe node pada
+// pohon struktur organisasi "Peta Jabatan Dinas" (HANYA relevan kalau
+// TempatKerja == TempatKerjaDinas; untuk unit kerja Sekolah field ini selalu
+// kosong/nil, karena Peta Jabatan Sekolah memakai struktur flat seperti
+// sebelumnya, tidak dipengaruhi field ini).
+//   - StrukturDinasRoot: SATU-SATUNYA node akar (induk == nil) yaitu "Dinas
+//     Pendidikan dan Kebudayaan ..." sendiri -- tampilan Kepala Dinas/Plt
+//     Kepala Dinas di node ini TIDAK memakai IDAtasanLangsung seperti node
+//     lain, melainkan pengaturanSuratOrDefault/resolveSignerFullRekomendasi
+//     (lihat handlers/surat_rekomendasi.go) supaya konsisten dengan tanda
+//     tangan Kepala Dinas di surat-surat lain.
+//   - StrukturDinasSekretariat/StrukturDinasBidang: anak LANGSUNG dari node
+//     root (IDIndukUnitKerja menunjuk ke root).
+//   - StrukturDinasSubBagian: anak dari node Sekretariat.
+//   - StrukturDinasSeksi: anak dari node Bidang.
+const (
+	StrukturDinasRoot        = "dinas"
+	StrukturDinasSekretariat = "sekretariat"
+	StrukturDinasBidang      = "bidang"
+	StrukturDinasSeksi       = "seksi"
+	StrukturDinasSubBagian   = "sub_bagian"
+)
+
 // UnitKerja merepresentasikan unit kerja/sekolah tempat pegawai bertugas.
 //   - IDKecamatan/Kecamatan: kecamatan tempat unit kerja/sekolah ini berada
 //     (opsional -- nullable untuk data lama yang belum diisi administrator).
@@ -231,6 +254,30 @@ type UnitKerja struct {
 	// ------------------------------------------------------------
 	IDAtasanLangsung *uint    `json:"id_atasan_langsung" gorm:"column:id_atasan_langsung"`
 	AtasanLangsung   *Pegawai `json:"atasan,omitempty" gorm:"-:migration;foreignKey:IDAtasanLangsung;references:ID"`
+	// ------------------------------------------------------------
+	// IDIndukUnitKerja/IndukUnitKerja: induk (parent) node ini pada pohon
+	// struktur organisasi "Peta Jabatan Dinas" -- KHUSUS unit kerja dengan
+	// TempatKerja == TempatKerjaDinas (nil/tidak dipakai untuk Sekolah, yang
+	// tetap memakai daftar flat seperti sebelumnya). nil berarti node ini
+	// adalah akar pohon (lihat StrukturDinasRoot).
+	//
+	// NB -- PENTING: field ini SENGAJA diberi nama Go, nama kolom DB, DAN
+	// key JSON yang semuanya beda dari IDAtasanLangsung/AtasanLangsung DI
+	// ATAS (yang juga self-relation ke *UnitKerja) -- mengikuti pola
+	// pencegahan bug GORM yang sama persis seperti yang dijelaskan pada
+	// komentar IDAtasanLangsung: kalau nama field Go ATAU nama kolom DB
+	// sama antara dua relasi self-referencing pada model yang sama, GORM
+	// bisa salah kaprah saat AutoMigrate (foreign key terpasang di tempat
+	// salah) atau saat Preload (arah query terbalik). Relasi
+	// IndukUnitKerja juga diberi tag "-:migration" dengan alasan yang sama.
+	// ------------------------------------------------------------
+	IDIndukUnitKerja *uint      `json:"id_induk_unit_kerja" gorm:"column:id_induk_unit_kerja"`
+	IndukUnitKerja   *UnitKerja `json:"induk,omitempty" gorm:"-:migration;foreignKey:IDIndukUnitKerja;references:ID"`
+	// TipeStrukturDinas: tipe node ini pada pohon "Peta Jabatan Dinas" --
+	// lihat konstanta StrukturDinas... di atas. nil/kosong untuk unit kerja
+	// Sekolah ATAU untuk unit kerja Dinas lama yang belum pernah dimasukkan
+	// ke pohon struktur (kompatibel dengan data lama).
+	TipeStrukturDinas *string `json:"tipe_struktur_dinas" gorm:"column:tipe_struktur_dinas;size:20"`
 }
 
 // PerataanKopKiri/PerataanKopKanan/PerataanKopTengah: nilai valid untuk

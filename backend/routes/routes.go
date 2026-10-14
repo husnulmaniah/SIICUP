@@ -39,6 +39,9 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 	handlers.RegisterBeritaAcaraRoutes(mux, db)
 	handlers.RegisterPengajuanBeritaAcaraRoutes(mux, db)
 	handlers.RegisterPetaJabatanRoutes(mux, db)
+	handlers.RegisterPetaJabatanDinasRoutes(mux, db)
+	handlers.RegisterPetaJabatanDinasPegawaiRoutes(mux, db)
+	handlers.RegisterPetaJabatanDinasExportRoutes(mux, db)
 	handlers.RegisterPetaJabatanKenaikanPangkatRoutes(mux, db)
 	handlers.RegisterPetaJabatanPerubahanRoutes(mux, db)
 

@@ -22,15 +22,19 @@ import Tab from 'primevue/tab'
 import TabPanels from 'primevue/tabpanels'
 import TabPanel from 'primevue/tabpanel'
 import PengajuanStepper from '../components/PengajuanStepper.vue'
+import PetaJabatanDinasNode from '../components/PetaJabatanDinasNode.vue'
 
 // PetaJabatanView -- menu "Peta Jabatan" (dropdown Administrasi Kepegawaian
 // untuk administrator/admin, + menu langsung untuk pegawai & atasan). Lihat
 // komentar alur lengkap di backend/models/models.go (bagian "PETA JABATAN --
 // SEKOLAH") & backend/handlers/peta_jabatan*.go.
 //
-// Tab "Peta Jabatan Dinas" BELUM dikerjakan (menyusul kemudian, permintaan
-// pengguna) -- ditampilkan nonaktif dengan badge "Segera Hadir". Seluruh
-// komponen di bawah ini KHUSUS tab "Peta Jabatan Sekolah".
+// Tab "Peta Jabatan Dinas" (pohon struktur Sekretariat/Bidang/Seksi/Sub
+// Bagian + garis komando, lihat backend/handlers/peta_jabatan_dinas*.go &
+// komponen rekursif ../components/PetaJabatanDinasNode.vue) memakai state &
+// fungsi TERPISAH (awalan "dinas...") dari seluruh komponen Peta Jabatan
+// Sekolah di bawah -- keduanya BERBEDA model data & hak kelola (lihat
+// komentar masing-masing bagian).
 const toast = useToast()
 const confirm = useConfirm()
 const auth = useAuthStore()
@@ -73,6 +77,121 @@ const currentUnitKerjaId = computed(() => (auth.canManageMaster ? selectedUnitKe
 const canSeeSekolahTab = computed(() => auth.canManageMaster || auth.isSekolah)
 const canSeeDinasTab = computed(() => auth.canManageMaster || !auth.isSekolah)
 const defaultPetaTab = computed(() => (canSeeSekolahTab.value ? 'sekolah' : 'dinas'))
+
+// ============================================================
+// Tab "Peta Jabatan Dinas" -- pohon TUNGGAL (Kepala Dinas -> Sekretariat/
+// Bidang -> Sub Bagian/Seksi, lihat backend/handlers/peta_jabatan_dinas.go)
+// untuk SELURUH instansi, beda dari Sekolah yang per-unit & perlu dropdown
+// pemilihan. Dirender rekursif lewat PetaJabatanDinasNode.vue. Hak kelola
+// (tambah/ubah/hapus struktur, ubah kepala, ubah KJ/K) HANYA administrator
+// (boleh_kelola dari backend) -- admin/atasan/pegawai hanya melihat, sesuai
+// permintaan pengguna.
+// ============================================================
+const dinasTree = ref(null)
+const dinasLoading = ref(false)
+const dinasBolehKelola = computed(() => !!dinasTree.value?.boleh_kelola)
+
+async function loadDinasTree() {
+  dinasLoading.value = true
+  try {
+    const { data } = await http.get('/peta-jabatan/dinas')
+    dinasTree.value = data.data
+  } catch (e) {
+    dinasTree.value = null
+    toast.add({ severity: 'error', summary: 'Gagal memuat Peta Jabatan Dinas', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    dinasLoading.value = false
+  }
+}
+
+// daftar pegawai (/ref/pegawai, SEMUA pegawai, bukan hanya Dinas -- biarkan
+// administrator yang memilih dengan benar) untuk dialog "Ubah Kepala" pada
+// setiap node -- dimuat SEKALI di sini & diteruskan sebagai prop ke seluruh
+// node (termasuk turunannya secara rekursif) supaya tidak perlu memanggil
+// API yang sama berulang kali per node.
+const dinasPegawaiOptions = ref([])
+async function loadDinasPegawaiOptions() {
+  try {
+    const { data } = await http.get('/ref/pegawai')
+    dinasPegawaiOptions.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat daftar pegawai', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+const dinasCetakExcelSubmitting = ref(false)
+const dinasCetakPdfSubmitting = ref(false)
+async function unduhPetaJabatanDinas(jenis) {
+  const loadingRef = jenis === 'excel' ? dinasCetakExcelSubmitting : dinasCetakPdfSubmitting
+  loadingRef.value = true
+  try {
+    const endpoint = jenis === 'excel' ? '/peta-jabatan/dinas/export-excel' : '/peta-jabatan/dinas/cetak-pdf'
+    const res = await http.get(endpoint, { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `peta_jabatan_dinas.${jenis === 'excel' ? 'xlsx' : 'pdf'}`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal mengunduh', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    loadingRef.value = false
+  }
+}
+
+// ============================================================
+// "Pegawai Dinas Belum Ditempatkan" -- permintaan pengguna (Task #23):
+// administrator menempatkan pegawai bertempat tugas Dinas/Kantor yang
+// unit kerjanya saat ini BELUM (atau tidak lagi) bagian dari pohon struktur
+// di atas, ke salah satu unit (Sekretariat/Bidang/Seksi/Sub Bagian).
+// ============================================================
+const dinasBelumDitempatkan = ref([])
+const dinasBelumDitempatkanLoading = ref(false)
+async function loadDinasBelumDitempatkan() {
+  dinasBelumDitempatkanLoading.value = true
+  try {
+    const { data } = await http.get('/peta-jabatan/dinas/pegawai/belum-ditempatkan')
+    dinasBelumDitempatkan.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    dinasBelumDitempatkanLoading.value = false
+  }
+}
+
+// daftar SELURUH unit struktur Dinas (flat, tanpa filter tipe) -- opsi
+// Select "Tempatkan ke Unit" per baris pegawai di atas.
+const dinasStrukturFlat = ref([])
+async function loadDinasStrukturFlat() {
+  try {
+    const { data } = await http.get('/peta-jabatan/dinas/struktur/daftar')
+    dinasStrukturFlat.value = data.data || []
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal memuat daftar unit', detail: e.response?.data?.message || e.message, life: 5000 })
+  }
+}
+
+const dinasTempatkanTarget = ref({})
+const dinasTempatkanSubmitting = ref({})
+async function tempatkanPegawaiDinas(pg) {
+  const idUnitKerja = dinasTempatkanTarget.value[pg.id]
+  if (!idUnitKerja) return
+  dinasTempatkanSubmitting.value = { ...dinasTempatkanSubmitting.value, [pg.id]: true }
+  try {
+    await http.put(`/peta-jabatan/dinas/pegawai/${pg.id}/unit-kerja`, { id_unit_kerja: idUnitKerja })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: `${pg.nama} berhasil ditempatkan`, life: 3000 })
+    await Promise.all([loadDinasBelumDitempatkan(), loadDinasTree()])
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menempatkan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    const copy = { ...dinasTempatkanSubmitting.value }
+    delete copy[pg.id]
+    dinasTempatkanSubmitting.value = copy
+  }
+}
 
 async function loadDaftarSekolah() {
   try {
@@ -1023,6 +1142,17 @@ onMounted(() => {
   if (auth.isPegawai || auth.isAtasan) {
     loadPerubahanSaya()
   }
+  if (canSeeDinasTab.value) {
+    loadDinasTree()
+    // "Ubah Kepala"/"Pegawai Belum Ditempatkan" HANYA administrator (BUKAN
+    // admin -- beda dari Sekolah yang canManageMaster, lihat permintaan
+    // pengguna & hak kelola Dinas di backend/handlers/peta_jabatan_dinas*.go)
+    if (auth.isAdministrator) {
+      loadDinasPegawaiOptions()
+      loadDinasBelumDitempatkan()
+      loadDinasStrukturFlat()
+    }
+  }
 })
 </script>
 
@@ -1057,18 +1187,112 @@ onMounted(() => {
 
     <Tabs :value="defaultPetaTab">
       <TabList>
-        <Tab v-if="canSeeDinasTab" value="dinas" disabled>
-          Peta Jabatan Dinas
-          <Tag value="Segera Hadir" severity="secondary" style="margin-left: 0.4rem" />
-        </Tab>
+        <Tab v-if="canSeeDinasTab" value="dinas"><i class="pi pi-building" style="margin-right: 0.4rem"></i> Peta Jabatan Dinas</Tab>
         <Tab v-if="canSeeSekolahTab" value="sekolah"><i class="pi pi-sitemap" style="margin-right: 0.4rem"></i> Peta Jabatan Sekolah</Tab>
       </TabList>
       <TabPanels>
         <TabPanel v-if="canSeeDinasTab" value="dinas">
-          <Message severity="info" :closable="false">
-            Peta Jabatan Dinas (untuk pegawai bertempat tugas Dinas/Kantor) akan hadir menyusul setelah Peta Jabatan Sekolah
-            selesai.
-          </Message>
+          <div class="card">
+            <div class="tab-toolbar">
+              <div style="font-weight: 600; flex: 1">
+                <i class="pi pi-building" style="margin-right: 0.4rem"></i>{{ dinasTree?.root?.unit || 'Peta Jabatan Dinas' }}
+              </div>
+              <Button
+                label="Cetak Excel"
+                icon="pi pi-file-excel"
+                size="small"
+                severity="success"
+                outlined
+                :loading="dinasCetakExcelSubmitting"
+                title="Unduh seluruh struktur Peta Jabatan Dinas sebagai Excel"
+                @click="unduhPetaJabatanDinas('excel')"
+              />
+              <Button
+                label="Cetak PDF"
+                icon="pi pi-file-pdf"
+                size="small"
+                severity="danger"
+                outlined
+                :loading="dinasCetakPdfSubmitting"
+                title="Unduh organogram & tabel B/K Peta Jabatan Dinas sebagai PDF"
+                @click="unduhPetaJabatanDinas('pdf')"
+              />
+            </div>
+            <p class="page-subtitle" style="margin: 0.25rem 0 1rem 0">
+              Hanya administrator yang dapat mengelola struktur, kepala unit, KJ, dan kebutuhan (K) di bawah ini -- admin,
+              atasan, dan pegawai Dinas hanya dapat melihat.
+            </p>
+            <div v-if="dinasLoading" style="display: flex; justify-content: center; padding: 2rem">
+              <ProgressSpinner style="width: 2.5rem; height: 2.5rem" />
+            </div>
+            <Message v-else-if="!dinasTree?.root" severity="warn" :closable="false">
+              Struktur Peta Jabatan Dinas belum dibuat. Hubungi administrator sistem.
+            </Message>
+            <PetaJabatanDinasNode
+              v-else
+              :node="dinasTree.root"
+              :boleh-kelola="dinasBolehKelola"
+              :pegawai-options="dinasPegawaiOptions"
+              @changed="loadDinasTree"
+            />
+          </div>
+
+          <div v-if="dinasBolehKelola" class="card" style="margin-top: 1.25rem">
+            <h4 style="margin: 0 0 0.5rem 0">Pegawai Dinas Belum Ditempatkan</h4>
+            <p style="font-size: 0.82rem; color: var(--p-text-muted-color); margin: 0 0 0.75rem 0">
+              Pegawai bertempat tugas Dinas/Kantor yang unit kerjanya saat ini belum (atau belum lagi) merupakan bagian
+              dari struktur Peta Jabatan Dinas di atas -- pilih unit tujuan untuk menempatkannya.
+            </p>
+            <div class="responsive-table-wrap">
+              <DataTable
+                :value="dinasBelumDitempatkan"
+                :loading="dinasBelumDitempatkanLoading"
+                dataKey="id"
+                stripedRows
+                size="small"
+                style="min-width: 640px"
+              >
+                <template #empty>
+                  <div style="padding: 1rem; text-align: center; color: var(--p-text-muted-color)">
+                    Seluruh pegawai Dinas sudah ditempatkan ke struktur.
+                  </div>
+                </template>
+                <Column header="Pegawai">
+                  <template #body="{ data }">
+                    <div style="font-weight: 600">{{ data.nama }}</div>
+                    <div style="font-size: 0.78rem; color: var(--p-text-muted-color)">{{ data.nip }} &middot; {{ data.jabatan }}</div>
+                  </template>
+                </Column>
+                <Column header="Unit Saat Ini">
+                  <template #body="{ data }">{{ data.unit_kerja_saat_ini || '-' }}</template>
+                </Column>
+                <Column header="Tempatkan ke Unit" style="width: 280px">
+                  <template #body="{ data }">
+                    <Select
+                      v-model="dinasTempatkanTarget[data.id]"
+                      :options="dinasStrukturFlat"
+                      optionLabel="unit"
+                      optionValue="id"
+                      filter
+                      placeholder="Pilih unit"
+                      style="width: 100%"
+                    />
+                  </template>
+                </Column>
+                <Column header="Aksi" style="width: 120px">
+                  <template #body="{ data }">
+                    <Button
+                      label="Tempatkan"
+                      size="small"
+                      :disabled="!dinasTempatkanTarget[data.id]"
+                      :loading="dinasTempatkanSubmitting[data.id]"
+                      @click="tempatkanPegawaiDinas(data)"
+                    />
+                  </template>
+                </Column>
+              </DataTable>
+            </div>
+          </div>
         </TabPanel>
 
         <TabPanel v-if="canSeeSekolahTab" value="sekolah">

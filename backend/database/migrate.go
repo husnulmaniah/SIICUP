@@ -256,5 +256,11 @@ func Migrate(db *gorm.DB) {
 		log.Printf("migrasi: %d pengajuan kenaikan pangkat lama (menunggu_admin) dimajukan ke disetujui + perubahan jabatan menunggu_upload", len(pendingKP))
 	}
 
+	// Struktur awal "Peta Jabatan Dinas" (Sekretariat/Bidang/Seksi/Sub
+	// Bagian + Jabatan Pelaksana/Fungsional-nya, ditranskripsi dari berkas
+	// ANJAB) -- lihat SeedPetaJabatanDinas di seed_peta_jabatan_dinas.go.
+	// Idempotent: dilewati total begitu root-nya sudah ada.
+	SeedPetaJabatanDinas(db)
+
 	log.Println("migrasi database berhasil")
 }
