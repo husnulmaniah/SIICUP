@@ -205,6 +205,12 @@ func RegisterPegawaiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	mux.Handle("POST /api/pegawai/{id}/dokumen/{jenis}", manage(func(w http.ResponseWriter, r *http.Request) { uploadDokumenPegawai(w, r, db) }))
 	mux.Handle("DELETE /api/pegawai/{id}/dokumen/{jenis}", manage(func(w http.ResponseWriter, r *http.Request) { deleteDokumenPegawai(w, r, db) }))
 
+	// Aktifkan status Pensiun/Mutasi LANGSUNG tanpa berkas pendukung --
+	// permintaan pengguna: "administrator dapat mengaktifkan tombol mutasi
+	// jika pegawai sudah mutasi tetapi tidak mengupload bukti dukung" (sama
+	// berlaku untuk pensiun). Lihat aktifkanStatusLangsungPegawai.
+	mux.Handle("PUT /api/pegawai/{id}/status-langsung/{jenis}", manage(func(w http.ResponseWriter, r *http.Request) { aktifkanStatusLangsungPegawai(w, r, db) }))
+
 	// Foto profil: endpoint TERPISAH dari dokumen SK di atas & dibuka untuk
 	// anyRole (bukan cuma manage/administrator-admin) karena setiap pegawai
 	// boleh melihat & mengganti foto profilnya SENDIRI kapan saja tanpa alur
@@ -405,6 +411,60 @@ func uploadDokumenPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		nonaktifkanPenerimaTppOtomatis(db, item.ID, "Mutasi / Pindah Tugas")
 	}
 	utils.Success(w, "dokumen berhasil diupload", map[string]string{"nama_file": header.Filename})
+}
+
+// aktifkanStatusLangsungPegawai mengubah status kepegawaian seorang pegawai
+// langsung jadi "Pensiun"/"Mutasi" TANPA mewajibkan berkas pendukung (SK
+// Pensiun/Berkas Pendukung Mutasi, lihat uploadDokumenPegawai di atas) lebih
+// dulu diupload -- permintaan pengguna: "administrator dapat mengaktifkan
+// tombol mutasi jika pegawai sudah mutasi tetapi tidak mengupload bukti
+// dukung, jadi data pegawai bisa berstatus mutasi jika administrator
+// mengaktifkan tombol mutasi dan pensiun" -- berguna untuk pegawai yang
+// nyatanya sudah pensiun/mutasi tapi berkas resminya belum tersedia/belum
+// sempat diupload. Efek sampingnya (akun login dinonaktifkan & baris
+// Penerima TPP ikut dinonaktifkan kalau masih aktif) SAMA PERSIS dengan
+// upload berkas -- satu-satunya beda, jalur ini TIDAK menyentuh kolom
+// dokumen apa pun (sk_pensiun_nama/sk_mutasi_nama tetap kosong kalau memang
+// belum pernah diupload). Membatalkannya kembali (misalnya ternyata keliru)
+// dilakukan administrator lewat form Edit Data Pegawai seperti biasa,
+// mengikuti pola yang sama dengan menghapus berkas SK Pensiun/Mutasi (lihat
+// deleteDokumenPegawai) yang juga tidak mengembalikan status secara
+// otomatis.
+func aktifkanStatusLangsungPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	id := r.PathValue("id")
+	jenis := r.PathValue("jenis")
+	if jenis != "pensiun" && jenis != "mutasi" {
+		utils.Error(w, http.StatusBadRequest, "jenis status tidak dikenal")
+		return
+	}
+	var item models.Pegawai
+	if err := db.First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return
+	}
+
+	var sid uint
+	var err error
+	label := "Pensiun"
+	alasanTpp := "Pensiun"
+	if jenis == "mutasi" {
+		label = "Mutasi"
+		alasanTpp = "Mutasi / Pindah Tugas"
+		sid, err = mutasiStatusID(db)
+	} else {
+		sid, err = pensiunStatusID(db)
+	}
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyiapkan status: "+err.Error())
+		return
+	}
+	if err := db.Model(&item).Update("id_status", sid).Error; err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan status: "+err.Error())
+		return
+	}
+	setAkunAktifByPegawai(db, item.ID, false)
+	nonaktifkanPenerimaTppOtomatis(db, item.ID, alasanTpp)
+	utils.Success(w, fmt.Sprintf("status pegawai berhasil diubah jadi \"%s\" tanpa berkas pendukung", label), nil)
 }
 
 // setAkunAktifByPegawai mengaktifkan/menonaktifkan akun login (models.User.

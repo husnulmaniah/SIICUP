@@ -465,6 +465,48 @@ function confirmRemoveDokumen(jenis, label) {
   })
 }
 
+// ---- aktifkan status Pensiun/Mutasi LANGSUNG tanpa berkas pendukung
+// (permintaan pengguna: "administrator dapat mengaktifkan tombol mutasi
+// jika pegawai sudah mutasi tetapi tidak mengupload bukti dukung, jadi data
+// pegawai bisa berstatus mutasi jika administrator mengaktifkan tombol
+// mutasi dan pensiun") -- lihat aktifkanStatusLangsungPegawai di
+// handlers/pegawai.go untuk efek sampingnya (akun login dinonaktifkan dst,
+// SAMA PERSIS dengan upload berkas). ----
+const statusLangsungSubmitting = ref({})
+
+function statusSaatIniAdalah(jenis) {
+  const s = (detailItem.value?.status?.status || '').toLowerCase()
+  return jenis === 'pensiun' ? s === 'pensiun' : s === 'mutasi'
+}
+
+function konfirmasiAktifkanStatusLangsung(jenis, label) {
+  confirm.require({
+    message: `Ubah status pegawai ini langsung jadi "${label}" TANPA mengupload berkas pendukung terlebih dulu? Akun login pegawai ini akan dinonaktifkan & tidak lagi dihitung di KP4/Peta Jabatan/TPP/dst -- sama seperti kalau berkasnya diupload.`,
+    header: `Aktifkan Status ${label}`,
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: `Ya, Aktifkan ${label}`,
+    rejectLabel: 'Batal',
+    acceptClass: 'p-button-warning',
+    accept: async () => {
+      statusLangsungSubmitting.value = { ...statusLangsungSubmitting.value, [jenis]: true }
+      try {
+        await http.put(`/pegawai/${detailItem.value.id}/status-langsung/${jenis}`)
+        // SAMA pola dengan upload SK Pensiun/berkas Mutasi (onDocFileChosen)
+        // -- muat ulang detail supaya tag Status di dialog ini & baris tabel
+        // di belakangnya ikut ter-update.
+        const refreshed = await http.get(`/pegawai/${detailItem.value.id}`)
+        detailItem.value = refreshed.data.data
+        fetchList()
+        toast.add({ severity: 'success', summary: 'Berhasil', detail: `Status pegawai berhasil diubah jadi "${label}"`, life: 3000 })
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 4000 })
+      } finally {
+        statusLangsungSubmitting.value = { ...statusLangsungSubmitting.value, [jenis]: false }
+      }
+    },
+  })
+}
+
 function fieldValue(row, path) {
   return path.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), row)
 }
@@ -1451,6 +1493,39 @@ const canManage = computed(() => true) // route guard already restricts page acc
           Surat Kolektif.
         </small>
 
+        <!-- Aktifkan status Pensiun/Mutasi TANPA berkas pendukung --
+        permintaan pengguna: pegawai yang sudah nyata-nya pensiun/mutasi
+        tapi berkas resminya belum tersedia/belum sempat diupload. -->
+        <div class="status-langsung-box">
+          <div style="font-weight: 600; margin-bottom: 0.3rem">Aktifkan Status Tanpa Berkas Pendukung</div>
+          <small style="display: block; margin-bottom: 0.6rem; color: var(--p-text-muted-color)">
+            Gunakan kalau pegawai ini sudah nyata-nya pensiun/mutasi, tapi berkas pendukungnya di atas belum
+            tersedia/belum sempat diupload -- efeknya sama seperti mengupload berkasnya.
+          </small>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+            <Button
+              label="Aktifkan Status Pensiun"
+              icon="pi pi-user-minus"
+              size="small"
+              outlined
+              severity="warn"
+              :disabled="statusSaatIniAdalah('pensiun')"
+              :loading="!!statusLangsungSubmitting.pensiun"
+              @click="konfirmasiAktifkanStatusLangsung('pensiun', 'Pensiun')"
+            />
+            <Button
+              label="Aktifkan Status Mutasi"
+              icon="pi pi-arrow-right-arrow-left"
+              size="small"
+              outlined
+              severity="warn"
+              :disabled="statusSaatIniAdalah('mutasi')"
+              :loading="!!statusLangsungSubmitting.mutasi"
+              @click="konfirmasiAktifkanStatusLangsung('mutasi', 'Mutasi')"
+            />
+          </div>
+        </div>
+
         <h4 style="margin: 1.5rem 0 0.75rem 0">Jatah Cuti Tahunan</h4>
         <div v-if="detailJatahCutiLoading" style="display: flex; justify-content: center; padding: 1rem">
           <ProgressSpinner style="width: 28px; height: 28px" />
@@ -1593,5 +1668,13 @@ const canManage = computed(() => true) // route guard already restricts page acc
   display: flex;
   gap: 0.4rem;
   flex-wrap: wrap;
+}
+
+.status-langsung-box {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px dashed #fbbf24;
+  background: #fffbeb;
+  border-radius: 10px;
 }
 </style>
