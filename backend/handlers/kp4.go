@@ -521,6 +521,20 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	filterLengkap := r.URL.Query().Get("lengkap")
 
+	// kp4AnakExportItem: SATU anak, dipecah jadi kolom-kolom tersendiri pada
+	// Excel (Nama, Status Tanggungan, Masih Sekolah/Kuliah, Sudah Bekerja,
+	// Status Perkawinan) -- permintaan pengguna: "buat agar masing-masing
+	// anak memiliki kolom tersendiri seperti kolom anak 1 ... begitupun
+	// untuk anak ke 2 dst", menggantikan SATU kolom "Daftar Anak" yang dulu
+	// menggabungkan semua anak jadi satu teks panjang dipisah titik koma.
+	type kp4AnakExportItem struct {
+		Nama             string
+		StatusTanggungan string
+		MasihSekolah     string
+		SudahBekerja     string
+		StatusPerkawinan string
+	}
+
 	type kp4ExportRow struct {
 		NIP                  string
 		Nama                 string
@@ -541,9 +555,26 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		PekerjaanPasangan    string
 		CatatanPasangan      string
 		JumlahAnak           string
-		DaftarNamaAnak       string
+		Anak                 []kp4AnakExportItem
 		StatusKp4            string
 		DataPegawai          string
+	}
+
+	// yaTidakLabel/statusKawinLabel: label boolean->teks untuk kolom per
+	// anak di bawah -- "Ya"/"Tidak" untuk Masih Sekolah/Kuliah & Sudah
+	// Bekerja, "Kawin"/"Belum Kawin" untuk Status Perkawinan (mengikuti
+	// Kp4Anak.SudahKawin).
+	yaTidakLabel := func(b bool) string {
+		if b {
+			return "Ya"
+		}
+		return "Tidak"
+	}
+	statusKawinLabel := func(b bool) string {
+		if b {
+			return "Kawin"
+		}
+		return "Belum Kawin"
 	}
 
 	// kp4CatatanTanggungan: label "TERTANGGUNG"/"TIDAK TERTANGGUNG" yang
@@ -608,7 +639,6 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			PekerjaanPasangan:    "-",
 			CatatanPasangan:      "-",
 			JumlahAnak:           strconv.Itoa(len(ring.Anak)),
-			DaftarNamaAnak:       "-",
 		}
 		if ring.Kp4Data != nil {
 			kp4 := ring.Kp4Data
@@ -629,12 +659,14 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			// kp4CatatanTanggungan di atas).
 			out.CatatanPasangan = kp4CatatanTanggungan(true)
 		}
-		if len(ring.Anak) > 0 {
-			namaAnak := make([]string, 0, len(ring.Anak))
-			for _, a := range ring.Anak {
-				namaAnak = append(namaAnak, fmt.Sprintf("%s (%s)", a.Nama, kp4CatatanTanggungan(a.DapatTunjangan)))
-			}
-			out.DaftarNamaAnak = strings.Join(namaAnak, "; ")
+		for _, a := range ring.Anak {
+			out.Anak = append(out.Anak, kp4AnakExportItem{
+				Nama:             namaOrDash(a.Nama),
+				StatusTanggungan: kp4CatatanTanggungan(a.DapatTunjangan),
+				MasihSekolah:     yaTidakLabel(a.MasihSekolah),
+				SudahBekerja:     yaTidakLabel(a.SudahBekerja),
+				StatusPerkawinan: statusKawinLabel(a.SudahKawin),
+			})
 		}
 		if ring.Kelengkapan.Kp4BelumLengkap {
 			out.StatusKp4 = "Belum Lengkap"
@@ -647,6 +679,24 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			out.DataPegawai = "Lengkap"
 		}
 		rows = append(rows, out)
+	}
+
+	// maxAnak: jumlah kolom per-anak yang disiapkan = jumlah anak TERBANYAK
+	// di antara seluruh pegawai yang diexport -- pegawai dengan anak lebih
+	// sedikit cukup mendapat "-" pada kolom anak yang tidak dia punya
+	// (lihat anakField di bawah), supaya tabel tetap satu bentuk (rectangular)
+	// walau jumlah anak tiap pegawai beda-beda.
+	maxAnak := 0
+	for _, row := range rows {
+		if len(row.Anak) > maxAnak {
+			maxAnak = len(row.Anak)
+		}
+	}
+	anakField := func(row kp4ExportRow, idx int, get func(kp4AnakExportItem) string) string {
+		if idx >= len(row.Anak) {
+			return "-"
+		}
+		return get(row.Anak[idx])
 	}
 
 	columns := []utils.ExcelColumn{
@@ -669,10 +719,38 @@ func kp4Export(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		{Header: "Pekerjaan Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).PekerjaanPasangan }},
 		{Header: "Catatan Isteri/Suami", Get: func(item interface{}) string { return item.(kp4ExportRow).CatatanPasangan }},
 		{Header: "Jumlah Anak", Get: func(item interface{}) string { return item.(kp4ExportRow).JumlahAnak }},
-		{Header: "Daftar Anak (Nama & Catatan Tanggungan)", Get: func(item interface{}) string { return item.(kp4ExportRow).DaftarNamaAnak }},
-		{Header: "Status KP4", Get: func(item interface{}) string { return item.(kp4ExportRow).StatusKp4 }},
-		{Header: "Data Pegawai", Get: func(item interface{}) string { return item.(kp4ExportRow).DataPegawai }},
 	}
+	// Kolom per anak (Nama, Status Tanggungan, Masih Sekolah/Kuliah, Sudah
+	// Bekerja, Status Perkawinan) -- diulang untuk Anak 1, Anak 2, dst
+	// sebanyak maxAnak, PERSIS permintaan pengguna ("seperti kolom anak 1
+	// ... begitupun untuk anak ke 2 dst"). idx di-capture per-iterasi (var
+	// lokal baru tiap putaran) supaya closure Get masing-masing kolom
+	// menunjuk ke anak yang benar, bukan ke idx putaran terakhir.
+	for i := 0; i < maxAnak; i++ {
+		idx := i
+		label := fmt.Sprintf("Anak %d", idx+1)
+		columns = append(columns,
+			utils.ExcelColumn{Header: label + " - Nama", Get: func(item interface{}) string {
+				return anakField(item.(kp4ExportRow), idx, func(a kp4AnakExportItem) string { return a.Nama })
+			}},
+			utils.ExcelColumn{Header: label + " - Status Tanggungan", Get: func(item interface{}) string {
+				return anakField(item.(kp4ExportRow), idx, func(a kp4AnakExportItem) string { return a.StatusTanggungan })
+			}},
+			utils.ExcelColumn{Header: label + " - Masih Sekolah/Kuliah", Get: func(item interface{}) string {
+				return anakField(item.(kp4ExportRow), idx, func(a kp4AnakExportItem) string { return a.MasihSekolah })
+			}},
+			utils.ExcelColumn{Header: label + " - Sudah Bekerja", Get: func(item interface{}) string {
+				return anakField(item.(kp4ExportRow), idx, func(a kp4AnakExportItem) string { return a.SudahBekerja })
+			}},
+			utils.ExcelColumn{Header: label + " - Status Perkawinan", Get: func(item interface{}) string {
+				return anakField(item.(kp4ExportRow), idx, func(a kp4AnakExportItem) string { return a.StatusPerkawinan })
+			}},
+		)
+	}
+	columns = append(columns,
+		utils.ExcelColumn{Header: "Status KP4", Get: func(item interface{}) string { return item.(kp4ExportRow).StatusKp4 }},
+		utils.ExcelColumn{Header: "Data Pegawai", Get: func(item interface{}) string { return item.(kp4ExportRow).DataPegawai }},
+	)
 	f, err := utils.ExportData(rows, columns)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat file excel: "+err.Error())
