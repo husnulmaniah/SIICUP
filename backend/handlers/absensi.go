@@ -586,8 +586,29 @@ func absensiEligibleDetail(setting models.PengaturanAbsensi, pegawai models.Pega
 		}
 	}
 	if allowed := absensiAllowedKecamatanIDs(setting); len(allowed) > 0 {
-		if pegawai.UnitKerja == nil || pegawai.UnitKerja.IDKecamatan == nil {
-			return false, "Unit Kerja Anda belum diberi Kecamatan (menu Master Data -> Unit Kerja), sehingga tidak bisa dicocokkan dengan filter \"Kecamatan yang Boleh Absen\" pada Pengaturan Absen."
+		// DIPISAH jadi 2 pesan berbeda (sebelumnya digabung jadi satu pesan
+		// "Unit Kerja Anda belum diberi Kecamatan" untuk KEDUA kasus ini) --
+		// kasus pegawai yang belum terhubung ke Unit Kerja manapun di Data
+		// Pegawai itu masalah DATA PEGAWAI (field "Unit Kerja" kosong),
+		// sedangkan kasus Unit Kerja-nya sudah terhubung tapi Kecamatan-nya
+		// sendiri belum diisi itu masalah di baris Unit Kerja tsb -- pesan
+		// gabungan sebelumnya bisa menyesatkan administrator yang sudah
+		// mengisi Kecamatan untuk SEBAGIAN BESAR unit kerja (lihat menu
+		// Master Data -> Unit Kerja) tapi pegawai yang bersangkutan ternyata
+		// tidak tertaut ke unit kerja manapun sama sekali, atau tertaut ke
+		// baris unit kerja LAIN yang belum sempat diisi Kecamatan-nya --
+		// menyebut nama & ID unit kerjanya (sama seperti resolveGeofenceTarget)
+		// supaya administrator langsung tahu baris mana yang harus dicek,
+		// tanpa perlu menebak dari daftar Unit Kerja yang sebagian besar
+		// sebenarnya sudah benar.
+		if pegawai.UnitKerja == nil {
+			return false, "Anda belum terhubung ke Unit Kerja manapun pada Data Pegawai, sehingga tidak bisa dicocokkan dengan filter \"Kecamatan yang Boleh Absen\" pada Pengaturan Absen. Hubungi administrator untuk mengisi Unit Kerja Anda di menu Data Pegawai."
+		}
+		if pegawai.UnitKerja.IDKecamatan == nil {
+			return false, fmt.Sprintf(
+				"Unit Kerja Anda (\"%s\", ID #%d) belum diberi Kecamatan di menu Master Data -> Unit Kerja, sehingga tidak bisa dicocokkan dengan filter \"Kecamatan yang Boleh Absen\" pada Pengaturan Absen.",
+				pegawai.UnitKerja.Unit, pegawai.UnitKerja.ID,
+			)
 		}
 		match := false
 		for _, id := range allowed {
