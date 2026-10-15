@@ -1393,7 +1393,16 @@ async function downloadDokumen(item) {
 
     <template v-else-if="pengaturan && pengaturan.eligible === false">
       <Message severity="warn" :closable="false">
-        Menu ini bukan untuk Anda. Hubungi administrator/admin jika menurut Anda ini tidak sesuai.
+        <div>Menu ini bukan untuk Anda.</div>
+        <!-- eligible_alasan: penjelasan SPESIFIK filter mana (Kategori Tempat
+        Kerja/Jabatan/Kecamatan pada Pengaturan Absen) yang menyebabkan Anda
+        tidak lolos -- lihat absensiEligibleDetail di backend. Permintaan
+        pengguna: "cek mengapa menu absensi tidak bisa terbuka sesuai
+        pengaturan absensi" -- sebelumnya pesan ini generik saja, sekarang
+        pegawai/administrator langsung tahu penyebabnya tanpa harus
+        menebak-nebak. -->
+        <div v-if="pengaturan.eligible_alasan" style="margin-top: 0.35rem">{{ pengaturan.eligible_alasan }}</div>
+        <div style="margin-top: 0.35rem">Hubungi administrator/admin jika menurut Anda ini tidak sesuai.</div>
       </Message>
     </template>
 

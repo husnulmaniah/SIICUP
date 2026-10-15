@@ -340,13 +340,17 @@ const toleransiAkurasiMinimum = 30.0
 // UnitKerja.Lat/Lng/RadiusMeter), titik itulah yang jadi PRIORITAS UTAMA --
 // ini yang memungkinkan absen dilakukan di banyak sekolah/kecamatan sekaligus
 // dengan titik masing-masing, bukan cuma satu titik kantor tunggal. Kalau
-// unitKerja nil atau belum diberi titik koordinat, jatuh kembali (fallback)
-// ke titik kantor tunggal setting.KantorLat/KantorLng/RadiusMeter (kompatibel
-// dengan instansi yang hanya punya satu titik kantor). Kalau KEDUANYA belum
-// diatur, geofence dianggap belum aktif dan absen tetap diperbolehkan tanpa
-// validasi jarak (default terbuka, sama seperti filter tempat tugas/jabatan/
-// kecamatan). Kalau geofence aktif tapi lat/lng pegawai tidak terdeteksi (GPS
-// ditolak/gagal), absen ditolak karena jarak tidak bisa dipastikan.
+// unitKerja nil atau belum diberi titik koordinat sendiri (termasuk unit
+// kerja berkategori Sekolah yang belum diisi -- lihat perubahan di bawah),
+// jatuh kembali (fallback) ke titik kantor tunggal
+// setting.KantorLat/KantorLng/RadiusMeter dari menu Pengaturan Absen (Rekap
+// Absensi), supaya kompatibel dengan instansi yang hanya punya satu titik
+// kantor. Kalau KEDUANYA belum diatur (titik unit kerja maupun titik kantor
+// pusat kosong), geofence dianggap belum aktif dan absen tetap diperbolehkan
+// tanpa validasi jarak (default terbuka, sama seperti filter tempat tugas/
+// jabatan/kecamatan). Kalau geofence aktif tapi lat/lng pegawai tidak
+// terdeteksi (GPS ditolak/gagal), absen ditolak karena jarak tidak bisa
+// dipastikan.
 //
 // akurasi adalah nilai accuracy (meter) dari Geolocation API browser --
 // radius kemungkinan posisi ASLI pegawai di sekitar titik (lat,lng) yang
@@ -358,18 +362,24 @@ const toleransiAkurasiMinimum = 30.0
 // komentarnya) dan batas atas toleransiAkurasiMaksimal meter supaya geofence
 // tetap berarti untuk lokasi yang jelas-jelas jauh dari titik acuan).
 //
-// Fallback ke titik kantor tunggal (setting.KantorLat/KantorLng) HANYA
-// berlaku untuk unit kerja berkategori Dinas/Kantor (UnitKerja.TempatKerja ==
-// "dinas") atau yang belum dikategorikan sama sekali (kompatibel dengan data
-// lama) -- inilah yang membuat unit kerja Dinas otomatis memakai titik
-// kantor pusat yang sudah ditetapkan di Pengaturan Absen, tanpa perlu admin
-// mengisi titik koordinat satu-satu untuk setiap unit dinas. Unit kerja
-// berkategori Sekolah TIDAK ikut fallback ini -- kalau titik koordinat
-// sekolah itu sendiri belum diisi, geofence untuk pegawai di sekolah tsb
-// dianggap belum aktif (absen tetap diperbolehkan tanpa validasi jarak,
-// bukan malah memvalidasi terhadap titik kantor dinas yang jelas salah
-// lokasi) sampai admin mengisi titik koordinat sekolah itu di menu Unit
-// Kerja.
+// Fallback ke titik kantor tunggal (setting.KantorLat/KantorLng) berlaku
+// untuk SEMUA kategori unit kerja (Dinas/Kantor maupun Sekolah) begitu unit
+// kerja yang bersangkutan belum diberi titik koordinat sendiri -- ini yang
+// membuat unit kerja Dinas DAN sekolah yang belum diisi sama-sama otomatis
+// memakai titik kantor pusat yang sudah ditetapkan di Pengaturan Absen,
+// tanpa perlu admin mengisi titik koordinat satu-satu untuk setiap unit,
+// dan tanpa membiarkan absen tanpa validasi jarak sama sekali hanya karena
+// sekolahnya belum sempat diisi titik koordinatnya (permintaan pengguna:
+// "untuk sekolah yang tidak memiliki titik koordinat sendiri, default
+// menggunakan Pengaturan Absensi pada menu Rekap Absensi"). CATATAN
+// PERILAKU LAMA (sebelum perubahan ini): sekolah yang belum diisi titik
+// koordinat sendiri dibiarkan TANPA validasi jarak sama sekali, supaya
+// tidak divalidasi keliru terhadap titik kantor dinas yang jelas beda
+// lokasi -- begitu admin mengisi titik kantor pusat yang representatif
+// (atau lebih baik lagi, mengisi titik koordinat sekolah itu sendiri di
+// menu Unit Kerja), risiko "salah lokasi" itu tidak lagi relevan, jadi
+// fallback ke kantor pusat sekarang dianggap lebih aman daripada tanpa
+// validasi sama sekali.
 //
 // Pesan penolakan (sumberTitik) SENGAJA menyebutkan ID unit kerja & alasan
 // jatuh ke kantor pusat (bukan cuma nama unit kerjanya) -- ditambahkan
@@ -415,6 +425,14 @@ func resolveGeofenceTarget(setting models.PengaturanAbsensi, unitKerja *models.U
 	case unitKerja.TempatKerja == nil || *unitKerja.TempatKerja != models.TempatKerjaSekolah:
 		targetLat, targetLng = setting.KantorLat, setting.KantorLng
 		sumberTitik = fmt.Sprintf("kantor pusat (unit kerja \"%s\" ID #%d belum diberi titik koordinat sendiri & tidak/belum berkategori Sekolah)", unitKerja.Unit, unitKerja.ID)
+	default:
+		// unitKerja berkategori Sekolah TAPI belum diisi titik koordinat
+		// sendiri di menu Unit Kerja -- default ke titik kantor pusat dari
+		// Pengaturan Absen (menu Rekap Absensi), bukan dibiarkan tanpa
+		// validasi jarak sama sekali (lihat komentar panjang di atas
+		// absensiCekRadius untuk alasan perubahan ini).
+		targetLat, targetLng = setting.KantorLat, setting.KantorLng
+		sumberTitik = fmt.Sprintf("kantor pusat (unit kerja Sekolah \"%s\" ID #%d belum diberi titik koordinat sendiri di menu Unit Kerja)", unitKerja.Unit, unitKerja.ID)
 	}
 	if radius <= 0 {
 		radius = 20
@@ -511,13 +529,32 @@ func absensiAllowedKecamatanIDs(item models.PengaturanAbsensi) []uint {
 // tidak diam-diam ikut menutup akses absen milik atasan Dinas, yang harus
 // tetap bisa absen sendiri terlepas dari filter manapun.
 func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai, roleName string) bool {
+	ok, _ := absensiEligibleDetail(setting, pegawai, roleName)
+	return ok
+}
+
+// absensiEligibleDetail adalah absensiEligible di atas DITAMBAH alasan
+// spesifik kalau hasilnya false -- filter MANA (Kategori Tempat Kerja/
+// Jabatan/Kecamatan) yang membuat pegawai ini tidak lolos, supaya pesan
+// "Menu ini bukan untuk Anda" di AbsensiView.vue tidak lagi generik
+// (permintaan pengguna: "cek mengapa menu absensi tidak bisa terbuka sesuai
+// pengaturan absensi" -- sebelumnya pegawai/administrator harus menebak-
+// nebak sendiri filter mana yang menyebabkannya dari 3 filter yang ada).
+// Urutan pengecekan SAMA dengan absensiEligible lama (tempat tugas ->
+// jabatan -> kecamatan), berhenti di filter PERTAMA yang gagal -- pegawai
+// yang gagal di lebih dari satu filter cukup diberi tahu yang pertama dulu,
+// konsisten dengan cara absensiEligible lama langsung return false begitu
+// satu filter gagal.
+func absensiEligibleDetail(setting models.PengaturanAbsensi, pegawai models.Pegawai, roleName string) (bool, string) {
 	if roleName == "atasan" && !isSekolahPegawai(pegawai) {
-		return true
+		return true, ""
 	}
 	if allowed := absensiAllowedTempatTugas(setting); len(allowed) > 0 {
 		kategori := models.TempatKerjaDinas
+		kategoriLabel := "Dinas/Kantor"
 		if isSekolahPegawai(pegawai) {
 			kategori = models.TempatKerjaSekolah
+			kategoriLabel = "Sekolah"
 		}
 		match := false
 		for _, t := range allowed {
@@ -527,12 +564,15 @@ func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai, r
 			}
 		}
 		if !match {
-			return false
+			return false, fmt.Sprintf(
+				"Kategori tempat kerja Anda saat ini (\"%s\") tidak termasuk dalam filter \"Kategori Tempat Kerja yang Boleh Absen\" pada Pengaturan Absen.",
+				kategoriLabel,
+			)
 		}
 	}
 	if allowed := absensiAllowedJabatanIDs(setting); len(allowed) > 0 {
 		if pegawai.IDJabatan == nil {
-			return false
+			return false, "Anda belum memiliki Jabatan pada Data Pegawai, sehingga tidak bisa dicocokkan dengan filter \"Jabatan yang Boleh Absen\" pada Pengaturan Absen."
 		}
 		match := false
 		for _, id := range allowed {
@@ -542,12 +582,12 @@ func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai, r
 			}
 		}
 		if !match {
-			return false
+			return false, "Jabatan Anda saat ini tidak termasuk dalam filter \"Jabatan yang Boleh Absen\" pada Pengaturan Absen."
 		}
 	}
 	if allowed := absensiAllowedKecamatanIDs(setting); len(allowed) > 0 {
 		if pegawai.UnitKerja == nil || pegawai.UnitKerja.IDKecamatan == nil {
-			return false
+			return false, "Unit Kerja Anda belum diberi Kecamatan (menu Master Data -> Unit Kerja), sehingga tidak bisa dicocokkan dengan filter \"Kecamatan yang Boleh Absen\" pada Pengaturan Absen."
 		}
 		match := false
 		for _, id := range allowed {
@@ -557,10 +597,10 @@ func absensiEligible(setting models.PengaturanAbsensi, pegawai models.Pegawai, r
 			}
 		}
 		if !match {
-			return false
+			return false, "Kecamatan Unit Kerja Anda tidak termasuk dalam filter \"Kecamatan yang Boleh Absen\" pada Pengaturan Absen."
 		}
 	}
-	return true
+	return true, ""
 }
 
 // pengaturanAbsensiOut adalah bentuk PengaturanAbsensi yang dikirim ke
@@ -628,6 +668,15 @@ type pengaturanAbsensiOut struct {
 	// tanpa pegawai perlu tahu jam berapa pun.
 	HariLiburShift bool   `json:"hari_libur_shift"`
 	TitikSumber    string `json:"titik_sumber"`
+	// EligibleAlasan: penjelasan SPESIFIK kenapa Eligible di atas bernilai
+	// false -- filter mana (Kategori Tempat Kerja/Jabatan/Kecamatan) yang
+	// tidak cocok, lihat absensiEligibleDetail. Sebelumnya AbsensiView.vue
+	// hanya menampilkan pesan generik "Menu ini bukan untuk Anda" tanpa
+	// alasan, sehingga pegawai maupun administrator harus menebak-nebak
+	// filter mana yang menyebabkannya (permintaan pengguna: "cek mengapa
+	// menu absensi tidak bisa terbuka sesuai pengaturan absensi"). Kosong
+	// kalau Eligible true atau belum dihitung (role tanpa id_pegawai).
+	EligibleAlasan string `json:"eligible_alasan"`
 }
 
 func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut {
@@ -768,7 +817,7 @@ func getPengaturanAbsensiHandler(w http.ResponseWriter, r *http.Request, db *gor
 	if claims, ok := middleware.GetClaims(r); ok && claims.IDPegawai != nil {
 		var pegawai models.Pegawai
 		if err := db.Preload("UnitKerja").First(&pegawai, *claims.IDPegawai).Error; err == nil {
-			out.Eligible = absensiEligible(item, pegawai, claims.RoleName)
+			out.Eligible, out.EligibleAlasan = absensiEligibleDetail(item, pegawai, claims.RoleName)
 			// Titik acuan geofence yang sudah "resolved" khusus untuk pegawai
 			// ini -- lihat komentar TitikLat pada pengaturanAbsensiOut di
 			// atas untuk alasannya (AbsensiView.vue butuh titik yang SAMA
