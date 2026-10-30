@@ -37,9 +37,14 @@ type pengaturanAbsensiPayload struct {
 	TempatTugasAllowed    []string `json:"tempat_tugas_allowed"`
 	JabatanAllowedIDs     []uint   `json:"jabatan_allowed_ids"`
 	KecamatanAllowedIDs   []uint   `json:"kecamatan_allowed_ids"`
-	KantorLat             *float64 `json:"kantor_lat"`
-	KantorLng             *float64 `json:"kantor_lng"`
-	RadiusMeter           int      `json:"radius_meter"`
+	// JabatanJamPulangSekolahIDs: lihat komentar pada
+	// models.PengaturanAbsensi.JabatanJamPulangSekolahIDs -- daftar ID
+	// Jabatan yang jam pulangnya ikut jam pulang Sekolah walau unit
+	// kerjanya Dinas/Kantor (permintaan pengguna: jabatan Penilik).
+	JabatanJamPulangSekolahIDs []uint   `json:"jabatan_jam_pulang_sekolah_ids"`
+	KantorLat                  *float64 `json:"kantor_lat"`
+	KantorLng                  *float64 `json:"kantor_lng"`
+	RadiusMeter                int      `json:"radius_meter"`
 }
 
 func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -127,6 +132,7 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	tempatJSON, _ := json.Marshal(nonNilStrings(p.TempatTugasAllowed))
 	jabatanJSON, _ := json.Marshal(nonNilUints(p.JabatanAllowedIDs))
 	kecamatanJSON, _ := json.Marshal(nonNilUints(p.KecamatanAllowedIDs))
+	jabatanJamPulangSekolahJSON, _ := json.Marshal(nonNilUints(p.JabatanJamPulangSekolahIDs))
 
 	var item models.PengaturanAbsensi
 	if err := db.First(&item, 1).Error; err != nil {
@@ -148,6 +154,7 @@ func updatePengaturanAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB
 	item.TempatTugasAllowed = string(tempatJSON)
 	item.JabatanAllowedIDs = string(jabatanJSON)
 	item.KecamatanAllowedIDs = string(kecamatanJSON)
+	item.JabatanJamPulangSekolahIDs = string(jabatanJamPulangSekolahJSON)
 	item.KantorLat = p.KantorLat
 	item.KantorLng = p.KantorLng
 	item.RadiusMeter = p.RadiusMeter

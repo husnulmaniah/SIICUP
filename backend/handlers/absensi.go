@@ -209,13 +209,13 @@ func jamAbsenUntukPegawai(db *gorm.DB, setting models.PengaturanAbsensi, pegawai
 				if !h.Aktif {
 					return jamAbsenSet{Libur: true}
 				}
-				return jamAbsenSet{
+				return jamPulangOverride(setting, pegawai, jamAbsenSet{
 					MulaiPagi:   h.JamMulaiPagi,
 					BatasPagi:   h.JamBatasPagi,
 					TutupPagi:   h.JamTutupPagi,
 					MulaiPulang: h.JamMulaiPulang,
 					TutupPulang: h.JamTutupPulang,
-				}
+				})
 			}
 			// Shift terpasang tapi entah kenapa baris hari ini tidak
 			// ditemukan (seharusnya tidak terjadi -- validasi create/update
@@ -231,22 +231,22 @@ func jamAbsenUntukPegawai(db *gorm.DB, setting models.PengaturanAbsensi, pegawai
 		uk.JamTutupPagi != nil && *uk.JamTutupPagi != "" &&
 		uk.JamMulaiPulang != nil && *uk.JamMulaiPulang != "" &&
 		uk.JamTutupPulang != nil && *uk.JamTutupPulang != "" {
-		return jamAbsenSet{
+		return jamPulangOverride(setting, pegawai, jamAbsenSet{
 			MulaiPagi:   *uk.JamMulaiPagi,
 			BatasPagi:   *uk.JamBatasPagi,
 			TutupPagi:   *uk.JamTutupPagi,
 			MulaiPulang: *uk.JamMulaiPulang,
 			TutupPulang: *uk.JamTutupPulang,
-		}
+		})
 	}
 	if isSekolahPegawai(pegawai) {
-		return jamAbsenSet{
+		return jamPulangOverride(setting, pegawai, jamAbsenSet{
 			MulaiPagi:   setting.JamMulaiPagiSekolah,
 			BatasPagi:   setting.JamBatasPagiSekolah,
 			TutupPagi:   setting.JamTutupPagiSekolah,
 			MulaiPulang: setting.JamMulaiPulangSekolah,
 			TutupPulang: setting.JamTutupPulangSekolah,
-		}
+		})
 	}
 	// Pegawai Dinas/Kantor pulang lebih awal di hari Jumat -- kalau HARI INI
 	// Jumat dan kedua jam Jumat sudah diisi administrator, pakai set itu
@@ -262,13 +262,40 @@ func jamAbsenUntukPegawai(db *gorm.DB, setting models.PengaturanAbsensi, pegawai
 		mulaiPulang = setting.JamMulaiPulangJumat
 		tutupPulang = setting.JamTutupPulangJumat
 	}
-	return jamAbsenSet{
+	return jamPulangOverride(setting, pegawai, jamAbsenSet{
 		MulaiPagi:   setting.JamMulaiPagi,
 		BatasPagi:   setting.JamBatasPagi,
 		TutupPagi:   setting.JamTutupPagi,
 		MulaiPulang: mulaiPulang,
 		TutupPulang: tutupPulang,
+	})
+}
+
+// jamPulangOverride menimpa HANYA MulaiPulang/TutupPulang pada set yang sudah
+// ditentukan jamAbsenUntukPegawai (lewat jalur manapun -- Shift Kerja, jam
+// unit kerja lawas, atau set Dinas/Sekolah global) dengan jam pulang Sekolah
+// (JamMulaiPulangSekolah/JamTutupPulangSekolah), KHUSUS untuk pegawai yang
+// Jabatan-nya terdaftar di PengaturanAbsensi.JabatanJamPulangSekolahIDs --
+// lihat komentar panjang pada field tersebut di models.PengaturanAbsensi.
+// Permintaan pengguna: "untuk jabatan penilik, unit kerjanya di dinas, tapi
+// jam waktu pulangnya mengikuti sekolah". Jam masuk/pagi (MulaiPagi/
+// BatasPagi/TutupPagi) TIDAK disentuh sama sekali -- pegawai yang
+// bersangkutan tetap masuk pagi seperti kategori unit kerjanya (Dinas/
+// Kantor), hanya jam pulangnya yang mengikuti Sekolah. Tidak diterapkan
+// kalau hari ini libur (set.Libur true -- tidak relevan, tidak ada absen
+// sama sekali hari itu) atau pegawai belum punya Jabatan (IDJabatan nil).
+func jamPulangOverride(setting models.PengaturanAbsensi, pegawai models.Pegawai, set jamAbsenSet) jamAbsenSet {
+	if set.Libur || pegawai.IDJabatan == nil {
+		return set
 	}
+	for _, id := range absensiJabatanJamPulangSekolahIDs(setting) {
+		if id == *pegawai.IDJabatan {
+			set.MulaiPulang = setting.JamMulaiPulangSekolah
+			set.TutupPulang = setting.JamTutupPulangSekolah
+			return set
+		}
+	}
+	return set
 }
 
 func parseFloatForm(r *http.Request, key string) *float64 {
@@ -500,6 +527,18 @@ func absensiAllowedKecamatanIDs(item models.PengaturanAbsensi) []uint {
 	return out
 }
 
+// absensiJabatanJamPulangSekolahIDs mem-parse
+// PengaturanAbsensi.JabatanJamPulangSekolahIDs -- lihat komentar pada field
+// tersebut untuk format & artinya. Dipakai jamPulangOverride di atas.
+func absensiJabatanJamPulangSekolahIDs(item models.PengaturanAbsensi) []uint {
+	if strings.TrimSpace(item.JabatanJamPulangSekolahIDs) == "" {
+		return nil
+	}
+	var out []uint
+	_ = json.Unmarshal([]byte(item.JabatanJamPulangSekolahIDs), &out)
+	return out
+}
+
 // absensiEligible menentukan apakah seorang pegawai boleh memakai menu
 // Absen berdasarkan filter tempat tugas, jabatan, & kecamatan (unit kerja/
 // sekolah pegawai) yang diatur administrator. Kalau SEMUA filter kosong
@@ -658,10 +697,17 @@ type pengaturanAbsensiOut struct {
 	TempatTugasAllowed    []string `json:"tempat_tugas_allowed"`
 	JabatanAllowedIDs     []uint   `json:"jabatan_allowed_ids"`
 	KecamatanAllowedIDs   []uint   `json:"kecamatan_allowed_ids"`
-	KantorLat             *float64 `json:"kantor_lat"`
-	KantorLng             *float64 `json:"kantor_lng"`
-	RadiusMeter           int      `json:"radius_meter"`
-	Eligible              bool     `json:"eligible"`
+	// JabatanJamPulangSekolahIDs: daftar ID Jabatan yang jam pulangnya
+	// (HANYA jam pulang) ikut jam pulang Sekolah walau unit kerjanya
+	// Dinas/Kantor -- lihat komentar pada models.PengaturanAbsensi.
+	// JabatanJamPulangSekolahIDs & jamPulangOverride di atas. TIDAK
+	// berhubungan dengan JabatanAllowedIDs (yang mengatur ELIGIBILITAS
+	// memakai menu Absen, bukan jam-nya).
+	JabatanJamPulangSekolahIDs []uint   `json:"jabatan_jam_pulang_sekolah_ids"`
+	KantorLat                  *float64 `json:"kantor_lat"`
+	KantorLng                  *float64 `json:"kantor_lng"`
+	RadiusMeter                int      `json:"radius_meter"`
+	Eligible                   bool     `json:"eligible"`
 	// TitikLat/TitikLng/TitikRadius: titik koordinat & radius ACUAN yang
 	// sudah "resolved" khusus untuk pegawai yang login (lihat
 	// resolveGeofenceTarget) -- BUKAN selalu sama dengan KantorLat/KantorLng
@@ -713,32 +759,37 @@ func toPengaturanAbsensiOut(item models.PengaturanAbsensi) pengaturanAbsensiOut 
 	if kecamatan == nil {
 		kecamatan = []uint{}
 	}
+	jamPulangSekolahJabatan := absensiJabatanJamPulangSekolahIDs(item)
+	if jamPulangSekolahJabatan == nil {
+		jamPulangSekolahJabatan = []uint{}
+	}
 	radius := item.RadiusMeter
 	if radius <= 0 {
 		radius = 20
 	}
 	return pengaturanAbsensiOut{
-		ID:                    item.ID,
-		Aktif:                 item.Aktif,
-		JamMulaiPagi:          item.JamMulaiPagi,
-		JamBatasPagi:          item.JamBatasPagi,
-		JamTutupPagi:          item.JamTutupPagi,
-		JamMulaiPulang:        item.JamMulaiPulang,
-		JamTutupPulang:        item.JamTutupPulang,
-		JamMulaiPulangJumat:   item.JamMulaiPulangJumat,
-		JamTutupPulangJumat:   item.JamTutupPulangJumat,
-		JamMulaiPagiSekolah:   item.JamMulaiPagiSekolah,
-		JamBatasPagiSekolah:   item.JamBatasPagiSekolah,
-		JamTutupPagiSekolah:   item.JamTutupPagiSekolah,
-		JamMulaiPulangSekolah: item.JamMulaiPulangSekolah,
-		JamTutupPulangSekolah: item.JamTutupPulangSekolah,
-		TempatTugasAllowed:    tempat,
-		JabatanAllowedIDs:     jabatan,
-		KecamatanAllowedIDs:   kecamatan,
-		KantorLat:             item.KantorLat,
-		KantorLng:             item.KantorLng,
-		RadiusMeter:           radius,
-		Eligible:              true,
+		ID:                         item.ID,
+		Aktif:                      item.Aktif,
+		JamMulaiPagi:               item.JamMulaiPagi,
+		JamBatasPagi:               item.JamBatasPagi,
+		JamTutupPagi:               item.JamTutupPagi,
+		JamMulaiPulang:             item.JamMulaiPulang,
+		JamTutupPulang:             item.JamTutupPulang,
+		JamMulaiPulangJumat:        item.JamMulaiPulangJumat,
+		JamTutupPulangJumat:        item.JamTutupPulangJumat,
+		JamMulaiPagiSekolah:        item.JamMulaiPagiSekolah,
+		JamBatasPagiSekolah:        item.JamBatasPagiSekolah,
+		JamTutupPagiSekolah:        item.JamTutupPagiSekolah,
+		JamMulaiPulangSekolah:      item.JamMulaiPulangSekolah,
+		JamTutupPulangSekolah:      item.JamTutupPulangSekolah,
+		TempatTugasAllowed:         tempat,
+		JabatanAllowedIDs:          jabatan,
+		KecamatanAllowedIDs:        kecamatan,
+		JabatanJamPulangSekolahIDs: jamPulangSekolahJabatan,
+		KantorLat:                  item.KantorLat,
+		KantorLng:                  item.KantorLng,
+		RadiusMeter:                radius,
+		Eligible:                   true,
 	}
 }
 

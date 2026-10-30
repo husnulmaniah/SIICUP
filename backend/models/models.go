@@ -1653,17 +1653,38 @@ type PengaturanAbsensi struct {
 	// JamMulaiPagiSekolah di atas struct. Default sengaja dibuat berbeda dari
 	// set Dinas/Kantor (mengikuti pola jam sekolah pada umumnya), tapi tetap
 	// harus disesuaikan administrator lewat menu Rekap Absen -> Pengaturan.
-	JamMulaiPagiSekolah   string   `json:"jam_mulai_pagi_sekolah" gorm:"column:jam_mulai_pagi_sekolah;size:5;default:'06:30'"`
-	JamBatasPagiSekolah   string   `json:"jam_batas_pagi_sekolah" gorm:"column:jam_batas_pagi_sekolah;size:5;default:'07:00'"`
-	JamTutupPagiSekolah   string   `json:"jam_tutup_pagi_sekolah" gorm:"column:jam_tutup_pagi_sekolah;size:5;default:'08:00'"`
-	JamMulaiPulangSekolah string   `json:"jam_mulai_pulang_sekolah" gorm:"column:jam_mulai_pulang_sekolah;size:5;default:'12:30'"`
-	JamTutupPulangSekolah string   `json:"jam_tutup_pulang_sekolah" gorm:"column:jam_tutup_pulang_sekolah;size:5;default:'15:00'"`
-	TempatTugasAllowed    string   `json:"-" gorm:"column:tempat_tugas_allowed;type:text"`
-	JabatanAllowedIDs     string   `json:"-" gorm:"column:jabatan_allowed_ids;type:text"`
-	KecamatanAllowedIDs   string   `json:"-" gorm:"column:kecamatan_allowed_ids;type:text"`
-	KantorLat             *float64 `json:"-" gorm:"column:kantor_lat"`
-	KantorLng             *float64 `json:"-" gorm:"column:kantor_lng"`
-	RadiusMeter           int      `json:"-" gorm:"column:radius_meter;default:20"`
+	JamMulaiPagiSekolah   string `json:"jam_mulai_pagi_sekolah" gorm:"column:jam_mulai_pagi_sekolah;size:5;default:'06:30'"`
+	JamBatasPagiSekolah   string `json:"jam_batas_pagi_sekolah" gorm:"column:jam_batas_pagi_sekolah;size:5;default:'07:00'"`
+	JamTutupPagiSekolah   string `json:"jam_tutup_pagi_sekolah" gorm:"column:jam_tutup_pagi_sekolah;size:5;default:'08:00'"`
+	JamMulaiPulangSekolah string `json:"jam_mulai_pulang_sekolah" gorm:"column:jam_mulai_pulang_sekolah;size:5;default:'12:30'"`
+	JamTutupPulangSekolah string `json:"jam_tutup_pulang_sekolah" gorm:"column:jam_tutup_pulang_sekolah;size:5;default:'15:00'"`
+	TempatTugasAllowed    string `json:"-" gorm:"column:tempat_tugas_allowed;type:text"`
+	JabatanAllowedIDs     string `json:"-" gorm:"column:jabatan_allowed_ids;type:text"`
+	KecamatanAllowedIDs   string `json:"-" gorm:"column:kecamatan_allowed_ids;type:text"`
+	// JabatanJamPulangSekolahIDs: daftar ID Jabatan (format sama dengan
+	// JabatanAllowedIDs, teks JSON "[3,5]") yang JAM PULANG-nya (HANYA jam
+	// pulang -- JamMulaiPulang/JamTutupPulang, BUKAN jam masuk/pagi) ikut
+	// jam pulang Sekolah (JamMulaiPulangSekolah/JamTutupPulangSekolah) di
+	// atas, WALAUPUN unit kerja pegawai yang bersangkutan berkategori
+	// Dinas/Kantor (bukan Sekolah). Permintaan pengguna: jabatan "Penilik"
+	// unit kerjanya Dinas tapi jam pulangnya ikut jam sekolah (penilik
+	// bertugas mengawasi sekolah-sekolah, jadi jam kerjanya menyesuaikan
+	// jam sekolah, bukan jam kantor dinas) -- dibuat sebagai DAFTAR Jabatan
+	// (bukan hardcode "Penilik") supaya administrator bisa menambah/
+	// menghapus jabatan lain yang punya kebutuhan serupa tanpa perlu ubah
+	// kode. Diparsing lewat absensiJabatanJamPulangSekolahIDs di
+	// handlers/absensi.go, DITERAPKAN di jamAbsenUntukPegawai SETELAH jam
+	// pulang dasar pegawai (dari Shift Kerja/jam unit kerja lawas/set
+	// Dinas-Sekolah global) ditentukan -- override ini HANYA mengganti
+	// MulaiPulang/TutupPulang hasil akhir, jam masuk/pagi (& status Libur)
+	// pegawai tetap mengikuti jalur normalnya masing-masing. Daftar KOSONG
+	// berarti tidak ada jabatan yang di-override (default sebelum
+	// administrator mengatur, perilaku jam pulang tidak berubah sama
+	// sekali dari sebelumnya).
+	JabatanJamPulangSekolahIDs string   `json:"-" gorm:"column:jabatan_jam_pulang_sekolah_ids;type:text"`
+	KantorLat                  *float64 `json:"-" gorm:"column:kantor_lat"`
+	KantorLng                  *float64 `json:"-" gorm:"column:kantor_lng"`
+	RadiusMeter                int      `json:"-" gorm:"column:radius_meter;default:20"`
 }
 
 func (PengaturanAbsensi) TableName() string { return "pengaturan_absensi" }

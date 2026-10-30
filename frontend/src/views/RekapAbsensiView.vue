@@ -63,6 +63,7 @@ const pengaturan = reactive({
   tempat_tugas_allowed: [],
   jabatan_allowed_ids: [],
   kecamatan_allowed_ids: [],
+  jabatan_jam_pulang_sekolah_ids: [],
   kantor_lat: null,
   kantor_lng: null,
   radius_meter: 20,
@@ -1950,6 +1951,31 @@ const defaultTab = computed(() => {
                 pesan "menu ini bukan untuk Anda" saat membuka menu Absen. Kosongkan ketiga filter untuk membuka menu
                 Absen bagi semua pegawai.
               </Message>
+            </div>
+
+            <div class="pengaturan-group">
+              <div class="group-title">Jabatan yang Jam Pulangnya Mengikuti Sekolah</div>
+              <div>
+                <label class="field-label">Jabatan</label>
+                <MultiSelect
+                  v-model="pengaturan.jabatan_jam_pulang_sekolah_ids"
+                  :options="jabatanOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  filter
+                  display="chip"
+                  placeholder="Tidak ada (jam pulang mengikuti kategori unit kerja seperti biasa)"
+                  style="width: 100%"
+                />
+                <small class="text-muted">
+                  Untuk jabatan tertentu yang unit kerjanya Dinas/Kantor tapi tugasnya sebenarnya mengikuti jam
+                  sekolah (contoh: Penilik). Jabatan yang dipilih di sini akan memakai jam pulang Sekolah ("Jam
+                  Mulai/Tutup Absen Pulang (Sekolah)" di atas) walau unit kerjanya Dinas/Kantor -- jam masuk/pagi
+                  TETAP mengikuti jam Dinas/Kantor seperti biasa, HANYA jam pulang yang berubah. Tidak berhubungan
+                  dengan filter "Jabatan yang Boleh Absen" di atas (itu mengatur siapa yang boleh memakai menu
+                  Absen, bukan jam pulangnya). Kosongkan kalau tidak ada jabatan yang perlu pengecualian ini.
+                </small>
+              </div>
             </div>
           </div>
         </div>
