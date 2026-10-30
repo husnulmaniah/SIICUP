@@ -2361,7 +2361,10 @@ const defaultTab = computed(() => {
       </Message>
       <DataTable :value="verifikasiFiltered" :loading="loadingVerifikasi" size="small" stripedRows responsiveLayout="scroll">
         <Column header="Pegawai">
-          <template #body="{ data }">{{ data.pegawai?.nama }}</template>
+          <template #body="{ data }">
+            <div>{{ data.pegawai?.nama }}</div>
+            <div style="font-size: 0.78rem; color: var(--p-text-muted-color, #64748b)">{{ data.pegawai?.nip || '-' }}</div>
+          </template>
         </Column>
         <Column header="Tanggal">
           <template #body="{ data }">{{ data.tanggal_list.map(formatTanggal).join(', ') }}</template>

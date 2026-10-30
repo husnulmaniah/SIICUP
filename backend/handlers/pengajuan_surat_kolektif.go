@@ -627,6 +627,18 @@ func kembalikanPengajuanSuratKolektif(w http.ResponseWriter, r *http.Request, db
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan: "+err.Error())
 		return
 	}
+	// beri tahu pegawai yang mengajukan lewat lonceng notifikasi di
+	// dashboard-nya -- lihat models.NotifikasiPegawai. Jenis ini belum
+	// punya status "ditolak" tersendiri, jadi "dikembalikan" dipakai
+	// sebagai pemicu notifikasi (lihat komentar panjang pada model).
+	labelJenis := item.Label
+	if labelJenis == "" {
+		labelJenis = item.Jenis
+	}
+	buatNotifikasiPegawai(db, item.IDPegawai, models.NotifikasiPegawaiJenisSuratKolektif, item.ID,
+		"Pengajuan Surat Kolektif Dikembalikan",
+		"Pengajuan \""+labelJenis+"\" Anda dikembalikan untuk direvisi dengan catatan: "+catatan,
+		"/absen")
 	utils.Success(w, "pengajuan dikembalikan ke pegawai untuk direvisi", toPengajuanSuratKolektifOut(item))
 }
 

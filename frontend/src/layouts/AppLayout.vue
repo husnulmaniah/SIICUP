@@ -80,12 +80,81 @@ function waktuRelatif(iso) {
   return `${Math.floor(jam / 24)} hari lalu`
 }
 
+// ============================================================
+// notifikasi lonceng KEDUA (khusus pegawai/atasan) -- BEDA dari lonceng
+// admin di atas: ini memberi tahu PEGAWAI YANG MENGAJUKAN begitu
+// pengajuannya (Cuti/Surat Kolektif/Berita Acara/Perubahan Data) ditolak
+// atau dikembalikan administrator/admin/atasan, supaya tidak perlu
+// bolak-balik mengecek sendiri status pengajuannya (lihat
+// backend/handlers/notifikasi_pegawai.go). Punya status "dibaca" (BEDA
+// dari lonceng admin yang tidak perlu status dibaca karena item di sana
+// otomatis hilang begitu diproses) -- diklik satu per satu, atau "Tandai
+// semua dibaca" sekaligus.
+// ============================================================
+const notifPegawaiPanel = ref(null)
+const notifPegawaiData = ref({ total_belum_dibaca: 0, items: [] })
+const notifPegawaiLoading = ref(false)
+let notifPegawaiTimer = null
+
+async function fetchNotifikasiPegawai() {
+  if (!auth.isPegawai && !auth.isAtasan) return
+  notifPegawaiLoading.value = true
+  try {
+    const { data } = await http.get('/notifikasi-pegawai/pending')
+    notifPegawaiData.value = data.data
+  } catch (e) {
+    // diamkan -- gagal memuat notifikasi tidak boleh mengganggu layar utama
+  } finally {
+    notifPegawaiLoading.value = false
+  }
+}
+
+function toggleNotifPegawaiPanel(event) {
+  fetchNotifikasiPegawai()
+  notifPegawaiPanel.value?.toggle(event)
+}
+
+async function bukaNotifikasiPegawai(item) {
+  notifPegawaiPanel.value?.hide()
+  if (!item.dibaca) {
+    try {
+      await http.put(`/notifikasi-pegawai/${item.id}/baca`)
+      item.dibaca = true
+      notifPegawaiData.value.total_belum_dibaca = Math.max(0, notifPegawaiData.value.total_belum_dibaca - 1)
+    } catch (e) {
+      // diamkan -- navigasi tetap lanjut walau gagal menandai dibaca
+    }
+  }
+  router.push(item.link)
+}
+
+async function tandaiSemuaNotifikasiPegawaiDibaca() {
+  try {
+    await http.put('/notifikasi-pegawai/baca-semua')
+    notifPegawaiData.value.items.forEach((it) => { it.dibaca = true })
+    notifPegawaiData.value.total_belum_dibaca = 0
+  } catch (e) {
+    // diamkan
+  }
+}
+
+function notifPegawaiIcon(jenis) {
+  if (jenis === 'pengajuan_cuti') return 'pi pi-calendar'
+  if (jenis === 'surat_kolektif') return 'pi pi-file'
+  if (jenis === 'berita_acara') return 'pi pi-file-edit'
+  return 'pi pi-user-edit'
+}
+
 onMounted(() => {
   if (auth.canManageMaster) {
     fetchNotifikasi()
     // polling ringan setiap 30 detik supaya badge tetap update tanpa harus
     // reload halaman -- cukup jarang untuk tidak membebani server.
     notifTimer = setInterval(fetchNotifikasi, 30000)
+  }
+  if (auth.isPegawai || auth.isAtasan) {
+    fetchNotifikasiPegawai()
+    notifPegawaiTimer = setInterval(fetchNotifikasiPegawai, 30000)
   }
   if (auth.user?.id_pegawai) {
     refreshFotoProfil(auth.user.id_pegawai)
@@ -94,6 +163,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (notifTimer) clearInterval(notifTimer)
+  if (notifPegawaiTimer) clearInterval(notifPegawaiTimer)
 })
 
 const roleLabel = computed(() => {
@@ -441,6 +511,54 @@ const menuLainnyaAktif = computed(
                     {{ notifTitle(item.type) }}
                   </div>
                   <div class="notif-item-desc">{{ item.nama }} — {{ item.keterangan }}</div>
+                  <div class="notif-item-time">{{ waktuRelatif(item.created_at) }}</div>
+                </div>
+              </a>
+            </div>
+          </Popover>
+
+          <!-- Lonceng notifikasi KEDUA: khusus pegawai/atasan -- memberi
+               tahu kalau pengajuan Cuti/Surat Kolektif/Berita Acara/
+               Perubahan Data MEREKA SENDIRI ditolak/dikembalikan. -->
+          <button
+            v-if="auth.isPegawai || auth.isAtasan"
+            type="button"
+            class="notif-bell"
+            @click="toggleNotifPegawaiPanel"
+          >
+            <i class="pi pi-bell"></i>
+            <Badge
+              v-if="notifPegawaiData.total_belum_dibaca > 0"
+              :value="notifPegawaiData.total_belum_dibaca > 99 ? '99+' : notifPegawaiData.total_belum_dibaca"
+              severity="danger"
+              class="notif-badge"
+            />
+          </button>
+          <Popover v-if="auth.isPegawai || auth.isAtasan" ref="notifPegawaiPanel" class="notif-popover">
+            <div class="notif-header">
+              <span>Notifikasi</span>
+              <a
+                v-if="notifPegawaiData.total_belum_dibaca > 0"
+                href="#"
+                class="notif-header-count"
+                style="text-decoration: underline; cursor: pointer"
+                @click.prevent="tandaiSemuaNotifikasiPegawaiDibaca"
+              >Tandai semua dibaca</a>
+            </div>
+            <div v-if="notifPegawaiLoading && !notifPegawaiData.items.length" class="notif-empty">Memuat...</div>
+            <div v-else-if="!notifPegawaiData.items.length" class="notif-empty">Belum ada notifikasi.</div>
+            <div v-else class="notif-list">
+              <a
+                v-for="item in notifPegawaiData.items"
+                :key="item.id"
+                class="notif-item"
+                :class="{ 'notif-item-unread': !item.dibaca }"
+                @click="bukaNotifikasiPegawai(item)"
+              >
+                <i :class="notifPegawaiIcon(item.jenis)"></i>
+                <div class="notif-item-body">
+                  <div class="notif-item-title">{{ item.judul }}</div>
+                  <div class="notif-item-desc">{{ item.pesan }}</div>
                   <div class="notif-item-time">{{ waktuRelatif(item.created_at) }}</div>
                 </div>
               </a>
@@ -879,6 +997,25 @@ const menuLainnyaAktif = computed(
 
 .notif-item:hover {
   background: #f3f4f6;
+}
+
+/* notif-item-unread: lonceng pegawai/atasan -- tanda titik merah supaya
+   notifikasi yang belum dibaca langsung terlihat beda dari yang sudah
+   dibaca sebelum diklik (lihat bukaNotifikasiPegawai). */
+.notif-item-unread {
+  background: #fef2f2;
+  position: relative;
+}
+
+.notif-item-unread::before {
+  content: '';
+  position: absolute;
+  left: 0.15rem;
+  top: 1rem;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #dc2626;
 }
 
 .notif-item i {

@@ -1069,6 +1069,71 @@ type PerubahanDataPegawai struct {
 func (PerubahanDataPegawai) TableName() string { return "perubahan_data_pegawai" }
 
 // ============================================================
+// NOTIFIKASI PEGAWAI (pemberitahuan penolakan/pengembalian pengajuan ke
+// pegawai yang mengajukan sendiri)
+// ============================================================
+
+// NotifikasiPegawai BEDA dari "notifikasi lonceng" administrator/admin di
+// handlers/notifikasi.go (yang menghitung pengajuan BARU/pending untuk
+// DIPROSES administrator) -- ini sebaliknya memberi tahu PEGAWAI YANG
+// MENGAJUKAN begitu pengajuannya ditolak/dikembalikan, supaya pegawai tidak
+// perlu bolak-balik mengecek sendiri status pengajuannya satu per satu di
+// menu masing-masing. Permintaan pengguna: "jika administrator, admin,
+// admin absensi, admin verifikasi menolak pengajuan tersebut maka di
+// dashboard pegawai akan muncul notifikasi jika ditolak" -- dibuat untuk 4
+// jenis pengajuan (lihat konstanta Jenis* di bawah & buatNotifikasiPegawai
+// di handlers/notifikasi_pegawai.go untuk titik pemicunya satu per satu):
+//
+//   - Pengajuan Cuti: saat ditolak atasan/administrator/admin
+//     (rejectPengajuan, handlers/pengajuan_cuti.go).
+//   - Pengajuan Surat Kolektif: saat DIKEMBALIKAN untuk direvisi
+//     (kembalikanPengajuanSuratKolektif, handlers/pengajuan_surat_kolektif.go)
+//     -- jenis ini BELUM punya status "ditolak" tersendiri (cuma "menunggu"
+//     -> "disetujui"/"dikembalikan"), jadi "dikembalikan" dipakai sebagai
+//     notifikasi karena itu satu-satunya status negatif yang ada.
+//   - Pengajuan Berita Acara (mandiri, sekolah): saat ditolak PERMANEN tahap
+//     akhir admin (tolakPengajuanBeritaAcaraAdmin,
+//     handlers/pengajuan_berita_acara.go) -- TIDAK termasuk "dikembalikan_
+//     atasan"/"dikembalikan_admin" (itu masih memberi pegawai kesempatan
+//     merevisi & mengajukan ulang, dianggap belum final).
+//   - Pengajuan Perubahan Data Pegawai: saat ditolak administrator/admin
+//     (rejectPerubahanData, handlers/perubahan_data.go).
+//
+// Dibaca/Dibaca-nya ditandai SENDIRI oleh pegawai (klik item di panel
+// lonceng, atau "Tandai semua dibaca") -- BEDA dari notifikasi lonceng
+// admin yang tidak punya status dibaca sama sekali (item di sana otomatis
+// hilang begitu statusnya berubah dari "pending"), karena di sini
+// pengajuan yang sudah ditolak TETAP berstatus ditolak selamanya, jadi
+// badge jumlah perlu penanda terpisah supaya tidak terus menumpuk tak
+// terbatas begitu pegawai sudah membacanya.
+type NotifikasiPegawai struct {
+	ID        uint     `json:"id" gorm:"primaryKey"`
+	IDPegawai uint     `json:"id_pegawai" gorm:"column:id_pegawai;not null;index"`
+	Pegawai   *Pegawai `json:"pegawai,omitempty" gorm:"foreignKey:IDPegawai;references:ID"`
+	// Jenis: salah satu dari NotifikasiPegawaiJenisPengajuanCuti/
+	// SuratKolektif/BeritaAcara/PerubahanData di bawah.
+	Jenis string `json:"jenis" gorm:"column:jenis;size:30;not null"`
+	// RefID: ID baris pengajuan terkait (PengajuanCuti.ID/
+	// PengajuanSuratKolektif.ID/dst, sesuai Jenis) -- TIDAK dibuat foreign
+	// key sungguhan karena tabelnya berbeda-beda tergantung Jenis.
+	RefID     uint      `json:"ref_id" gorm:"column:ref_id;not null"`
+	Judul     string    `json:"judul" gorm:"column:judul;size:150;not null"`
+	Pesan     string    `json:"pesan" gorm:"column:pesan;size:500"`
+	Link      string    `json:"link" gorm:"column:link;size:100"`
+	Dibaca    bool      `json:"dibaca" gorm:"column:dibaca;not null;default:false;index"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (NotifikasiPegawai) TableName() string { return "notifikasi_pegawai" }
+
+const (
+	NotifikasiPegawaiJenisPengajuanCuti = "pengajuan_cuti"
+	NotifikasiPegawaiJenisSuratKolektif = "surat_kolektif"
+	NotifikasiPegawaiJenisBeritaAcara   = "berita_acara"
+	NotifikasiPegawaiJenisPerubahanData = "perubahan_data"
+)
+
+// ============================================================
 // PENGAJUAN PENSIUN (retirement request + approval workflow)
 // ============================================================
 

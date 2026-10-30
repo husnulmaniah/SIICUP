@@ -1032,6 +1032,18 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	preloadPengajuan(db).First(&item, item.ID)
+	// beri tahu pegawai yang mengajukan lewat lonceng notifikasi di
+	// dashboard-nya -- lihat models.NotifikasiPegawai.
+	jenisCutiNama := "Cuti"
+	if item.JenisCuti != nil {
+		jenisCutiNama = item.JenisCuti.Jenis
+	}
+	pesan := "Pengajuan " + jenisCutiNama + " Anda ditolak"
+	if p.Catatan != "" {
+		pesan += " dengan catatan: " + p.Catatan
+	}
+	buatNotifikasiPegawai(db, item.IDPegawai, models.NotifikasiPegawaiJenisPengajuanCuti, item.ID,
+		"Pengajuan Cuti Ditolak", pesan, "/pengajuan-cuti")
 	utils.Success(w, "pengajuan cuti telah ditolak", item)
 }
 

@@ -837,6 +837,15 @@ func tolakPengajuanBeritaAcaraAdmin(w http.ResponseWriter, r *http.Request, db *
 		utils.Error(w, http.StatusInternalServerError, "gagal menyimpan: "+err.Error())
 		return
 	}
+	// beri tahu pegawai yang mengajukan lewat lonceng notifikasi di
+	// dashboard-nya -- lihat models.NotifikasiPegawai. HANYA penolakan
+	// PERMANEN tahap akhir ini yang memicu notifikasi, TIDAK termasuk
+	// "kembalikan" (masih memberi pegawai kesempatan merevisi, belum
+	// final).
+	buatNotifikasiPegawai(db, item.IDPegawai, models.NotifikasiPegawaiJenisBeritaAcara, item.ID,
+		"Pengajuan Berita Acara Ditolak",
+		"Pengajuan Berita Acara Anda tanggal "+item.TanggalKejadian.Format("02-01-2006")+" ditolak dengan catatan: "+catatan,
+		"/absen")
 	utils.Success(w, "pengajuan Berita Acara ditolak", nil)
 }
 

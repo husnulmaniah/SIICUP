@@ -30,6 +30,7 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 	handlers.RegisterAbsensiRoutes(mux, db)
 	handlers.RegisterPengajuanSuratKolektifRoutes(mux, db)
 	handlers.RegisterNotifikasiRoutes(mux, db)
+	handlers.RegisterNotifikasiPegawaiRoutes(mux, db)
 	handlers.RegisterTemplateSuratRoutes(mux, db)
 	handlers.RegisterTppRoutes(mux, db)
 	handlers.RegisterShiftKerjaRoutes(mux, db)

@@ -39,6 +39,7 @@ func Migrate(db *gorm.DB) {
 		&models.PengajuanDokumen{},
 		&models.PengaturanSurat{},
 		&models.PerubahanDataPegawai{},
+		&models.NotifikasiPegawai{},
 		&models.PengaturanPensiun{},
 		&models.PengajuanPensiun{},
 		&models.PengaturanKenaikanGajiBerkala{},

@@ -556,6 +556,12 @@ func rejectPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	db.Preload("Pegawai").First(&item, item.ID)
+	// beri tahu pegawai yang mengajukan lewat lonceng notifikasi di
+	// dashboard-nya -- lihat models.NotifikasiPegawai.
+	buatNotifikasiPegawai(db, item.IDPegawai, models.NotifikasiPegawaiJenisPerubahanData, item.ID,
+		"Pengajuan Perubahan Data Ditolak",
+		"Pengajuan perubahan data diri Anda ditolak dengan catatan: "+p.Catatan,
+		"/profil-saya")
 	utils.Success(w, "pengajuan perubahan data telah ditolak", item)
 }
 
