@@ -135,6 +135,21 @@ func listJatahCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		query = query.Where("tahun = ?", tahun)
 		countQuery = countQuery.Where("tahun = ?", tahun)
 	}
+	// Kotak "Cari..." di menu Jatah Cuti Tahunan (lihat searchPlaceholder
+	// pada config/tables.js -> 'jatah-cuti') mengirim query param "q", tapi
+	// sebelumnya parameter ini TIDAK PERNAH dibaca sama sekali di sini --
+	// akibatnya tabel selalu menampilkan semua baris tanpa tersaring apa pun
+	// walau administrator sudah mengetik sesuatu di kotak pencarian
+	// (dilaporkan pengguna: "tombol pencarian pada menu jatah cuti tahunan
+	// tidak berfungsi"). Nama & NIP pegawai ada di tabel "pegawai", BUKAN di
+	// tabel "jatah_cuti" sendiri (lihat models.JatahCuti.Pegawai), jadi
+	// dicocokkan lewat subquery id_pegawai, sama seperti filter kecamatan
+	// pada daftar lain yang juga menjangkau tabel terkait tanpa JOIN.
+	if search := strings.TrimSpace(q.Get("q")); search != "" {
+		cond := "id_pegawai IN (SELECT id FROM pegawai WHERE nama ILIKE ? OR nip ILIKE ?)"
+		query = query.Where(cond, "%"+search+"%", "%"+search+"%")
+		countQuery = countQuery.Where(cond, "%"+search+"%", "%"+search+"%")
+	}
 	// filter tambahan supaya admin/administrator/atasan bisa melihat riwayat
 	// jatah cuti tahunan milik SATU pegawai tertentu saja (dipakai di dialog
 	// Detail Pegawai) -- diterapkan setelah scoping role di atas, jadi hanya
