@@ -971,25 +971,52 @@ function haversineMeter(lat1, lng1, lat2, lng2) {
 // terbaik yang berhasil didapat sejauh itu, atau null kalau tidak ada sama
 // sekali).
 const GPS_TARGET_ACCURACY_M = 15
-const GPS_MAX_WAIT_MS = 7000
+// GPS_MAX_WAIT_MS: SEBELUMNYA 7000 (7 detik) -- terlalu singkat untuk
+// "cold start" GPS (chip GPS baru mulai mencari sinyal satelit, misalnya
+// sehabis HP idle/GPS sempat mati, atau pegawai absen di dalam ruangan
+// beton/gedung sekolah dengan pandangan ke langit yang terhalang). Dengan
+// enableHighAccuracy+maximumAge:0 di bawah, SETIAP absen WAJIB menunggu
+// pembacaan GPS yang benar-benar baru (tidak boleh pakai posisi lama yang
+// tersimpan) -- kalau GPS belum sempat "kunci" dalam 7 detik, dulu fungsi
+// ini langsung menyerah dan melaporkan "tidak terdeteksi" padahal GPS-nya
+// aktif & sebenarnya cuma butuh waktu sedikit lebih lama (dilaporkan
+// pengguna: "beberapa pegawai mengalami ini sementara lokasi di HP sudah
+// diaktifkan"). Dinaikkan jadi 20 detik supaya kasus sinyal lemah/cold
+// start seperti ini tetap sempat dapat titik, tanpa membuat pegawai dengan
+// sinyal normal menunggu lebih lama (watchPosition tetap berhenti lebih
+// awal begitu dapat sampel cukup akurat, lihat onSample di bawah).
+const GPS_MAX_WAIT_MS = 20000
 
+// getLocationOnce mengembalikan { sample, permissionDenied }:
+//   - sample: titik GPS terbaik yang didapat ({lat,lng,accuracy}), atau
+//     null kalau GPS gagal total (tidak ada satu pun pembacaan berhasil
+//     sampai batas waktu GPS_MAX_WAIT_MS habis).
+//   - permissionDenied: true KHUSUS kalau browser melaporkan izin lokasi
+//     DITOLAK (GeolocationPositionError.code === 1) -- dibedakan dari
+//     sample null karena GPS belum sempat kunci (timeout biasa), supaya
+//     cekLokasiKantor bisa menampilkan pesan yang SESUAI akar masalahnya:
+//     "izin ditolak" perlu diperbaiki lewat pengaturan izin situs di
+//     browser (menunggu lebih lama tidak akan membantu sama sekali),
+//     sedangkan "GPS belum kunci" cukup dengan pindah ke tempat terbuka &
+//     mencoba lagi.
 function getLocationOnce() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
-      resolve(null)
+      resolve({ sample: null, permissionDenied: false })
       return
     }
     let best = null
     let watchId = null
     let settled = false
     let hardTimer = null
+    let permissionDenied = false
 
     const finish = () => {
       if (settled) return
       settled = true
       if (hardTimer) clearTimeout(hardTimer)
       if (watchId != null) navigator.geolocation.clearWatch(watchId)
-      resolve(best)
+      resolve({ sample: best, permissionDenied })
     }
 
     const onSample = (pos) => {
@@ -1008,7 +1035,10 @@ function getLocationOnce() {
       // Error lain (timeout sampel tunggal / posisi sesaat tak tersedia)
       // diabaikan -- watchPosition akan mencoba lagi sendiri, dan tetap ada
       // batas waktu total di bawah.
-      if (err && err.code === 1) finish()
+      if (err && err.code === 1) {
+        permissionDenied = true
+        finish()
+      }
     }
 
     try {
@@ -1018,7 +1048,7 @@ function getLocationOnce() {
         timeout: GPS_MAX_WAIT_MS,
       })
     } catch {
-      resolve(null)
+      resolve({ sample: null, permissionDenied: false })
       return
     }
 
@@ -1056,7 +1086,7 @@ async function cekLokasiKantor() {
   locationChecking.value = true
   locationUnavailable.value = false
   geoStatus.value = 'mencari titik koordinat...'
-  const pos = await getLocationOnce()
+  const { sample: pos, permissionDenied } = await getLocationOnce()
   locationChecking.value = false
 
   const kantorLat = pengaturan.value?.titik_lat
@@ -1066,11 +1096,22 @@ async function cekLokasiKantor() {
   const geofenceAktif = kantorLat != null && kantorLng != null
 
   if (!pos) {
-    geoStatus.value = 'lokasi tidak diizinkan/tidak ditemukan'
     locationBlocked.value = true
     locationUnavailable.value = true
-    locationBlockedMsg.value =
-      'Lokasi GPS tidak terdeteksi. Aktifkan layanan lokasi dan izinkan akses lokasi pada browser/HP ini, lalu tekan "Coba Lagi". Absen tidak dapat dilakukan tanpa titik lokasi, walau menggunakan opsi Dinas Dalam.'
+    // Dua pesan BERBEDA tergantung akar masalahnya (lihat komentar
+    // getLocationOnce) -- permintaan pengguna: "beberapa pegawai
+    // mengalami lokasi tidak terdeteksi padahal lokasi di HP sudah
+    // diaktifkan", yang sebelumnya cuma diberi SATU pesan generik
+    // "aktifkan layanan lokasi" walau akar masalahnya belum tentu itu.
+    if (permissionDenied) {
+      geoStatus.value = 'izin lokasi untuk situs ini ditolak/diblokir'
+      locationBlockedMsg.value =
+        'Izin lokasi untuk situs ini DITOLAK/DIBLOKIR di browser -- ini BEDA dari pengaturan "Layanan Lokasi" di HP yang sudah aktif. Ketuk ikon gembok/info di sebelah alamat situs pada browser -> Izin Situs (Site settings) -> Lokasi -> pilih "Izinkan", lalu tekan "Coba Lagi". Absen tidak dapat dilakukan tanpa titik lokasi, walau menggunakan opsi Dinas Dalam.'
+    } else {
+      geoStatus.value = 'GPS belum berhasil mendapat titik lokasi'
+      locationBlockedMsg.value =
+        'GPS belum berhasil mendapat titik lokasi (sinyal lemah/baru mencari) -- sering terjadi di dalam ruangan/gedung walau layanan lokasi sudah aktif. Coba pindah sejenak ke tempat yang lebih terbuka (dekat jendela atau di luar ruangan), lalu tekan "Coba Lagi". Absen tidak dapat dilakukan tanpa titik lokasi, walau menggunakan opsi Dinas Dalam.'
+    }
     return false
   }
 
