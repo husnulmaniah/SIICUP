@@ -141,6 +141,29 @@ func absensiManualInputHandler(w http.ResponseWriter, r *http.Request, db *gorm.
 	existing.IsManual = true
 	existing.DiinputOlehNama = claims.Username
 
+	// Titik koordinat masuk/pulang -- OPSIONAL, sama perlakuannya dengan foto
+	// di bawah: field "lat_masuk"/"lng_masuk"/"lat_pulang"/"lng_pulang" hanya
+	// diisi kalau administrator benar-benar mengirim keduanya (lat & lng
+	// sepasang, lewat tempel koordinat Google Maps di form Input/Edit Absen
+	// Manual, RekapAbsensiView.vue), supaya koordinat yang sudah tersimpan
+	// (kalau ada) tidak diam-diam tertimpa kosong ketika admin cuma mengedit
+	// jam/foto. Sebelum perbaikan ini, baris yang diinput/diedit lewat form
+	// manual SELALU kosong kolom Titik Koordinat-nya karena field ini tidak
+	// pernah dibaca dari request sama sekali -- lihat RekapAbsensiView.vue
+	// (manualAbsenForm) & kolom "Titik Koordinat" pada tabel Riwayat Absen.
+	if latMasuk := parseFloatForm(r, "lat_masuk"); latMasuk != nil {
+		if lngMasuk := parseFloatForm(r, "lng_masuk"); lngMasuk != nil {
+			existing.LatMasuk = latMasuk
+			existing.LngMasuk = lngMasuk
+		}
+	}
+	if latPulang := parseFloatForm(r, "lat_pulang"); latPulang != nil {
+		if lngPulang := parseFloatForm(r, "lng_pulang"); lngPulang != nil {
+			existing.LatPulang = latPulang
+			existing.LngPulang = lngPulang
+		}
+	}
+
 	// Foto bersifat OPSIONAL untuk input manual (berbeda dari absen mandiri
 	// pegawai yang mewajibkan foto kamera) -- hanya diproses/diganti kalau
 	// administrator benar-benar mengirim file baru, supaya foto lama (kalau

@@ -661,6 +661,16 @@ const manualAbsenFotoPulangInput = ref(null)
 const manualAbsenNamaPegawai = ref('')
 const manualAbsenAdaFotoMasuk = ref(false)
 const manualAbsenAdaFotoPulang = ref(false)
+// Titik koordinat masuk/pulang -- OPSIONAL, ditempel dari Google Maps sama
+// seperti pola tempelKoordinat/parseKoordinatMaps di atas (lihat komentar
+// pada parseKoordinatMaps). Sebelum field ini ada, baris yang diinput/diedit
+// lewat dialog ini SELALU kosong kolom "Titik Koordinat"-nya karena formnya
+// tidak pernah menanyakan koordinat sama sekali -- lihat juga perbaikan
+// terkait pada absensi_manual.go (absensiManualInputHandler).
+const manualAbsenKoordMasuk = ref('')
+const manualAbsenKoordPulang = ref('')
+const manualAbsenAdaKoordMasuk = ref(false)
+const manualAbsenAdaKoordPulang = ref(false)
 // manualAbsenHadirPenuhSaatDibuka: true kalau baris yang dibuka SUDAH punya
 // jam masuk & jam pulang SEBELUM dialog ini dibuka (lihat bukaManualAbsenEdit
 // di bawah) -- dipakai untuk peringatan dini & menonaktifkan tombol Simpan
@@ -676,6 +686,8 @@ const manualAbsenHadirPenuhSaatDibuka = ref(false)
 function resetManualAbsenFoto() {
   manualAbsenFotoMasuk.value = null
   manualAbsenFotoPulang.value = null
+  manualAbsenKoordMasuk.value = ''
+  manualAbsenKoordPulang.value = ''
 }
 
 function bukaManualAbsenEdit(row) {
@@ -687,6 +699,8 @@ function bukaManualAbsenEdit(row) {
   manualAbsenForm.jam_pulang = row.jam_pulang ? formatJam(row.jam_pulang) : ''
   manualAbsenAdaFotoMasuk.value = !!row.jam_masuk
   manualAbsenAdaFotoPulang.value = !!row.jam_pulang
+  manualAbsenAdaKoordMasuk.value = row.lat_masuk != null && row.lng_masuk != null
+  manualAbsenAdaKoordPulang.value = row.lat_pulang != null && row.lng_pulang != null
   manualAbsenHadirPenuhSaatDibuka.value = !!row.jam_masuk && !!row.jam_pulang
   resetManualAbsenFoto()
   manualAbsenDialog.value = true
@@ -701,6 +715,8 @@ function bukaManualAbsenTambah(tglKey) {
   manualAbsenForm.jam_pulang = ''
   manualAbsenAdaFotoMasuk.value = false
   manualAbsenAdaFotoPulang.value = false
+  manualAbsenAdaKoordMasuk.value = false
+  manualAbsenAdaKoordPulang.value = false
   manualAbsenHadirPenuhSaatDibuka.value = false
   resetManualAbsenFoto()
   manualAbsenDialog.value = true
@@ -748,6 +764,30 @@ async function submitManualAbsen() {
     toast.add({ severity: 'warn', summary: 'Periksa kembali', detail: 'Format jam pulang harus HH:MM, contoh 16:00', life: 4000 })
     return
   }
+  // Titik koordinat masuk/pulang -- opsional, ditempel dari Google Maps
+  // (format sama dengan tempelKoordinat Titik Kantor, lihat parseKoordinatMaps
+  // di atas). Kalau kolomnya diisi tapi formatnya tidak dikenali, tolak di sini
+  // dulu supaya admin tidak baru tahu setelah submit gagal di server.
+  const koordMasuk = manualAbsenKoordMasuk.value.trim() ? parseKoordinatMaps(manualAbsenKoordMasuk.value) : null
+  if (manualAbsenKoordMasuk.value.trim() && !koordMasuk) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Periksa kembali',
+      detail: 'Format Titik Koordinat Masuk tidak dikenali. Tempel koordinat (contoh: "-1.976688, 121.335284") atau link Google Maps yang mengandung koordinat.',
+      life: 6000,
+    })
+    return
+  }
+  const koordPulang = manualAbsenKoordPulang.value.trim() ? parseKoordinatMaps(manualAbsenKoordPulang.value) : null
+  if (manualAbsenKoordPulang.value.trim() && !koordPulang) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Periksa kembali',
+      detail: 'Format Titik Koordinat Pulang tidak dikenali. Tempel koordinat (contoh: "-1.976688, 121.335284") atau link Google Maps yang mengandung koordinat.',
+      life: 6000,
+    })
+    return
+  }
   manualAbsenSubmitting.value = true
   try {
     const fd = new FormData()
@@ -760,6 +800,14 @@ async function submitManualAbsen() {
     if (manualAbsenForm.jam_pulang) fd.append('jam_pulang', manualAbsenForm.jam_pulang)
     if (manualAbsenFotoMasuk.value) fd.append('foto_masuk', manualAbsenFotoMasuk.value)
     if (manualAbsenFotoPulang.value) fd.append('foto_pulang', manualAbsenFotoPulang.value)
+    if (koordMasuk) {
+      fd.append('lat_masuk', koordMasuk.lat)
+      fd.append('lng_masuk', koordMasuk.lng)
+    }
+    if (koordPulang) {
+      fd.append('lat_pulang', koordPulang.lat)
+      fd.append('lng_pulang', koordPulang.lng)
+    }
     const { data } = await http.post('/absensi/manual', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
     manualAbsenDialog.value = false
@@ -2746,11 +2794,30 @@ const defaultTab = computed(() => {
           </div>
         </div>
 
+        <div class="jam-grid" style="margin-bottom: 1rem">
+          <div>
+            <label class="field-label">Titik Koordinat Masuk (opsional)</label>
+            <InputText
+              v-model="manualAbsenKoordMasuk"
+              :placeholder="manualAbsenAdaKoordMasuk ? 'Sudah ada -- tempel untuk mengganti' : '-1.976688, 121.335284 atau link Google Maps'"
+              style="width: 100%"
+            />
+          </div>
+          <div>
+            <label class="field-label">Titik Koordinat Pulang (opsional)</label>
+            <InputText
+              v-model="manualAbsenKoordPulang"
+              :placeholder="manualAbsenAdaKoordPulang ? 'Sudah ada -- tempel untuk mengganti' : '-1.976688, 121.335284 atau link Google Maps'"
+              style="width: 100%"
+            />
+          </div>
+        </div>
+
         <Message v-if="manualAbsenHadirPenuhSaatDibuka" severity="warn" :closable="false">
           Pegawai ini sudah memiliki absen masuk &amp; pulang (hadir) pada tanggal ini -- data absen asli tidak bisa ditimpa lewat input manual. Hapus dulu lewat tombol Hapus kalau memang harus diganti.
         </Message>
         <Message v-else severity="info" :closable="false">
-          Isi minimal salah satu jam (masuk/pulang). Foto bersifat opsional -- kalau tidak dipilih, foto yang sudah tersimpan (kalau ada) tidak akan diubah.
+          Isi minimal salah satu jam (masuk/pulang). Foto &amp; titik koordinat bersifat opsional -- kalau tidak diisi, foto/koordinat yang sudah tersimpan (kalau ada) tidak akan diubah. Titik koordinat ditempel dari Google Maps (klik kanan titik yang tepat &rarr; salin koordinat, atau salin link/alamat bar), sama caranya dengan Titik Koordinat Kantor pada Pengaturan.
         </Message>
       </div>
 
