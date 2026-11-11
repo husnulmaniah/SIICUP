@@ -498,6 +498,11 @@ type Pegawai struct {
 	IDAtasan                       *uint      `json:"id_atasan" gorm:"column:id_atasan"`
 	Atasan                         *Pegawai   `json:"atasan,omitempty" gorm:"foreignKey:IDAtasan;references:ID"`
 	Email                          string     `json:"email" gorm:"size:100"`
+	// Agama: agama pegawai -- opsional, boleh diisi/diubah lewat Profil Saya
+	// -> Ajukan Perubahan Data (baru berlaku setelah disetujui, lihat
+	// handlers/perubahan_data.go) ATAU langsung oleh administrator lewat
+	// menu Data Pegawai.
+	Agama string `json:"agama" gorm:"column:agama;size:50"`
 
 	// IDSubJabatan: pecahan KHUSUS dari Jabatan pegawai ini pada sekolahnya
 	// sendiri (mis. Jabatan "Guru Ahli Pertama" dipecah atasan jadi "Guru
