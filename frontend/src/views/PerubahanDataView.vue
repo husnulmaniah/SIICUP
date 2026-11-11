@@ -140,6 +140,7 @@ function diffRows(row) {
     { key: 'no_hp', label: 'No HP' },
     { key: 'id_status', label: 'Status Kepegawaian', fmt: statusPegawaiLabel },
     { key: 'email', label: 'Email' },
+    { key: 'agama', label: 'Agama' },
   ]
   return fields.map((f) => {
     const rawLama = lama[f.key]

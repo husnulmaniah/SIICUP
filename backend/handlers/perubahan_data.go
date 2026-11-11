@@ -42,6 +42,7 @@ type pegawaiEditableData struct {
 	NoHP                           string `json:"no_hp"`
 	IDStatus                       *uint  `json:"id_status"`
 	Email                          string `json:"email"`
+	Agama                          string `json:"agama"`
 }
 
 func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
@@ -74,6 +75,7 @@ func pegawaiSnapshot(p models.Pegawai) pegawaiEditableData {
 		NoHP:                           p.NoHP,
 		IDStatus:                       p.IDStatus,
 		Email:                          p.Email,
+		Agama:                          p.Agama,
 	}
 }
 
@@ -250,6 +252,28 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusBadRequest, "nama wajib diisi")
 		return
 	}
+
+	// Tanggal Kenaikan Gaji Berkala/Pangkat Terakhir HANYA berlaku untuk
+	// Status Kepegawaian "PNS" (permintaan pengguna: PPPK/PPPK Paruh Waktu
+	// tidak punya mekanisme kenaikan gaji berkala/pangkat ini). Frontend
+	// (ProfilSayaView.vue, lihat tampilkanKgbPangkat) sudah menyembunyikan
+	// field-field ini dari form kalau status yang dipilih bukan PNS, tapi
+	// dikosongkan ulang di sini juga sebagai jaring pengaman kedua -- supaya
+	// data historis/sisa dari status sebelumnya tidak diam-diam ikut
+	// tersimpan kalau pegawai sekaligus mengganti statusnya ke PPPK/PPPK
+	// Paruh Waktu dalam pengajuan yang sama.
+	statusIsPNS := false
+	if baru.IDStatus != nil {
+		var st models.Status
+		if err := db.First(&st, *baru.IDStatus).Error; err == nil {
+			statusIsPNS = strings.EqualFold(strings.TrimSpace(st.Status), "PNS")
+		}
+	}
+	if !statusIsPNS {
+		baru.TglKenaikanGajiBerkalaTerakhir = ""
+		baru.TglKenaikanPangkatTerakhir = ""
+	}
+
 	if baru.TMT != "" {
 		if _, err := utils.ParseDateCell(baru.TMT); err != nil {
 			utils.Error(w, http.StatusBadRequest, "TMT tidak valid")
@@ -337,6 +361,13 @@ func createPerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	skPangkatNamaFile, skPangkatFileData, ok := optionalSkFile(w, r, "file_pangkat", "SK Kenaikan Pangkat")
 	if !ok {
 		return
+	}
+	// Sama seperti tanggalnya di atas (statusIsPNS) -- berkas SK Kenaikan
+	// Gaji Berkala/Pangkat ikut diabaikan kalau status yang diajukan bukan
+	// PNS, walau entah bagaimana tetap terkirim di request.
+	if !statusIsPNS {
+		skKgbNamaFile, skKgbFileData = "", nil
+		skPangkatNamaFile, skPangkatFileData = "", nil
 	}
 
 	// tolak pengajuan kalau TIDAK ADA yang benar-benar berubah -- baik data
@@ -441,6 +472,7 @@ func approvePerubahanData(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		"no_hp":          baru.NoHP,
 		"id_status":      baru.IDStatus,
 		"email":          baru.Email,
+		"agama":          baru.Agama,
 		// SK terakhir yang diupload pegawai saat mengajukan perubahan ini
 		// menjadi dokumen SK Terakhir resmi begitu disetujui.
 		"sk_terakhir_nama": item.SkNamaFile,

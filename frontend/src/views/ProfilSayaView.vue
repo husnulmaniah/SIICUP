@@ -366,6 +366,14 @@ const intervalPangkatSaya = computed(() =>
 const kelayakanGajiBerkalaSaya = computed(() => hitungKelayakanKenaikan(profile.value?.tgl_kenaikan_gaji_berkala_terakhir, intervalGajiBerkalaSaya.value))
 const kelayakanPangkatSaya = computed(() => hitungKelayakanKenaikan(profile.value?.tgl_kenaikan_pangkat_terakhir, intervalPangkatSaya.value))
 
+// isPNSSaya: dari status kepegawaian yang TERSIMPAN (profile.status.status),
+// BUKAN dari form yang sedang diedit (lihat tampilkanKgbPangkat untuk versi
+// form-nya) -- dipakai menyembunyikan baris Kenaikan Gaji Berkala/Kenaikan
+// Pangkat pada ringkasan profil read-only di bawah untuk pegawai berstatus
+// PPPK/PPPK Paruh Waktu, konsisten dengan form Ajukan Perubahan Data yang
+// juga menyembunyikan field-field ini untuk status selain PNS.
+const isPNSSaya = computed(() => (profile.value?.status?.status || '').trim() === 'PNS')
+
 const pensiunDialogVisible = ref(false)
 const pensiunSaving = ref(false)
 const pensiunFormErrors = ref('')
@@ -510,13 +518,49 @@ const form = reactive({
   no_hp: '',
   id_status: null,
   email: '',
+  agama: '',
 })
+
+// AGAMA_OPTIONS: daftar baku 6 agama resmi di Indonesia + "Lainnya", dipakai
+// Select pada field Agama (form Ajukan Perubahan Data) -- array string polos
+// (bukan {id,label}) karena PrimeVue Select menerima array string langsung
+// sebagai label sekaligus value, tanpa perlu ref tabel master tersendiri.
+const AGAMA_OPTIONS = ['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Khonghucu', 'Lainnya']
+
 const skFile = ref(null)
 const skFileInputRef = ref(null)
 const skKgbFile = ref(null)
 const skKgbFileInputRef = ref(null)
 const skPangkatFile = ref(null)
 const skPangkatFileInputRef = ref(null)
+
+// tampilkanKgbPangkat: true hanya kalau Status Kepegawaian yang SEDANG
+// DIPILIH di form (bukan status pegawai yang tersimpan -- bisa saja sedang
+// diganti di dialog yang sama) berlabel persis "PNS". Input tanggal/berkas SK
+// Kenaikan Gaji Berkala & Kenaikan Pangkat HANYA berlaku untuk status PNS
+// (permintaan pengguna: PPPK/PPPK Paruh Waktu tidak punya mekanisme kenaikan
+// gaji berkala/pangkat ini), jadi disembunyikan sama sekali untuk status
+// lain supaya tidak membingungkan pegawai PPPK/PPPK Paruh Waktu mengisinya.
+// Backend (createPerubahanData di handlers/perubahan_data.go) juga sudah
+// mengosongkan ulang field-field ini sebagai jaring pengaman kalau status
+// yang diajukan ternyata bukan PNS, konsisten dengan sisi frontend ini.
+const tampilkanKgbPangkat = computed(() => {
+  const label = refStatus.value.find((x) => x.id === form.id_status)?.status || ''
+  return label.trim() === 'PNS'
+})
+
+// Begitu status yang dipilih di form berubah jadi bukan PNS (atau belum
+// dipilih), kosongkan field-field yang jadi tersembunyi supaya TIDAK ikut
+// terkirim dalam pengajuan walau sempat diisi sebelum status diganti --
+// termasuk berkas yang sudah dipilih (bukan cuma tanggalnya).
+watch(tampilkanKgbPangkat, (tampil) => {
+  if (!tampil) {
+    form.tgl_kenaikan_gaji_berkala_terakhir = null
+    form.tgl_kenaikan_pangkat_terakhir = null
+    skKgbFile.value = null
+    skPangkatFile.value = null
+  }
+})
 
 const hasSkTerakhir = computed(() => !!profile.value?.sk_terakhir_nama)
 const hasSkKgb = computed(() => !!profile.value?.sk_kgb_nama)
@@ -558,6 +602,7 @@ function openAjukan() {
   form.no_hp = profile.value.no_hp || ''
   form.id_status = profile.value.id_status || null
   form.email = profile.value.email || ''
+  form.agama = profile.value.agama || ''
   skFile.value = null
   skKgbFile.value = null
   skPangkatFile.value = null
@@ -685,11 +730,18 @@ function buildPayloadFromForm() {
     tempat_tgs: form.tempat_tgs,
     tmt: toDateStr(form.tmt),
     tgl_lahir: toDateStr(form.tgl_lahir),
-    tgl_kenaikan_gaji_berkala_terakhir: toDateStr(form.tgl_kenaikan_gaji_berkala_terakhir),
-    tgl_kenaikan_pangkat_terakhir: toDateStr(form.tgl_kenaikan_pangkat_terakhir),
+    // Dikosongkan paksa kalau status yang dipilih BUKAN PNS -- lihat
+    // tampilkanKgbPangkat. Field ini (& berkas SK pendukungnya) tidak
+    // ditampilkan sama sekali di form untuk status PPPK/PPPK Paruh Waktu,
+    // tapi dipaksa kosong juga di sini sebagai jaring pengaman kalau `form`
+    // masih menyimpan nilai lama (mis. data historis sebelum status diganti
+    // di dialog yang sama).
+    tgl_kenaikan_gaji_berkala_terakhir: tampilkanKgbPangkat.value ? toDateStr(form.tgl_kenaikan_gaji_berkala_terakhir) : '',
+    tgl_kenaikan_pangkat_terakhir: tampilkanKgbPangkat.value ? toDateStr(form.tgl_kenaikan_pangkat_terakhir) : '',
     no_hp: form.no_hp,
     id_status: form.id_status,
     email: form.email,
+    agama: form.agama,
   }
 }
 
@@ -720,8 +772,8 @@ async function submitAjukan() {
     const fd = new FormData()
     fd.append('data', JSON.stringify(payload))
     if (skFile.value) fd.append('file', skFile.value)
-    if (skKgbFile.value) fd.append('file_kgb', skKgbFile.value)
-    if (skPangkatFile.value) fd.append('file_pangkat', skPangkatFile.value)
+    if (tampilkanKgbPangkat.value && skKgbFile.value) fd.append('file_kgb', skKgbFile.value)
+    if (tampilkanKgbPangkat.value && skPangkatFile.value) fd.append('file_pangkat', skPangkatFile.value)
     await http.post('/perubahan-data', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     toast.add({
       severity: 'success',
@@ -909,44 +961,47 @@ function formatDate(v) {
               <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi Tanggal Lahir untuk menghitung</span>
             </div>
           </div>
-          <div>
-            <span class="detail-label">Kenaikan Gaji Berkala Terakhir</span>
+          <template v-if="isPNSSaya">
             <div>
-              {{ formatDate(profile.tgl_kenaikan_gaji_berkala_terakhir) }}
-              <Button v-if="hasSkKgb" label="Lihat SK" text size="small" style="padding: 0 0.3rem" @click="previewSkKgbSaatIni" />
+              <span class="detail-label">Kenaikan Gaji Berkala Terakhir</span>
+              <div>
+                {{ formatDate(profile.tgl_kenaikan_gaji_berkala_terakhir) }}
+                <Button v-if="hasSkKgb" label="Lihat SK" text size="small" style="padding: 0 0.3rem" @click="previewSkKgbSaatIni" />
+              </div>
             </div>
-          </div>
-          <div>
-            <span class="detail-label">Kelayakan Kenaikan Gaji Berkala</span>
             <div>
-              <Tag
-                v-if="kelayakanGajiBerkalaSaya.jatuhTempo"
-                :value="kelayakanGajiBerkalaSaya.sudahWaktunya ? `Sudah waktunya (interval ${intervalGajiBerkalaSaya} tahun)` : `Jatuh tempo ${formatDate(kelayakanGajiBerkalaSaya.jatuhTempo)}`"
-                :severity="kelayakanGajiBerkalaSaya.sudahWaktunya ? 'warn' : 'success'"
-              />
-              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi tanggal kenaikan terakhir untuk menghitung</span>
+              <span class="detail-label">Kelayakan Kenaikan Gaji Berkala</span>
+              <div>
+                <Tag
+                  v-if="kelayakanGajiBerkalaSaya.jatuhTempo"
+                  :value="kelayakanGajiBerkalaSaya.sudahWaktunya ? `Sudah waktunya (interval ${intervalGajiBerkalaSaya} tahun)` : `Jatuh tempo ${formatDate(kelayakanGajiBerkalaSaya.jatuhTempo)}`"
+                  :severity="kelayakanGajiBerkalaSaya.sudahWaktunya ? 'warn' : 'success'"
+                />
+                <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi tanggal kenaikan terakhir untuk menghitung</span>
+              </div>
             </div>
-          </div>
-          <div>
-            <span class="detail-label">Kenaikan Pangkat Terakhir</span>
             <div>
-              {{ formatDate(profile.tgl_kenaikan_pangkat_terakhir) }}
-              <Button v-if="hasSkPangkat" label="Lihat SK" text size="small" style="padding: 0 0.3rem" @click="previewSkPangkatSaatIni" />
+              <span class="detail-label">Kenaikan Pangkat Terakhir</span>
+              <div>
+                {{ formatDate(profile.tgl_kenaikan_pangkat_terakhir) }}
+                <Button v-if="hasSkPangkat" label="Lihat SK" text size="small" style="padding: 0 0.3rem" @click="previewSkPangkatSaatIni" />
+              </div>
             </div>
-          </div>
-          <div>
-            <span class="detail-label">Kelayakan Kenaikan Pangkat</span>
             <div>
-              <Tag
-                v-if="kelayakanPangkatSaya.jatuhTempo"
-                :value="kelayakanPangkatSaya.sudahWaktunya ? `Sudah waktunya (interval ${intervalPangkatSaya} tahun)` : `Jatuh tempo ${formatDate(kelayakanPangkatSaya.jatuhTempo)}`"
-                :severity="kelayakanPangkatSaya.sudahWaktunya ? 'warn' : 'success'"
-              />
-              <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi tanggal kenaikan terakhir untuk menghitung</span>
+              <span class="detail-label">Kelayakan Kenaikan Pangkat</span>
+              <div>
+                <Tag
+                  v-if="kelayakanPangkatSaya.jatuhTempo"
+                  :value="kelayakanPangkatSaya.sudahWaktunya ? `Sudah waktunya (interval ${intervalPangkatSaya} tahun)` : `Jatuh tempo ${formatDate(kelayakanPangkatSaya.jatuhTempo)}`"
+                  :severity="kelayakanPangkatSaya.sudahWaktunya ? 'warn' : 'success'"
+                />
+                <span v-else style="color: var(--p-text-muted-color); font-size: 0.85rem">Isi tanggal kenaikan terakhir untuk menghitung</span>
+              </div>
             </div>
-          </div>
+          </template>
           <div><span class="detail-label">No HP</span><div>{{ profile.no_hp || '-' }}</div></div>
           <div><span class="detail-label">Email</span><div>{{ profile.email || '-' }}</div></div>
+          <div><span class="detail-label">Agama</span><div>{{ profile.agama || '-' }}</div></div>
           <div><span class="detail-label">Status</span><div><Tag :value="profile.status?.status || '-'" severity="info" /></div></div>
           <div><span class="detail-label">Atasan Langsung</span><div>{{ profile.atasan?.nama || '-' }}</div></div>
         </div>
@@ -1170,6 +1225,10 @@ function formatDate(v) {
           <small class="field-hint">Dipakai untuk menghitung usia &amp; kelayakan pensiun anda.</small>
         </div>
         <div class="col-12">
+          <label class="field-label">Agama</label>
+          <Select v-model="form.agama" :options="AGAMA_OPTIONS" showClear style="width: 100%" placeholder="Pilih..." />
+        </div>
+        <div class="col-12">
           <label class="field-label">No HP</label>
           <InputText v-model="form.no_hp" style="width: 100%" />
         </div>
@@ -1177,64 +1236,74 @@ function formatDate(v) {
           <label class="field-label">Email</label>
           <InputText v-model="form.email" style="width: 100%" />
         </div>
-        <div class="col-12">
-          <label class="field-label">
-            Kenaikan Gaji Berkala Terakhir
-            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
-          </label>
-          <DatePicker v-model="form.tgl_kenaikan_gaji_berkala_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
-          <small class="field-hint">Dipakai menghitung kapan kenaikan gaji berkala berikutnya jatuh tempo.</small>
-        </div>
-        <div class="col-12">
-          <label class="field-label">
-            Kenaikan Pangkat Terakhir
-            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
-          </label>
-          <DatePicker v-model="form.tgl_kenaikan_pangkat_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
-          <small class="field-hint">Dipakai menghitung kapan kenaikan pangkat berikutnya jatuh tempo.</small>
-        </div>
-        <div class="col-12">
-          <label class="field-label">
-            Berkas SK Kenaikan Gaji Berkala
-            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
-          </label>
-          <div class="doc-upload-box">
-            <div v-if="hasSkKgb" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem">
-              <Tag severity="info" value="SK Tersimpan" />
-              <span style="font-size: 0.85rem">{{ profile.sk_kgb_nama }}</span>
-              <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkKgbSaatIni" />
-            </div>
-            <input ref="skKgbFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkKgbFileChosen" />
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
-              <Button :label="hasSkKgb ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkKgbFile" />
-              <span style="font-size: 0.85rem">{{ skKgbFile?.name || 'Belum ada berkas dipilih' }}</span>
-            </div>
-            <small class="field-hint">
-              Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan gaji berkala terakhir anda.
-            </small>
+        <!-- Kenaikan Gaji Berkala/Pangkat (tanggal & berkas SK pendukung) --
+             HANYA untuk Status Kepegawaian "PNS", lihat tampilkanKgbPangkat.
+             PPPK/PPPK Paruh Waktu tidak punya mekanisme ini sama sekali,
+             jadi disembunyikan total (bukan cuma dinonaktifkan) kalau status
+             yang sedang dipilih di form bukan PNS. -->
+        <template v-if="tampilkanKgbPangkat">
+          <div class="col-12">
+            <label class="field-label">
+              Kenaikan Gaji Berkala Terakhir
+              <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+            </label>
+            <DatePicker v-model="form.tgl_kenaikan_gaji_berkala_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
+            <small class="field-hint">Dipakai menghitung kapan kenaikan gaji berkala berikutnya jatuh tempo.</small>
           </div>
-        </div>
-        <div class="col-12">
-          <label class="field-label">
-            Berkas SK Kenaikan Pangkat
-            <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
-          </label>
-          <div class="doc-upload-box">
-            <div v-if="hasSkPangkat" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem">
-              <Tag severity="info" value="SK Tersimpan" />
-              <span style="font-size: 0.85rem">{{ profile.sk_pangkat_nama }}</span>
-              <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkPangkatSaatIni" />
-            </div>
-            <input ref="skPangkatFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkPangkatFileChosen" />
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
-              <Button :label="hasSkPangkat ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkPangkatFile" />
-              <span style="font-size: 0.85rem">{{ skPangkatFile?.name || 'Belum ada berkas dipilih' }}</span>
-            </div>
-            <small class="field-hint">
-              Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan pangkat terakhir anda.
-            </small>
+          <div class="col-12">
+            <label class="field-label">
+              Kenaikan Pangkat Terakhir
+              <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+            </label>
+            <DatePicker v-model="form.tgl_kenaikan_pangkat_terakhir" dateFormat="dd-mm-yy" showIcon showButtonBar style="width: 100%" />
+            <small class="field-hint">Dipakai menghitung kapan kenaikan pangkat berikutnya jatuh tempo.</small>
           </div>
-        </div>
+          <div class="col-12">
+            <label class="field-label">
+              Berkas SK Kenaikan Gaji Berkala
+              <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+            </label>
+            <div class="doc-upload-box">
+              <div v-if="hasSkKgb" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem">
+                <Tag severity="info" value="SK Tersimpan" />
+                <span style="font-size: 0.85rem">{{ profile.sk_kgb_nama }}</span>
+                <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkKgbSaatIni" />
+              </div>
+              <input ref="skKgbFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkKgbFileChosen" />
+              <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+                <Button :label="hasSkKgb ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkKgbFile" />
+                <span style="font-size: 0.85rem">{{ skKgbFile?.name || 'Belum ada berkas dipilih' }}</span>
+              </div>
+              <small class="field-hint">
+                Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan gaji berkala terakhir anda.
+              </small>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="field-label">
+              Berkas SK Kenaikan Pangkat
+              <span style="font-weight: 400; color: var(--p-text-muted-color)">(opsional)</span>
+            </label>
+            <div class="doc-upload-box">
+              <div v-if="hasSkPangkat" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem">
+                <Tag severity="info" value="SK Tersimpan" />
+                <span style="font-size: 0.85rem">{{ profile.sk_pangkat_nama }}</span>
+                <Button label="Lihat SK Saat Ini" icon="pi pi-eye" text size="small" @click="previewSkPangkatSaatIni" />
+              </div>
+              <input ref="skPangkatFileInputRef" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="onSkPangkatFileChosen" />
+              <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+                <Button :label="hasSkPangkat ? 'Ganti Berkas' : 'Pilih Berkas'" icon="pi pi-upload" outlined @click="pickSkPangkatFile" />
+                <span style="font-size: 0.85rem">{{ skPangkatFile?.name || 'Belum ada berkas dipilih' }}</span>
+              </div>
+              <small class="field-hint">
+                Tidak wajib. Isi hanya jika ingin memperbarui tanggal &amp; bukti kenaikan pangkat terakhir anda.
+              </small>
+            </div>
+          </div>
+        </template>
+        <Message v-else severity="info" :closable="false" class="col-12">
+          Input Kenaikan Gaji Berkala &amp; Kenaikan Pangkat hanya berlaku untuk Status Kepegawaian "PNS" -- tidak ditampilkan untuk PPPK/PPPK Paruh Waktu.
+        </Message>
         <div class="col-12">
           <label class="field-label">
             Berkas SK Terakhir
