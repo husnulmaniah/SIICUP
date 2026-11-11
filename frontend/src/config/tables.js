@@ -47,6 +47,21 @@ export const statusAnakOptions = [
 ]
 export const statusAnakLabels = statusAnakOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
 
+// Pilihan Agama (statis, 6 agama resmi di Indonesia + "Lainnya") -- dipakai
+// form Data Pegawai (admin) & Profil Saya -> Ajukan Perubahan Data (pegawai
+// sendiri, lihat AGAMA_OPTIONS di ProfilSayaView.vue yang nilainya SENGAJA
+// disamakan persis dengan daftar id di sini).
+export const agamaOptions = [
+  { id: 'Islam', label: 'Islam' },
+  { id: 'Kristen', label: 'Kristen' },
+  { id: 'Katolik', label: 'Katolik' },
+  { id: 'Hindu', label: 'Hindu' },
+  { id: 'Buddha', label: 'Buddha' },
+  { id: 'Khonghucu', label: 'Khonghucu' },
+  { id: 'Lainnya', label: 'Lainnya' },
+]
+export const agamaLabels = agamaOptions.reduce((acc, o) => ({ ...acc, [o.id]: o.label }), {})
+
 // Pilihan Kode Jenis Surat Kolektif (statis) -- menentukan bagaimana satu
 // jenis surat kolektif (lihat tableConfigs['jenis-surat'] di bawah) dihitung
 // & ditampilkan di rekap/PDF absen: DD (Dinas Dalam), I (Izin), S (Sakit).
@@ -390,6 +405,7 @@ export const tableConfigs = {
       },
       { field: 'no_hp', label: 'No HP', type: 'text' },
       { field: 'email', label: 'Email', type: 'text' },
+      { field: 'agama', label: 'Agama', type: 'select', staticOptions: agamaOptions, optionLabel: 'label' },
     ],
     searchPlaceholder: 'Cari nama / NIP...',
   },

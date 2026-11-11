@@ -1463,6 +1463,7 @@ const canManage = computed(() => true) // route guard already restricts page acc
           </div>
           <div><span class="detail-label">No HP</span><div>{{ detailItem.no_hp || '-' }}</div></div>
           <div><span class="detail-label">Email</span><div>{{ detailItem.email || '-' }}</div></div>
+          <div><span class="detail-label">Agama</span><div>{{ detailItem.agama || '-' }}</div></div>
           <div><span class="detail-label">Status</span><div><Tag :value="detailItem.status?.status || '-'" severity="info" /></div></div>
           <div><span class="detail-label">Atasan Langsung</span><div>{{ detailItem.atasan?.nama || '-' }}</div></div>
         </div>
