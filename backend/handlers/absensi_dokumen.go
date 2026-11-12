@@ -213,14 +213,18 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 		return
 	}
 
-	// Pola hari kerja dihitung PER PEGAWAI dari status dinas/sekolahnya (lihat
-	// sixDayWeekForPegawai/isSekolahPegawai di pengajuan_cuti.go): pegawai
-	// sekolah masuk Senin-Sabtu (hanya Minggu yang libur), pegawai kantor
-	// dinas masuk Senin-Jumat (Sabtu & Minggu libur). Tanggal merah juga
-	// dilewati untuk keduanya. Tanggal di luar hari kerja TIDAK diinput
-	// walaupun ikut dipilih admin dalam rentang tanggal -- aturannya sama
-	// persis dengan perhitungan "tanggal terlewat" pada rekap absen, supaya
-	// tidak ada surat untuk hari yang memang bukan hari kerja.
+	// Pola hari kerja dihitung PER PEGAWAI lewat hariKerjaMingguanUntukPegawai
+	// (absensi.go): PRIORITAS PERTAMA Shift Kerja yang terpasang pada
+	// Jabatan/Unit Kerja pegawai (HariList-nya sendiri, mis. "Penilik" yang
+	// hari kerjanya 6 hari -- Senin-Sabtu), baru kalau belum dipasangi Shift
+	// Kerja sama sekali FALLBACK ke status dinas/sekolahnya (sixDayWeekForPegawai/
+	// isSekolahPegawai di pengajuan_cuti.go): pegawai sekolah masuk
+	// Senin-Sabtu (hanya Minggu yang libur), pegawai kantor dinas masuk
+	// Senin-Jumat (Sabtu & Minggu libur). Tanggal merah juga dilewati untuk
+	// semuanya. Tanggal di luar hari kerja TIDAK diinput walaupun ikut
+	// dipilih admin dalam rentang tanggal -- aturannya sama persis dengan
+	// perhitungan "tanggal terlewat" pada rekap absen, supaya tidak ada
+	// surat untuk hari yang memang bukan hari kerja.
 	var pegawaiTerpilih []models.Pegawai
 	if err := db.Preload("UnitKerja").Where("id IN ?", idList).Find(&pegawaiTerpilih).Error; err != nil || len(pegawaiTerpilih) == 0 {
 		utils.Error(w, http.StatusBadRequest, "data pegawai yang dipilih tidak ditemukan")
@@ -252,7 +256,7 @@ func inputAbsensiDokumenKolektif(w http.ResponseWriter, r *http.Request, db *gor
 	dilewatiHadir := 0
 	contohDilewatiHadir := []string{}
 	for _, p := range pegawaiTerpilih {
-		hariKerja := workingDaysWithHolidaySet(tglMulai, tglSelesai, sixDayWeekForPegawai(p), holidaySet)
+		hariKerja := workingDaysForPegawai(db, p, tglMulai, tglSelesai, holidaySet)
 		dilewati += totalHari - len(hariKerja)
 		for _, tgl := range hariKerja {
 			if hadirSet[fmt.Sprintf("%d|%s", p.ID, tgl.Format("2006-01-02"))] {

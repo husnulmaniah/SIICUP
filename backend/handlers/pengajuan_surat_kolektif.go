@@ -97,11 +97,19 @@ func tanggalTerlewatValid(db *gorm.DB, pegawai models.Pegawai, tanggal time.Time
 		return false, "tanggal di luar bulan ini (maksimal sampai akhir bulan berjalan)"
 	}
 	wd := tanggal.Weekday()
-	if wd == time.Sunday {
-		return false, "hari Minggu (bukan hari kerja)"
-	}
-	if wd == time.Saturday && !sixDayWeekForPegawai(pegawai) {
-		return false, "hari Sabtu (bukan hari kerja untuk pegawai kantor dinas)"
+	// Pakai set hari kerja yang sudah sadar Shift Kerja (jabatan lebih
+	// diutamakan drpd unit kerja, fallback ke sekolah=6 hari/dinas=5 hari
+	// kalau belum ada Shift Kerja yg cocok) -- lihat hariKerjaMingguanUntukPegawai
+	// di absensi.go. Pesan error tetap disesuaikan utk Minggu/Sabtu spt sebelumnya.
+	if hariSet := hariKerjaMingguanUntukPegawai(db, pegawai); !hariSet[int(wd)] {
+		switch wd {
+		case time.Sunday:
+			return false, "hari Minggu (bukan hari kerja)"
+		case time.Saturday:
+			return false, "hari Sabtu (bukan hari kerja untuk pegawai kantor dinas)"
+		default:
+			return false, "bukan hari kerja sesuai jadwal kerja pegawai"
+		}
 	}
 	var holidayCount int64
 	db.Model(&models.TglMerah{}).Where("tgl = ?", tanggal).Count(&holidayCount)

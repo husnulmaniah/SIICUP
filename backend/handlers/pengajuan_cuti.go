@@ -237,6 +237,42 @@ func calculateWorkingDays(db *gorm.DB, start, end time.Time, sixDayWeek bool, je
 	return count
 }
 
+// calculateWorkingDaysWithHariSet adalah padanan calculateWorkingDays di
+// atas, tapi menerima pola hari kerja MINGGUAN pegawai yang sebenarnya
+// (hariSet, lihat hariKerjaMingguanUntukPegawai di absensi.go -- ikut Shift
+// Kerja yang terpasang pada Jabatan/Unit Kerja kalau ada, fallback ke
+// sixDayWeekForPegawai kalau belum) alih-alih sekadar boolean sixDayWeek --
+// dipakai di SEMUA tempat yang menghitung JumlahHari cuti supaya jatah cuti
+// pegawai yang jam kerjanya diatur lewat Shift Kerja (mis. "Penilik" 6 hari
+// kerja) terhitung benar, konsisten dengan rekap/PDF absen & jendela kamera
+// absen (jamAbsenUntukPegawai).
+func calculateWorkingDaysWithHariSet(db *gorm.DB, start, end time.Time, hariSet map[int]bool, jenisNama string) int {
+	fullCalendar := isFullCalendarLeave(jenisNama)
+
+	holidaySet := map[string]bool{}
+	if !fullCalendar {
+		var holidays []models.TglMerah
+		db.Where("tgl BETWEEN ? AND ?", start, end).Find(&holidays)
+		for _, h := range holidays {
+			holidaySet[h.Tgl.Format("2006-01-02")] = true
+		}
+	}
+
+	count := 0
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		if !fullCalendar {
+			if !hariSet[int(d.Weekday())] {
+				continue
+			}
+			if holidaySet[d.Format("2006-01-02")] {
+				continue
+			}
+		}
+		count++
+	}
+	return count
+}
+
 // isAnnualLeave decides whether a jenis_cuti counts against the yearly quota
 // (jatah_cuti). By convention only "cuti tahunan" (annual leave) is quota-limited.
 func isAnnualLeave(jenis models.JenisCuti) bool {
@@ -260,12 +296,11 @@ func syncJumlahHariWithHolidays(db *gorm.DB, item *models.PengajuanCuti) {
 	if item.Pegawai == nil || (item.Status != models.StatusPending && item.Status != models.StatusDisetuju) {
 		return
 	}
-	sixDayWeek := sixDayWeekForPegawai(*item.Pegawai)
 	jenisNama := ""
 	if item.JenisCuti != nil {
 		jenisNama = item.JenisCuti.Jenis
 	}
-	newJumlahHari := calculateWorkingDays(db, item.TglMulai, item.TglSelesai, sixDayWeek, jenisNama)
+	newJumlahHari := calculateWorkingDaysWithHariSet(db, item.TglMulai, item.TglSelesai, hariKerjaMingguanUntukPegawai(db, *item.Pegawai), jenisNama)
 	if newJumlahHari == item.JumlahHari {
 		return
 	}
@@ -663,7 +698,7 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 
 	sixDayWeek := sixDayWeekForPegawai(pegawai)
-	jumlahHari := calculateWorkingDays(db, start, end, sixDayWeek, jenis.Jenis)
+	jumlahHari := calculateWorkingDaysWithHariSet(db, start, end, hariKerjaMingguanUntukPegawai(db, pegawai), jenis.Jenis)
 	if jumlahHari <= 0 {
 		utils.Error(w, http.StatusBadRequest, "rentang tanggal yang dipilih tidak memiliki hari kerja")
 		return
@@ -837,7 +872,7 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	sixDayWeek := sixDayWeekForPegawai(pegawai)
 	var jenisForHari models.JenisCuti
 	db.First(&jenisForHari, item.IDJenisCuti)
-	item.JumlahHari = calculateWorkingDays(db, start, end, sixDayWeek, jenisForHari.Jenis)
+	item.JumlahHari = calculateWorkingDaysWithHariSet(db, start, end, hariKerjaMingguanUntukPegawai(db, pegawai), jenisForHari.Jenis)
 	item.IDPolaHariKerja = autoPolaID(db, sixDayWeek)
 
 	// editing resets it back to pending so the approval flow runs again --
@@ -1333,7 +1368,7 @@ func importPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			item.IDPolaHariKerja = autoPolaID(db, sixDayWeek)
 			var jenisForHari models.JenisCuti
 			db.First(&jenisForHari, item.IDJenisCuti)
-			item.JumlahHari = calculateWorkingDays(db, item.TglMulai, item.TglSelesai, sixDayWeek, jenisForHari.Jenis)
+			item.JumlahHari = calculateWorkingDaysWithHariSet(db, item.TglMulai, item.TglSelesai, hariKerjaMingguanUntukPegawai(db, peg), jenisForHari.Jenis)
 			if item.JumlahHari <= 0 {
 				errs = append(errs, "rentang tanggal tidak memiliki hari kerja")
 			}

@@ -221,9 +221,11 @@ func hitungBarisRingkasanPDF(
 		dokumenByTanggal[d.Tanggal.Format("2006-01-02")] = d
 	}
 
-	// Hari kerja mengikuti pola pegawai (sekolah 6 hari, kantor dinas 5 hari)
-	// dan melewati tanggal merah -- sama seperti perhitungan rekap di layar.
-	hariKerja := workingDaysWithHolidaySet(start, limit, sixDayWeekForPegawai(pegawai), holidaySet)
+	// Hari kerja mengikuti Shift Kerja yang terpasang pada Jabatan/Unit Kerja
+	// pegawai kalau ada, fallback ke pola sekolah 6 hari/kantor dinas 5 hari
+	// (lihat hariKerjaMingguanUntukPegawai di absensi.go), dan melewati
+	// tanggal merah -- sama seperti perhitungan rekap di layar.
+	hariKerja := workingDaysForPegawai(db, pegawai, start, limit, holidaySet)
 
 	var baris []barisRekapPDF
 	var ringkasan ringkasanRekapPDF
@@ -609,8 +611,22 @@ func buildRekapAbsensiPDF(
 			labelX := marginX
 			valueX := marginX + 110
 			y := 172.0
+			// pegawai yang dipasangi Shift Kerja (lihat shiftKerjaUntukJabatan/
+			// shiftKerjaUntukUnitKerja di absensi.go) pola hari kerjanya bisa
+			// APA SAJA (bukan cuma 5/6 hari biasa), jadi labelnya ikut nama
+			// shift-nya sendiri supaya tidak menyesatkan -- baru kalau belum
+			// dipasangi Shift Kerja sama sekali, fallback ke label 5/6 hari lama.
 			pola := "5 Hari Kerja (Senin - Jumat)"
-			if sixDayWeekForPegawai(pegawai) {
+			var shiftPegawai *models.ShiftKerja
+			if pegawai.IDJabatan != nil {
+				shiftPegawai = shiftKerjaUntukJabatan(db, *pegawai.IDJabatan)
+			}
+			if shiftPegawai == nil && pegawai.IDUnitKerja != nil {
+				shiftPegawai = shiftKerjaUntukUnitKerja(db, *pegawai.IDUnitKerja)
+			}
+			if shiftPegawai != nil {
+				pola = shiftPegawai.NamaShift + " (" + shiftPegawai.KategoriShift + ")"
+			} else if sixDayWeekForPegawai(pegawai) {
 				pola = "6 Hari Kerja (Senin - Sabtu)"
 			}
 			jabatan := "-"

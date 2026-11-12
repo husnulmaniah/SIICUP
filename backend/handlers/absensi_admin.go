@@ -219,10 +219,11 @@ func rekapPeriode(r *http.Request, db *gorm.DB) (pegawaiList []models.Pegawai, s
 		limit = today
 	}
 
-	// Preload("UnitKerja") supaya sixDayWeekForPegawai (dipakai buildRekapItems
-	// & exportRekapAbsensi di bawah) bisa membaca UnitKerja.TempatKerja
-	// pegawai untuk menentukan 5/6 hari kerja -- lihat isSekolahPegawai di
-	// pengajuan_cuti.go.
+	// Preload("UnitKerja") supaya workingDaysForPegawai/hariKerjaMingguanUntukPegawai
+	// (dipakai buildRekapItems & exportRekapAbsensi di bawah, lihat
+	// absensi.go) bisa membaca UnitKerja.TempatKerja pegawai untuk fallback
+	// 5/6 hari kerja (sixDayWeekForPegawai/isSekolahPegawai di
+	// pengajuan_cuti.go) kalau pegawainya belum dipasangi Shift Kerja.
 	query := db.Model(&models.Pegawai{}).Preload("UnitKerja")
 	if idStr := strings.TrimSpace(r.URL.Query().Get("id_pegawai")); idStr != "" {
 		query = query.Where("id = ?", idStr)
@@ -288,8 +289,7 @@ func buildRekapItems(db *gorm.DB, pegawaiList []models.Pegawai, start, end, limi
 
 		terlewat := []string{}
 		if !start.After(limit) {
-			sixDayWeek := sixDayWeekForPegawai(p)
-			for _, d := range workingDaysWithHolidaySet(start, limit, sixDayWeek, holidaySet) {
+			for _, d := range workingDaysForPegawai(db, p, start, limit, holidaySet) {
 				key := d.Format("2006-01-02")
 				if !hadirSet[p.ID][key] && !tercoverSet[p.ID][key] {
 					terlewat = append(terlewat, key)
@@ -431,9 +431,8 @@ func exportRekapAbsensi(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		for _, t := range it.TanggalTercover {
 			tercoverByTanggal[t.Tanggal] = t
 		}
-		sixDayWeek := sixDayWeekForPegawai(it.Pegawai)
 		holidaySet := holidaySetInRange(db, start, limit)
-		for _, d := range workingDaysWithHolidaySet(start, limit, sixDayWeek, holidaySet) {
+		for _, d := range workingDaysForPegawai(db, it.Pegawai, start, limit, holidaySet) {
 			key := d.Format("2006-01-02")
 			a, ada := byTanggal[key]
 			out := row{Nama: it.Pegawai.Nama, NIP: it.Pegawai.NIP, Tanggal: d.Format("02-01-2006")}

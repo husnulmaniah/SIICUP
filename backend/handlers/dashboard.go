@@ -239,8 +239,7 @@ func statistikAbsensiBulanIni(db *gorm.DB, idPegawai uint) statistikAbsensiPegaw
 	if err := db.Preload("UnitKerja").First(&pegawai, idPegawai).Error; err != nil {
 		return out
 	}
-	sixDayWeek := sixDayWeekForPegawai(pegawai)
-	out.TotalHariKerja = len(workingDaysInRange(db, start, end, sixDayWeek))
+	out.TotalHariKerja = len(workingDaysForPegawai(db, pegawai, start, end, holidaySetInRange(db, start, end)))
 	if start.After(limit) {
 		return out
 	}
@@ -288,7 +287,7 @@ func statistikAbsensiBulanIni(db *gorm.DB, idPegawai uint) statistikAbsensiPegaw
 	}
 
 	holidaySet := holidaySetInRange(db, start, limit)
-	for _, d := range workingDaysWithHolidaySet(start, limit, sixDayWeek, holidaySet) {
+	for _, d := range workingDaysForPegawai(db, pegawai, start, limit, holidaySet) {
 		key := d.Format("2006-01-02")
 		if a, ada := absenByTanggal[key]; ada && a.JamMasuk != nil {
 			out.Hadir++
