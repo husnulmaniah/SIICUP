@@ -119,7 +119,7 @@ func exportRekapAbsensiPegawaiPDF(w http.ResponseWriter, r *http.Request, db *go
 	holidaySet := holidaySetInRange(db, start, limit)
 	baris, ringkasan := hitungBarisRingkasanPDF(db, doc, pegawai, start, end, limit, jenisLookup, holidaySet)
 
-	pdfBytes, err := buildRekapAbsensiPDF(doc, pegawai, bulan, tahun, baris, ringkasan)
+	pdfBytes, err := buildRekapAbsensiPDF(db, doc, pegawai, bulan, tahun, baris, ringkasan)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal membuat PDF: "+err.Error())
 		return
@@ -391,7 +391,7 @@ func exportRekapAbsensiZIP(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 		}
 
 		baris, ringkasan := hitungBarisRingkasanPDF(db, doc, pegawai, start, end, limit, jenisLookup, holidaySet)
-		pdfBytes, err := buildRekapAbsensiPDF(doc, pegawai, bulan, tahun, baris, ringkasan)
+		pdfBytes, err := buildRekapAbsensiPDF(db, doc, pegawai, bulan, tahun, baris, ringkasan)
 		if err != nil {
 			// satu pegawai gagal dibuat PDF-nya (data tidak wajar dll) tidak
 			// membatalkan seluruh ZIP -- lewati saja & lanjut ke pegawai
@@ -419,6 +419,7 @@ func exportRekapAbsensiZIP(w http.ResponseWriter, r *http.Request, db *gorm.DB) 
 // buildRekapAbsensiPDF menggambar seluruh halaman PDF-nya. Tabel dipecah
 // otomatis ke halaman berikutnya bila barisnya tidak muat dalam satu halaman.
 func buildRekapAbsensiPDF(
+	db *gorm.DB,
 	doc *utils.PDFDoc,
 	pegawai models.Pegawai,
 	bulan time.Month,
