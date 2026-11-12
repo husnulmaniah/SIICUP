@@ -58,6 +58,16 @@ func RegisterPetaJabatanRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// aksi Atur K/Kelola Sub-Jabatan lainnya) -- bukan pegawai, karena ini
 	// bisa membuat baris FormasiJabatan baru.
 	mux.Handle("POST /api/peta-jabatan/sekolah/sinkronkan", kelola(func(w http.ResponseWriter, r *http.Request) { sinkronkanPetaJabatanSekolah(w, r, db) }))
+	// tambah-jabatan: permintaan pengguna -- "pada pengaturan peta jabatan
+	// Kepala Sekolah Kepala Sekolah dapat menambahkan jabatan apa yg
+	// dibutuhkan di sekolah itu seperti (Guru Ahli Utama, Guru Ahli Madya,
+	// Guru Ahli Pertama, Pengadministrasi Perkantoran dan Operator Layanan
+	// Operasional)". Sebelumnya satu-satunya cara jabatan muncul sebagai
+	// baris di tabel ini adalah lewat pegawai yang SUDAH menjabatnya (B>0)
+	// -- lihat tambahJabatanPetaSekolahHandler di bawah. Sama dengan
+	// "sinkronkan" di atas: HANYA administrator/admin/atasan, karena ini
+	// membuat baris FormasiJabatan baru.
+	mux.Handle("POST /api/peta-jabatan/sekolah/tambah-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { tambahJabatanPetaSekolahHandler(w, r, db) }))
 
 	mux.Handle("GET /api/peta-jabatan/sub-jabatan", lihat(func(w http.ResponseWriter, r *http.Request) { listSubJabatanHandler(w, r, db) }))
 	mux.Handle("POST /api/peta-jabatan/sub-jabatan", kelola(func(w http.ResponseWriter, r *http.Request) { createSubJabatanHandler(w, r, db) }))
@@ -295,6 +305,16 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 	// sama sekali untuk jabatan ini (mis. baris yang hanya muncul karena
 	// B>0, belum pernah diatur K/digeser).
 	urutanPerJabatan := map[uint]int{}
+	// formasiIndukExists: jabatan yang SUDAH punya baris FormasiJabatan
+	// "induk" (IDSubJabatan NULL) di sekolah ini, WALAU Kebutuhan-nya masih
+	// 0 -- permintaan pengguna: "pada pengaturan peta jabatan Kepala Sekolah
+	// dapat menambahkan jabatan apa yg dibutuhkan di sekolah itu" (lihat
+	// tambahJabatanPetaSekolahHandler di bawah). Jabatan yang baru
+	// ditambahkan lewat tombol itu TIDAK punya pegawai (B=0) & K-nya
+	// sengaja dibuat 0 (belum diatur) -- tanpa penanda eksplisit ini,
+	// kondisi skip di bawah (totalB==0 && totalK==0 && tanpa sub-jabatan)
+	// akan membuangnya lagi, padahal baris FormasiJabatan-nya SUDAH ada.
+	formasiIndukExists := map[uint]bool{}
 	for _, f := range formasiRows {
 		subID := uint(0)
 		if f.IDSubJabatan != nil {
@@ -306,6 +326,7 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 		kPerSub[f.IDJabatan][subID] = f.Kebutuhan
 		if f.IDSubJabatan == nil {
 			urutanPerJabatan[f.IDJabatan] = f.Urutan
+			formasiIndukExists[f.IDJabatan] = true
 		}
 	}
 
@@ -353,7 +374,10 @@ func hitungPetaJabatanSekolah(db *gorm.DB, idUnitKerja uint) (*petaJabatanSekola
 		} else {
 			totalK = kPerSub[idJabatan][0]
 		}
-		if totalB == 0 && totalK == 0 && len(subs) == 0 {
+		// lihat komentar formasiIndukExists di atas -- jabatan yang baru
+		// ditambahkan manual (B=0, K=0, belum dipecah sub-jabatan) TETAP
+		// ditampilkan selama baris FormasiJabatan induknya sudah ada.
+		if totalB == 0 && totalK == 0 && len(subs) == 0 && !formasiIndukExists[idJabatan] {
 			continue
 		}
 		nama := namaJabatan[idJabatan]
@@ -483,6 +507,68 @@ func sinkronkanPetaJabatanSekolah(w http.ResponseWriter, r *http.Request, db *go
 	pesan := "data Peta Jabatan sudah sesuai dengan data Jabatan & Pegawai terbaru"
 	if dibuat > 0 {
 		pesan = fmt.Sprintf("data Peta Jabatan disinkronkan -- %d baris kebutuhan (K) baru dibuat (default 0) untuk jabatan/sub-jabatan yang belum pernah diatur", dibuat)
+	}
+	utils.Success(w, pesan, out)
+}
+
+// tambahJabatanPetaSekolahPayload: payload tambahJabatanPetaSekolahHandler.
+type tambahJabatanPetaSekolahPayload struct {
+	IDUnitKerja uint `json:"id_unit_kerja"`
+	IDJabatan   uint `json:"id_jabatan"`
+}
+
+// tambahJabatanPetaSekolahHandler menangani POST
+// /api/peta-jabatan/sekolah/tambah-jabatan -- permintaan pengguna: "pada
+// pengaturan peta jabatan Kepala Sekolah Kepala Sekolah dapat menambahkan
+// jabatan apa yg dibutuhkan di sekolah itu seperti (Guru Ahli Utama, Guru
+// Ahli Madya, Guru Ahli Pertama, Pengadministrasi Perkantoran dan Operator
+// Layanan Operasional)".
+//
+// Sebelumnya satu-satunya cara jabatan BARU muncul sebagai baris di tabel
+// Peta Jabatan Sekolah adalah lewat pegawai yang SUDAH menjabatnya (B>0) --
+// Kepala Sekolah/administrator/admin tidak bisa menyiapkan baris untuk
+// jabatan yang memang dibutuhkan sekolah itu tapi belum ada pegawainya sama
+// sekali. Handler ini membuat baris FormasiJabatan "induk" (IDSubJabatan
+// NULL) dengan Kebutuhan 0 untuk (sekolah, jabatan) yang dipilih -- PERSIS
+// seperti ensureFormasiJabatan yang dipakai sinkronkanPetaJabatanSekolah
+// (idempoten, tidak menimpa K yang mungkin sudah ada) -- supaya baris itu
+// langsung muncul (lihat formasiIndukExists di hitungPetaJabatanSekolah) &
+// bisa langsung diatur Kebutuhan (K)-nya lewat "Atur K" seperti baris lain.
+func tambahJabatanPetaSekolahHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	claims, _ := middleware.GetClaims(r)
+	var p tambahJabatanPetaSekolahPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		utils.Error(w, http.StatusBadRequest, "format data tidak valid")
+		return
+	}
+	if p.IDUnitKerja == 0 || p.IDJabatan == 0 {
+		utils.Error(w, http.StatusBadRequest, "unit kerja dan jabatan wajib diisi")
+		return
+	}
+	if !canManagePetaJabatanSekolah(claims, p.IDUnitKerja, db) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses mengelola sekolah ini")
+		return
+	}
+	var jabatan models.Jabatan
+	if err := db.First(&jabatan, "id = ?", p.IDJabatan).Error; err != nil {
+		utils.Error(w, http.StatusBadRequest, "jabatan tidak ditemukan")
+		return
+	}
+	_, created, err := ensureFormasiJabatan(db, p.IDUnitKerja, p.IDJabatan, nil)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal menambahkan jabatan: "+err.Error())
+		return
+	}
+
+	out, err := hitungPetaJabatanSekolah(db, p.IDUnitKerja)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+	out.BolehKelola = true
+	pesan := fmt.Sprintf("jabatan '%s' berhasil ditambahkan ke Peta Jabatan sekolah ini", jabatan.Jabatan)
+	if !created {
+		pesan = fmt.Sprintf("jabatan '%s' sudah ada di Peta Jabatan sekolah ini", jabatan.Jabatan)
 	}
 	utils.Success(w, pesan, out)
 }

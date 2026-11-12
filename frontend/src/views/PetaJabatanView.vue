@@ -291,6 +291,53 @@ async function sinkronkanData() {
 }
 
 // ============================================================
+// dialog "Tambah Jabatan" -- permintaan pengguna: "pada pengaturan peta
+// jabatan Kepala Sekolah Kepala Sekolah dapat menambahkan jabatan apa yg
+// dibutuhkan di sekolah itu seperti (Guru Ahli Utama, Guru Ahli Madya, Guru
+// Ahli Pertama, Pengadministrasi Perkantoran dan Operator Layanan
+// Operasional)". Sebelumnya satu-satunya cara jabatan muncul di tabel ini
+// adalah lewat pegawai yang sudah menjabatnya (B>0) -- tombol ini memakai
+// endpoint baru POST /peta-jabatan/sekolah/tambah-jabatan (lihat
+// tambahJabatanPetaSekolahHandler di backend/handlers/peta_jabatan.go) yang
+// membuat baris Kebutuhan (K) kosong (0) untuk jabatan terpilih supaya
+// langsung muncul & bisa diatur K-nya lewat "Atur K" seperti baris lain.
+// Opsi dropdown memakai refJabatan (daftar master Jabatan) yang sudah
+// dimuat untuk dialog "Ajukan Kenaikan Pangkat", dikurangi jabatan yang
+// SUDAH tampil di tabel sekolah ini supaya tidak menawarkan yang sudah ada.
+const tambahJabatanDialog = ref(false)
+const tambahJabatanPilihan = ref(null)
+const tambahJabatanSubmitting = ref(false)
+const tambahJabatanOptions = computed(() => {
+  const sudahAda = new Set((petaData.value?.rows || []).map((r) => r.id_jabatan))
+  return jabatanOptions.value.filter((j) => !sudahAda.has(j.value))
+})
+function openTambahJabatan() {
+  tambahJabatanPilihan.value = null
+  if (refJabatan.value.length === 0) loadRefJabatan()
+  tambahJabatanDialog.value = true
+}
+async function simpanTambahJabatan() {
+  if (!tambahJabatanPilihan.value) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih jabatan yang ingin ditambahkan', life: 4000 })
+    return
+  }
+  tambahJabatanSubmitting.value = true
+  try {
+    const { data } = await http.post('/peta-jabatan/sekolah/tambah-jabatan', {
+      id_unit_kerja: currentUnitKerjaId.value,
+      id_jabatan: tambahJabatanPilihan.value,
+    })
+    petaData.value = data.data
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: data.message, life: 5000 })
+    tambahJabatanDialog.value = false
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal menambahkan', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    tambahJabatanSubmitting.value = false
+  }
+}
+
+// ============================================================
 // "Cetak Excel" / "Cetak PDF" -- permintaan pengguna: administrator &
 // atasan/Kepala Sekolah bisa mengunduh tabel Peta Jabatan Sekolah (Jabatan/
 // Sub-Jabatan/B/K/+-) dalam bentuk Excel ATAU PDF, keduanya diset ukuran
@@ -1352,6 +1399,14 @@ onMounted(() => {
               </div>
               <Button
                 v-if="bolehKelola"
+                label="Tambah Jabatan"
+                icon="pi pi-plus"
+                size="small"
+                title="Tambahkan jabatan yang dibutuhkan sekolah ini walau belum ada pegawainya (mis. Guru Ahli Utama, Pengadministrasi Perkantoran, dll)"
+                @click="openTambahJabatan"
+              />
+              <Button
+                v-if="bolehKelola"
                 label="Sinkronkan Data"
                 icon="pi pi-sync"
                 size="small"
@@ -1657,6 +1712,31 @@ onMounted(() => {
       <template #footer>
         <Button label="Batal" severity="secondary" outlined @click="aturKDialog = false" />
         <Button label="Simpan" icon="pi pi-save" :loading="aturKSubmitting" @click="simpanAturK" />
+      </template>
+    </Dialog>
+
+    <!-- dialog "Tambah Jabatan" -- permintaan pengguna: Kepala Sekolah bisa
+         menambahkan jabatan yang dibutuhkan sekolahnya walau belum ada
+         pegawainya (lihat openTambahJabatan/simpanTambahJabatan di atas) -->
+    <Dialog v-model:visible="tambahJabatanDialog" modal header="Tambah Jabatan" style="width: 28rem; max-width: 95vw">
+      <div class="field-label-wrap">
+        <label class="field-label">Jabatan</label>
+        <Select
+          v-model="tambahJabatanPilihan"
+          :options="tambahJabatanOptions"
+          optionLabel="label"
+          optionValue="value"
+          filter
+          placeholder="Pilih jabatan yang dibutuhkan sekolah ini"
+          style="width: 100%"
+        />
+        <p style="font-size: 0.78rem; color: var(--p-text-muted-color); margin: 0.5rem 0 0 0">
+          Jabatan akan ditambahkan dengan Kebutuhan (K) awal 0 -- atur jumlahnya lewat tombol "Atur K" setelah jabatan ini muncul di tabel.
+        </p>
+      </div>
+      <template #footer>
+        <Button label="Batal" severity="secondary" outlined @click="tambahJabatanDialog = false" />
+        <Button label="Tambahkan" icon="pi pi-plus" :loading="tambahJabatanSubmitting" @click="simpanTambahJabatan" />
       </template>
     </Dialog>
 
