@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useToast } from 'primevue/usetoast'
 import { useAuthStore } from '../stores/auth'
 import { useProfilePhoto } from '../composables/useProfilePhoto'
 import http from '../api/http'
@@ -9,10 +10,13 @@ import Button from 'primevue/button'
 import Menu from 'primevue/menu'
 import Popover from 'primevue/popover'
 import Badge from 'primevue/badge'
+import Dialog from 'primevue/dialog'
+import Password from 'primevue/password'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
+const toast = useToast()
 
 const userMenu = ref(null)
 
@@ -337,6 +341,11 @@ const navSections = computed(() => {
 
 const userMenuItems = [
   {
+    label: 'Ganti Password',
+    icon: 'pi pi-key',
+    command: () => bukaGantiPassword(),
+  },
+  {
     label: 'Keluar',
     icon: 'pi pi-sign-out',
     command: () => keluar(),
@@ -347,6 +356,60 @@ function keluar() {
   auth.logout()
   clearFotoProfil()
   router.push({ name: 'login' })
+}
+
+// ============================================================
+// "Ganti Password" -- permintaan pengguna: "buat agar masing-masing
+// pegawai bisa mengganti passwordnya masing-masing". Diletakkan di dropdown
+// akun topbar ini (BUKAN di halaman Profil Saya) karena AppLayout dipakai
+// SEMUA role (administrator/admin/pegawai/atasan, lihat userMenuItems di
+// atas) -- sedangkan rute /profil-saya sendiri HANYA boleh diakses
+// pegawai/atasan (lihat router/index.js), jadi menaruhnya di sini supaya
+// administrator/admin juga bisa mengganti password akunnya sendiri dengan
+// cara yang sama, bukan cuma lewat menu Akun Pengguna.
+// Endpoint backend (PUT /api/me/password, lihat ChangePasswordHandler di
+// handlers/auth.go) SELALU memproses akun yang sedang login sendiri (dari
+// token JWT) -- tidak pernah menerima id user lain, jadi aman dipakai
+// role apa pun tanpa perlu pengecekan tambahan di sini.
+const gantiPasswordDialog = ref(false)
+const passwordLama = ref('')
+const passwordBaru = ref('')
+const passwordKonfirmasi = ref('')
+const gantiPasswordSubmitting = ref(false)
+
+function bukaGantiPassword() {
+  passwordLama.value = ''
+  passwordBaru.value = ''
+  passwordKonfirmasi.value = ''
+  gantiPasswordDialog.value = true
+}
+
+async function simpanGantiPassword() {
+  if (!passwordLama.value || !passwordBaru.value || !passwordKonfirmasi.value) {
+    toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Semua kolom wajib diisi', life: 4000 })
+    return
+  }
+  if (passwordBaru.value.length < 6) {
+    toast.add({ severity: 'warn', summary: 'Password terlalu pendek', detail: 'Password baru minimal 6 karakter', life: 4000 })
+    return
+  }
+  if (passwordBaru.value !== passwordKonfirmasi.value) {
+    toast.add({ severity: 'warn', summary: 'Tidak cocok', detail: 'Konfirmasi password baru tidak sama dengan password baru', life: 4000 })
+    return
+  }
+  gantiPasswordSubmitting.value = true
+  try {
+    await http.put('/me/password', {
+      password_lama: passwordLama.value,
+      password_baru: passwordBaru.value,
+    })
+    toast.add({ severity: 'success', summary: 'Berhasil', detail: 'Password berhasil diganti', life: 4000 })
+    gantiPasswordDialog.value = false
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Gagal', detail: e.response?.data?.message || e.message, life: 5000 })
+  } finally {
+    gantiPasswordSubmitting.value = false
+  }
 }
 
 // ============================================================
@@ -628,10 +691,48 @@ const menuLainnyaAktif = computed(
         </a>
       </div>
     </div>
+
+    <!-- dialog "Ganti Password" -- lihat bukaGantiPassword/simpanGantiPassword di atas -->
+    <Dialog v-model:visible="gantiPasswordDialog" modal header="Ganti Password" style="width: 24rem; max-width: 95vw">
+      <div style="display: flex; flex-direction: column; gap: 1rem">
+        <div class="field-label-wrap">
+          <label class="field-label">Password Lama</label>
+          <Password v-model="passwordLama" :feedback="false" toggleMask style="width: 100%" inputStyle="width: 100%" />
+        </div>
+        <div class="field-label-wrap">
+          <label class="field-label">Password Baru</label>
+          <Password v-model="passwordBaru" :feedback="false" toggleMask style="width: 100%" inputStyle="width: 100%" />
+          <small style="color: var(--p-text-muted-color)">Minimal 6 karakter.</small>
+        </div>
+        <div class="field-label-wrap">
+          <label class="field-label">Konfirmasi Password Baru</label>
+          <Password v-model="passwordKonfirmasi" :feedback="false" toggleMask style="width: 100%" inputStyle="width: 100%" />
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Batal" severity="secondary" outlined @click="gantiPasswordDialog = false" />
+        <Button label="Simpan" icon="pi pi-check" :loading="gantiPasswordSubmitting" @click="simpanGantiPassword" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
+/* Dipakai pada dialog Ganti Password di atas -- kelas yang sama (nama &
+   nilai) dengan yang dipakai di PetaJabatanView.vue/PengajuanCutiView.vue,
+   tapi didefinisikan ulang di sini secara lokal karena setiap file .vue
+   dengan <style scoped> punya cakupan CSS-nya sendiri (tidak global). */
+.field-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.field-label-wrap {
+  margin-bottom: 1.1rem;
+}
+
 .app-shell {
   display: flex;
   min-height: 100vh;

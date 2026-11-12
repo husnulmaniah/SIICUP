@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"cuti-app/middleware"
 	"cuti-app/models"
@@ -81,6 +82,71 @@ func LoginHandler(db *gorm.DB) http.HandlerFunc {
 				"is_sekolah":          isSekolah,
 			},
 		})
+	}
+}
+
+type changePasswordRequest struct {
+	PasswordLama string `json:"password_lama"`
+	PasswordBaru string `json:"password_baru"`
+}
+
+// ChangePasswordHandler mengizinkan SETIAP pegawai (pegawai/atasan/admin/
+// administrator) mengganti password akunnya sendiri -- permintaan pengguna:
+// "buat agar masing-masing pegawai bisa mengganti passwordnya masing-masing".
+// Selalu memproses akun milik token JWT yang sedang login (claims.UserID),
+// TIDAK PERNAH menerima id user lain lewat body/URL, jadi endpoint ini aman
+// didaftarkan tanpa RequireRole -- berbeda dari PUT /api/user/{id} (lihat
+// handlers/user.go) yang khusus administrator dan BISA mengganti password
+// user lain (dipakai untuk reset password, tetap tidak diubah/dihapus oleh
+// fitur ini).
+func ChangePasswordHandler(db *gorm.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := middleware.GetClaims(r)
+		if !ok {
+			utils.Error(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		var req changePasswordRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			utils.Error(w, http.StatusBadRequest, "data tidak valid")
+			return
+		}
+		req.PasswordLama = strings.TrimSpace(req.PasswordLama)
+		req.PasswordBaru = strings.TrimSpace(req.PasswordBaru)
+
+		if req.PasswordLama == "" || req.PasswordBaru == "" {
+			utils.Error(w, http.StatusBadRequest, "password lama dan password baru wajib diisi")
+			return
+		}
+		if len(req.PasswordBaru) < 6 {
+			utils.Error(w, http.StatusBadRequest, "password baru minimal 6 karakter")
+			return
+		}
+
+		var user models.User
+		if err := db.First(&user, claims.UserID).Error; err != nil {
+			utils.Error(w, http.StatusNotFound, "user tidak ditemukan")
+			return
+		}
+
+		if !utils.CheckPasswordHash(req.PasswordLama, user.Pass) {
+			utils.Error(w, http.StatusBadRequest, "password lama salah")
+			return
+		}
+
+		hash, err := utils.HashPassword(req.PasswordBaru)
+		if err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal memproses password baru")
+			return
+		}
+
+		if err := db.Model(&user).Updates(map[string]interface{}{"pass": hash}).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan password baru: "+err.Error())
+			return
+		}
+
+		utils.Success(w, "password berhasil diganti", nil)
 	}
 }
 

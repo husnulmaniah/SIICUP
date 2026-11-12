@@ -15,6 +15,7 @@ func SetupRoutes(db *gorm.DB) http.Handler {
 
 	mux.HandleFunc("POST /api/login", handlers.LoginHandler(db))
 	mux.Handle("GET /api/me", middleware.Chain(handlers.MeHandler(db), middleware.Auth, middleware.RequireActiveUser(db)))
+	mux.Handle("PUT /api/me/password", middleware.Chain(handlers.ChangePasswordHandler(db), middleware.Auth, middleware.RequireActiveUser(db)))
 
 	handlers.RegisterDashboardRoutes(mux, db)
 	handlers.RegisterReferenceRoutes(mux, db)
