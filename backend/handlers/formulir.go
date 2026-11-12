@@ -1047,6 +1047,44 @@ func loadApprovedPengajuanForForm(w http.ResponseWriter, r *http.Request, db *go
 	return item, pegawai, true
 }
 
+// loadKepsekReadyPengajuanForForm adalah padanan loadApprovedPengajuanForForm
+// di atas, KHUSUS untuk "Surat Rekomendasi Kepala Sekolah"
+// (downloadFormRekomendasiKepsek di handlers/pengajuan_cuti_rekomendasi_kepsek.go)
+// -- SENGAJA BERBEDA gate status-nya: surat itu murni rekomendasi Kepala
+// Sekolah sendiri, jadi begitu TAHAP 1 selesai (status StatusDisetujuiKepsek,
+// lihat approvePengajuan di pengajuan_cuti.go) surat ini SUDAH SAH dan boleh
+// dicetak -- TIDAK perlu menunggu TAHAP 2/Dinas (StatusDisetuju) juga
+// selesai, berbeda dari Surat Rekomendasi Izin Cuti/Formulir Cuti (surat-
+// surat Kepala Dinas) yang tetap memakai loadApprovedPengajuanForForm di
+// atas (strict StatusDisetuju) karena memang baru sah setelah Dinas
+// menyetujui. Status StatusDisetuju JUGA diterima di sini -- begitu tahap 2
+// selesai, surat Kepala Sekolah ini tetap tercetak seperti biasa, tidak
+// pernah "ditarik kembali".
+func loadKepsekReadyPengajuanForForm(w http.ResponseWriter, r *http.Request, db *gorm.DB) (models.PengajuanCuti, models.Pegawai, bool) {
+	claims, _ := middleware.GetClaims(r)
+	id := r.PathValue("id")
+	var item models.PengajuanCuti
+	if err := db.Preload("JenisCuti").First(&item, "id = ?", id).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data tidak ditemukan")
+		return item, models.Pegawai{}, false
+	}
+	var pegawai models.Pegawai
+	if err := db.Preload("Jabatan").Preload("UnitKerja").First(&pegawai, item.IDPegawai).Error; err != nil {
+		utils.Error(w, http.StatusNotFound, "data pegawai tidak ditemukan")
+		return item, models.Pegawai{}, false
+	}
+	item.Pegawai = &pegawai
+	if !canAccessPengajuan(claims, item) {
+		utils.Error(w, http.StatusForbidden, "anda tidak memiliki akses ke data ini")
+		return item, pegawai, false
+	}
+	if item.Status != models.StatusDisetujuiKepsek && item.Status != models.StatusDisetuju {
+		utils.Error(w, http.StatusBadRequest, "surat ini hanya bisa dicetak setelah disetujui Kepala Sekolah")
+		return item, pegawai, false
+	}
+	return item, pegawai, true
+}
+
 // resolveItemSignerTrio returns the signer nama/nip/jabatan snapshot frozen
 // onto the pengajuan at approval time (TtdNama/TtdNip/TtdJabatan). For
 // pengajuan approved before this feature existed (snapshot empty), it falls

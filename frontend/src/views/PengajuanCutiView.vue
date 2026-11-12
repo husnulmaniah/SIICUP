@@ -55,27 +55,29 @@ const pegawaiOptions = ref([])
 // umroh/sakit/alasan penting) dicek sebelum kata kunci umum "tahunan",
 // karena "Cuti Tahunan Umroh" mengandung kedua kata "tahunan" dan "umroh".
 //
-// "Surat Rekomendasi Kepala Sekolah" hanya berlaku untuk pegawai yang tempat
-// tugasnya di sekolah (yang punya Kepala Sekolah untuk menandatanganinya) --
-// pegawai yang tempat tugasnya di Dinas tidak pernah diminta berkas ini.
+// "Surat Rekomendasi Kepala Sekolah" DIHAPUS dari checklist upload manual
+// ini -- permintaan pengguna: surat itu sekarang dibuat OTOMATIS oleh
+// sistem begitu Kepala Sekolah meng-ACC pengajuan cuti lewat menu ini
+// (lengkap dengan nomor surat otomatis & tanda tangan QR, lihat tombol
+// "Surat Rekomendasi Kepala Sekolah" pada kolom Aksi tabel di bawah), jadi
+// pegawai TIDAK PERLU lagi mengupload berkas ini sendiri. Parameter
+// isSekolah tetap diterima untuk kompatibilitas (dipanggil dengan
+// isSekolah.value di bawah) walau sudah tidak dipakai lagi di sini.
 function dokumenRequirementsForJenis(jenisNama, isSekolah) {
-  const rekomendasiKepsek = { key: 'rekomendasi_kepsek', label: 'Surat Rekomendasi Kepala Sekolah', required: true }
-  const withRekomendasiKepsek = (...reqs) => (isSekolah ? [rekomendasiKepsek, ...reqs] : reqs)
-
   const j = (jenisNama || '').toLowerCase()
   if (j.includes('melahirkan')) {
-    return withRekomendasiKepsek(
+    return [
       { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
       { key: 'keterangan_hpl', label: 'Surat Keterangan HPL (Rumah Sakit/Puskesmas)', required: true },
       { key: 'buku_kia', label: 'Buku KIA', required: true },
       { key: 'hasil_usg', label: 'Hasil USG', required: false },
-    )
+    ]
   }
   if (j.includes('umroh')) {
-    return withRekomendasiKepsek(
+    return [
       { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
       { key: 'keterangan_travel', label: 'Surat Keterangan dari Travel Pemberangkatan', required: true },
-    )
+    ]
   }
   if (j.includes('sakit')) {
     return [
@@ -85,20 +87,27 @@ function dokumenRequirementsForJenis(jenisNama, isSekolah) {
     ]
   }
   if (j.includes('alasan penting')) {
-    return withRekomendasiKepsek(
+    return [
       { key: 'sk_terakhir', label: 'SK Terakhir', required: true },
       { key: 'dokumen_pendukung', label: 'Dokumen Pendukung (rawat inap keluarga / kematian / KUA / istri melahirkan)', required: true },
-    )
+    ]
   }
   if (j.includes('tahunan')) {
-    return withRekomendasiKepsek({ key: 'sk_terakhir', label: 'SK Terakhir', required: true })
+    return [{ key: 'sk_terakhir', label: 'SK Terakhir', required: true }]
   }
   return []
 }
 
+// 'disetujui_kepsek' -- KHUSUS pengajuan cuti pegawai sekolah: Kepala
+// Sekolah (atasan langsung pegawai) sudah menyetujui (tahap 1), tapi BELUM
+// final -- masih menunggu persetujuan Dinas/administrator (tahap 2). Lihat
+// StatusDisetujuiKepsek & pengajuanStageGateOK di backend
+// handlers/pengajuan_cuti.go. Pegawai Dinas/Kantor (satu tahap saja) tidak
+// pernah melewati status ini.
 const statusFilterOptions = [
   { label: 'Semua', value: null },
   { label: 'Menunggu', value: 'pending' },
+  { label: 'Disetujui Kepsek (Menunggu Dinas)', value: 'disetujui_kepsek' },
   { label: 'Disetujui', value: 'disetujui' },
   { label: 'Ditolak', value: 'ditolak' },
   { label: 'Dikembalikan', value: 'dikembalikan' },
@@ -139,11 +148,39 @@ function canDeleteRow(row) {
   return (viewingOwn.value && (row.status === 'pending' || row.status === 'dikembalikan')) || isManage.value
 }
 
+// canProsesRow: pengganti pengecekan lama "viewingBawahanApprover &&
+// data.status === 'pending'" untuk tombol "Proses" -- sekarang bergantung
+// JUGA pada status baris itu sendiri, bukan cuma role/tab, karena pengajuan
+// cuti pegawai sekolah melewati DUA tahap persetujuan berurutan (lihat
+// StatusDisetujuiKepsek di atas): tahap 1 (status 'pending') boleh atasan
+// (Kepala Sekolah) ATAU admin/administrator; tahap 2 (status
+// 'disetujui_kepsek') HANYA admin/administrator -- atasan sudah menuntaskan
+// bagiannya di tahap 1, tombol "Proses" disembunyikan untuknya di tahap ini
+// (sama seperti pengajuanStageGateOK di backend).
+function canProsesRow(row) {
+  if (row.status === 'pending') return viewingBawahanApprover.value
+  if (row.status === 'disetujui_kepsek') return isManage.value
+  return false
+}
+
 function statusSeverity(status) {
   if (status === 'disetujui') return 'success'
+  if (status === 'disetujui_kepsek') return 'info'
   if (status === 'ditolak') return 'danger'
   if (status === 'dikembalikan') return 'contrast'
   return 'warn'
+}
+
+// statusLabel: label tampilan yang lebih jelas daripada nilai status mentah
+// -- terutama 'disetujui_kepsek' yang kalau ditampilkan apa adanya kurang
+// terbaca ("disetujui_kepsek"). Dipakai di kolom Status tabel & dialog detail.
+function statusLabel(status) {
+  if (status === 'disetujui_kepsek') return 'Disetujui Kepsek'
+  if (status === 'pending') return 'Menunggu'
+  if (status === 'disetujui') return 'Disetujui'
+  if (status === 'ditolak') return 'Ditolak'
+  if (status === 'dikembalikan') return 'Dikembalikan'
+  return status
 }
 
 function formatDate(v) {
@@ -157,6 +194,15 @@ function formatDate(v) {
 // mengajukan cuti untuk diri sendiri) -- dipakai untuk menentukan apakah
 // "Surat Rekomendasi Kepala Sekolah" wajib diupload (lihat isSekolah di bawah).
 const myTempatTgs = ref('')
+// mySkTerakhirNama: nama berkas SK Terakhir pegawai yang sedang login, kalau
+// sudah tersimpan di Data Pegawai -- permintaan pengguna: "cek pada data
+// pegawai jika sknya sudah ada pada data pegawai maka munculkan sk terakhir
+// yang sudah ada di data pegawai", supaya pegawai tidak perlu upload ulang
+// tiap kali mengajukan cuti (lihat existingSkTerakhirNama & baris upload
+// "sk_terakhir" di bawah). Kosong berarti pegawai ini belum pernah
+// mengupload SK Terakhir lewat Data Pegawai/pengajuan cuti sebelumnya --
+// tetap wajib diupload seperti biasa.
+const mySkTerakhirNama = ref('')
 
 async function loadOptions() {
   const jc = await http.get('/ref/jenis-cuti')
@@ -168,8 +214,10 @@ async function loadOptions() {
     try {
       const me = await http.get('/pegawai/me')
       myTempatTgs.value = me.data.data?.tempat_tgs || ''
+      mySkTerakhirNama.value = me.data.data?.sk_terakhir_nama || ''
     } catch (e) {
       myTempatTgs.value = ''
+      mySkTerakhirNama.value = ''
     }
   }
 }
@@ -261,6 +309,17 @@ const selectedTempatTgs = computed(() => {
 })
 const isSekolah = computed(() => selectedTempatTgs.value.toLowerCase().includes('sekolah'))
 const docRequirements = computed(() => dokumenRequirementsForJenis(selectedJenisNama.value, isSekolah.value))
+// existingSkTerakhirNama: nama berkas SK Terakhir pegawai yang BERSANGKUTAN
+// (pegawai yang dipilih admin, atau pegawai/atasan sendiri) yang sudah
+// tersimpan di Data Pegawai -- sama pola dengan selectedTempatTgs di atas.
+// Dipakai supaya baris upload "sk_terakhir" di bawah tahu kapan menampilkan
+// "sudah tersimpan, opsional untuk mengganti" alih-alih wajib diupload.
+const existingSkTerakhirNama = computed(() => {
+  if (isManage.value) {
+    return pegawaiOptions.value.find((p) => p.id === form.id_pegawai)?.sk_terakhir_nama || ''
+  }
+  return mySkTerakhirNama.value
+})
 // admin/administrator boleh membuat pengajuan tanpa berkas; pegawai/atasan
 // yang mengajukan untuk diri sendiri wajib melengkapi berkas.
 const docsRequired = computed(() => !isManage.value)
@@ -311,7 +370,9 @@ function onDocFileChosen(key, e) {
 }
 function missingDocs() {
   if (isEditing.value || !docsRequired.value) return []
-  return docRequirements.value.filter((r) => r.required && !docFiles[r.key]).map((r) => r.label)
+  return docRequirements.value
+    .filter((r) => r.required && !docFiles[r.key] && !(r.key === 'sk_terakhir' && existingSkTerakhirNama.value))
+    .map((r) => r.label)
 }
 function missingFlaggedDocs() {
   if (!isEditing.value) return []
@@ -624,7 +685,15 @@ async function previewDoc(pengajuanId, doc) {
 // menampilkan viewer PDF bawaan yang sudah punya tombol print/download sendiri.
 async function previewForm(pengajuanId, kind, title, nomorSurat) {
   try {
-    const url = kind === 'rekomendasi' ? `/pengajuan-cuti/${pengajuanId}/form/rekomendasi` : `/pengajuan-cuti/${pengajuanId}/form/cuti`
+    // rekomendasi-kepsek: "Surat Rekomendasi Kepala Sekolah", dibuat
+    // otomatis begitu disetujui -- lihat tombol baru pada kolom Aksi tabel
+    // (hanya muncul untuk pegawai sekolah, ditandai data.kepsek_nama).
+    const urlByKind = {
+      rekomendasi: `/pengajuan-cuti/${pengajuanId}/form/rekomendasi`,
+      cuti: `/pengajuan-cuti/${pengajuanId}/form/cuti`,
+      'rekomendasi-kepsek': `/pengajuan-cuti/${pengajuanId}/form/rekomendasi-kepsek`,
+    }
+    const url = urlByKind[kind]
     const res = await http.get(url, { params: { inline: 1 }, responseType: 'blob' })
     previewType.value = 'pdf'
     previewUrl.value = window.URL.createObjectURL(res.data)
@@ -666,47 +735,133 @@ function ttdDocOf(row) {
   return (row?.dokumen || []).find((d) => d.jenis === TTD_JENIS)
 }
 
+// rowIsSekolah: tiruan ringan isSekolahPegawai (backend
+// handlers/pengajuan_cuti.go) di sisi frontend, dari data yang SUDAH
+// tersedia di baris pengajuan (preloadPengajuan preload "Pegawai.UnitKerja")
+// -- dipakai HANYA untuk memperkirakan label tahap "Persetujuan Kepala
+// Sekolah" selagi status masih 'pending' (lihat cutiStepperSteps di bawah),
+// karena backend sendiri baru benar-benar MEMUTUSKAN satu tahap atau dua
+// tahap (lihat StatusDisetujuiKepsek) saat pengajuan ini diproses -- sebelum
+// itu frontend tidak punya info Pegawai.Atasan untuk memastikannya 100%.
+function rowIsSekolah(row) {
+  const tk = row.pegawai?.unit_kerja?.tempat_kerja
+  if (tk) return tk === 'sekolah'
+  return (row.pegawai?.tempat_tgs || '').toLowerCase().includes('sekolah')
+}
+
 // Progres Pengajuan Cuti (stepper) -- permintaan pengguna agar pegawai bisa
-// mentracking proses, bukan cuma lihat satu Tag status. Alur: Diajukan ->
-// Persetujuan (atasan/administrator) -> (kalau disetujui) TTD Kepala Dinas,
-// disimpulkan dari ttdDoc() karena tahap ini bukan status enum tersendiri,
-// cuma keberadaan dokumen "ttd_formulir".
+// mentracking proses, bukan cuma lihat satu Tag status, DAN permintaan
+// lanjutan: pengajuan cuti pegawai SEKOLAH melewati DUA tahap persetujuan
+// berurutan -- "Persetujuan Kepala Sekolah" dulu, baru "Persetujuan Dinas"
+// -- bukan satu tahap gabungan seperti pegawai Dinas/Kantor (lihat
+// StatusDisetujuiKepsek & pengajuanStageGateOK di backend
+// handlers/pengajuan_cuti.go). Alur lengkap: Diajukan -> Persetujuan Kepala
+// Sekolah -> (selesai/ditolak/dikembalikan oleh Kepala Sekolah) -> kalau
+// selesai, lanjut -> Persetujuan Dinas -> selesai/ditolak/dikembalikan oleh
+// Dinas -> (kalau selesai) TTD Kepala Dinas.
+//
+// twoStage (row.kepsek_nama terisi ATAU status 'disetujui_kepsek') adalah
+// SATU-SATUNYA sinyal yang PASTI benar (diisi backend begitu Kepala Sekolah
+// menyetujui) -- dipakai untuk status yang SUDAH diproses. Selagi masih
+// 'pending', pakai rowIsSekolah di atas sebagai PERKIRAAN label saja (bisa
+// saja nanti ternyata cuma satu tahap kalau Atasan pegawai belum diisi
+// administrator -- status sebenarnya akan langsung terlihat begitu diproses).
 const cutiStepperSteps = computed(() => {
   const row = detailRow.value
   if (!row) return []
   const steps = [
     { label: 'Diajukan', state: 'done', actor: row.pegawai?.nama, timestamp: formatDate(row.created_at) },
   ]
+  const kepsekLabel = 'Persetujuan Kepala Sekolah'
+  const dinasLabel = 'Persetujuan Dinas'
+  const twoStage = !!row.kepsek_nama || row.status === 'disetujui_kepsek'
+  const kepsekActor = row.kepsek_nama || row.atasan_approve?.nama
+
   if (row.status === 'pending') {
-    steps.push({ label: 'Persetujuan', state: 'current' })
+    steps.push({ label: rowIsSekolah(row) ? kepsekLabel : 'Persetujuan', state: 'current' })
     return steps
   }
-  const approver = row.atasan_approve?.nama || row.disetujui_oleh_username
-  if (row.status === 'dikembalikan') {
+
+  if (row.status === 'disetujui_kepsek') {
+    // Tahap 1 sudah PASTI selesai (disetujui Kepala Sekolah) -- menunggu
+    // tahap 2 (Dinas).
     steps.push({
-      label: 'Persetujuan',
+      label: kepsekLabel,
+      state: 'done',
+      actor: kepsekActor,
+      timestamp: formatDate(row.tgl_approval_kepsek || row.tgl_approval),
+      note: row.catatan_approval_kepsek || row.catatan_approval,
+    })
+    steps.push({ label: dinasLabel, state: 'current' })
+    return steps
+  }
+
+  if (row.status === 'dikembalikan' || row.status === 'ditolak') {
+    const defaultNote = row.status === 'dikembalikan' ? 'Dikembalikan untuk diperbaiki' : undefined
+    if (twoStage) {
+      // Kepala Sekolah sudah menyetujui lebih dulu (tahap 1 selesai) --
+      // Dinas-lah yang menolak/mengembalikan di tahap 2.
+      steps.push({
+        label: kepsekLabel,
+        state: 'done',
+        actor: kepsekActor,
+        timestamp: formatDate(row.tgl_approval_kepsek),
+        note: row.catatan_approval_kepsek,
+      })
+      steps.push({
+        label: dinasLabel,
+        state: 'rejected',
+        actor: row.disetujui_oleh_username,
+        timestamp: formatDate(row.tgl_approval),
+        note: row.catatan_approval || defaultNote,
+      })
+      return steps
+    }
+    // Satu tahap saja (pegawai Dinas/Kantor), ATAU ditolak/dikembalikan
+    // LANGSUNG di tahap 1 (belum pernah sampai disetujui Kepala Sekolah).
+    steps.push({
+      label: rowIsSekolah(row) ? kepsekLabel : 'Persetujuan',
       state: 'rejected',
-      actor: approver,
+      actor: row.atasan_approve?.nama || row.disetujui_oleh_username,
       timestamp: formatDate(row.tgl_approval),
-      note: row.catatan_approval || 'Dikembalikan untuk diperbaiki',
+      note: row.catatan_approval || defaultNote,
     })
     return steps
   }
-  if (row.status === 'ditolak') {
-    steps.push({ label: 'Persetujuan', state: 'rejected', actor: approver, timestamp: formatDate(row.tgl_approval), note: row.catatan_approval })
-    return steps
+
+  // disetujui (final) -- begitu pengajuan disetujui, tahap "TTD Kepala
+  // Dinas" LANGSUNG dicentang (state 'done') -- permintaan pengguna: tidak
+  // perlu menunggu upload scan fisik lagi, karena formulir yang diterbitkan
+  // sistem sudah punya QR "Mengetahui Kepala Dinas" otomatis (sama pola
+  // dengan dokumen lain di sistem ini, mis. Peta Jabatan/Kenaikan Pangkat).
+  // Upload berkas fisik bertanda tangan basah (ttd_formulir) TETAP bisa
+  // dilakukan administrator kalau instansi masih mau menyimpan arsip
+  // fisiknya -- cuma sudah tidak lagi dijadikan syarat supaya step ini
+  // tercentang.
+  if (twoStage) {
+    steps.push({
+      label: kepsekLabel,
+      state: 'done',
+      actor: kepsekActor,
+      timestamp: formatDate(row.tgl_approval_kepsek),
+      note: row.catatan_approval_kepsek,
+    })
+    steps.push({
+      label: dinasLabel,
+      state: 'done',
+      actor: row.disetujui_oleh_username,
+      timestamp: formatDate(row.tgl_approval),
+      note: row.catatan_approval,
+    })
+  } else {
+    steps.push({
+      label: 'Persetujuan',
+      state: 'done',
+      actor: row.atasan_approve?.nama || row.disetujui_oleh_username,
+      timestamp: formatDate(row.tgl_approval),
+      note: row.catatan_approval,
+    })
   }
-  // disetujui -- begitu pengajuan disetujui (berkas kelengkapan otomatis
-  // sudah diperiksa atasan/administrator sebelum menyetujui, lihat catatan
-  // approval), tahap "TTD Kepala Dinas" LANGSUNG dicentang (state 'done')
-  // -- permintaan pengguna: tidak perlu menunggu upload scan fisik lagi,
-  // karena formulir yang diterbitkan sistem sudah punya QR
-  // "Mengetahui Kepala Dinas" otomatis (sama pola dengan dokumen lain di
-  // sistem ini, mis. Peta Jabatan/Kenaikan Pangkat). Upload berkas fisik
-  // bertanda tangan basah (ttd_formulir) TETAP bisa dilakukan administrator
-  // kalau instansi masih mau menyimpan arsip fisiknya -- cuma sudah tidak
-  // lagi dijadikan syarat supaya step ini tercentang.
-  steps.push({ label: 'Persetujuan', state: 'done', actor: approver, timestamp: formatDate(row.tgl_approval), note: row.catatan_approval })
   steps.push({
     label: 'TTD Kepala Dinas',
     state: 'done',
@@ -1034,12 +1189,32 @@ onMounted(() => {
           </Column>
           <Column field="jumlah_hari" header="Jml Hari" style="width: 100px" />
           <Column header="Status" style="width: 130px">
-            <template #body="{ data }"><Tag :value="data.status" :severity="statusSeverity(data.status)" /></template>
+            <template #body="{ data }"><Tag :value="statusLabel(data.status)" :severity="statusSeverity(data.status)" /></template>
           </Column>
           <Column header="Aksi" style="width: 300px">
             <template #body="{ data }">
               <div style="display: flex; gap: 0.35rem; flex-wrap: wrap">
                 <Button icon="pi pi-eye" size="small" severity="secondary" rounded text @click="openDetail(data)" />
+                <!-- "Surat Rekomendasi Kepala Sekolah" -- otomatis dibuat sistem
+                     begitu TAHAP 1 (Kepala Sekolah) menyetujui -- status
+                     'disetujui_kepsek' ATAU 'disetujui' (lihat data.kepsek_nama,
+                     kosong untuk pegawai Dinas/belum pernah disetujui dengan
+                     Atasan terisi), TANPA pegawai perlu upload apa pun lagi.
+                     SENGAJA DILETAKKAN DI LUAR gate status === 'disetujui' di
+                     bawah -- surat ini murni rekomendasi Kepala Sekolah sendiri,
+                     jadi sudah bisa dicetak begitu tahap 1 selesai, TIDAK perlu
+                     menunggu tahap 2/Dinas selesai juga. Sama untuk pegawai
+                     maupun admin/atasan, jadi cukup satu tombol di sini. -->
+                <Button
+                  v-if="data.kepsek_nama"
+                  icon="pi pi-file-pdf"
+                  size="small"
+                  severity="warn"
+                  rounded
+                  text
+                  title="Lihat & Cetak Surat Rekomendasi Kepala Sekolah"
+                  @click="previewForm(data.id, 'rekomendasi-kepsek', 'Surat Rekomendasi Kepala Sekolah')"
+                />
                 <template v-if="data.status === 'disetujui'">
                   <!-- admin/administrator/atasan (bawahan): cetak formulir mentah (belum ttd) untuk diajukan ttd ke Kepala Dinas -->
                   <template v-if="!viewingOwn">
@@ -1132,7 +1307,7 @@ onMounted(() => {
                   </template>
                 </template>
                 <Button
-                  v-if="viewingBawahanApprover && data.status === 'pending'"
+                  v-if="canProsesRow(data)"
                   icon="pi pi-check-square"
                   size="small"
                   label="Proses"
@@ -1219,12 +1394,22 @@ onMounted(() => {
           <div v-for="req in docRequirements" :key="req.key" class="doc-upload-row">
             <div class="doc-upload-label">
               {{ req.label }}
-              <span v-if="req.required && docsRequired" style="color: #ef4444">*</span>
+              <template v-if="req.key === 'sk_terakhir' && existingSkTerakhirNama">
+                <br />
+                <small style="color: var(--p-text-muted-color)">Sudah tersimpan di Data Pegawai: {{ existingSkTerakhirNama }} &ndash; opsional, upload untuk mengganti</small>
+              </template>
+              <span v-else-if="req.required && docsRequired" style="color: #ef4444">*</span>
               <span v-else-if="!req.required" style="color: var(--p-text-muted-color); font-size: 0.75rem">(opsional)</span>
             </div>
             <div class="doc-upload-actions">
               <input :ref="(el) => (docFileInputs[req.key] = el)" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display: none" @change="(e) => onDocFileChosen(req.key, e)" />
-              <Button size="small" outlined :label="docFiles[req.key] ? 'Ganti File' : 'Pilih File'" icon="pi pi-upload" @click="pickDocFile(req.key)" />
+              <Button
+                size="small"
+                outlined
+                :label="docFiles[req.key] ? 'Ganti File' : req.key === 'sk_terakhir' && existingSkTerakhirNama ? 'Ganti SK Terakhir' : 'Pilih File'"
+                icon="pi pi-upload"
+                @click="pickDocFile(req.key)"
+              />
               <span v-if="docFiles[req.key]" class="doc-upload-filename">{{ docFiles[req.key].name }}</span>
             </div>
           </div>
@@ -1317,12 +1502,16 @@ onMounted(() => {
         <div v-if="!viewingOwn"><strong>Pegawai:</strong> {{ detailRow.pegawai?.nama }}</div>
         <div><strong>Jenis Cuti:</strong> {{ detailRow.jenis_cuti?.jenis }}</div>
         <div><strong>Tanggal:</strong> {{ formatDate(detailRow.tgl_mulai) }} &ndash; {{ formatDate(detailRow.tgl_selesai) }} ({{ detailRow.jumlah_hari }} hari)</div>
-        <div><strong>Status:</strong> <Tag :value="detailRow.status" :severity="statusSeverity(detailRow.status)" /></div>
+        <div><strong>Status:</strong> <Tag :value="statusLabel(detailRow.status)" :severity="statusSeverity(detailRow.status)" /></div>
         <div style="font-weight: 600; margin-top: 0.25rem">Progres Pengajuan</div>
         <PengajuanStepper :steps="cutiStepperSteps" />
         <div><strong>Alasan:</strong> {{ detailRow.alasan_cuti || '-' }}</div>
         <div><strong>Alamat Selama Cuti:</strong> {{ detailRow.alamat_selama_cuti || '-' }}</div>
-        <div v-if="detailRow.catatan_approval"><strong>Catatan Atasan:</strong> {{ detailRow.catatan_approval }}</div>
+        <!-- Label generik "Catatan" (bukan "Catatan Atasan") -- catatan_approval
+             bisa berasal dari tahap 1 (Kepala Sekolah/atasan) ATAU tahap 2
+             (Dinas/administrator), lihat cutiStepperSteps di atas untuk rincian
+             catatan PER TAHAP. -->
+        <div v-if="detailRow.catatan_approval"><strong>Catatan:</strong> {{ detailRow.catatan_approval }}</div>
         <div style="margin-top: 0.5rem; font-weight: 600">Berkas Kelengkapan</div>
         <div v-if="kelengkapanDocs.length">
           <div v-for="doc in kelengkapanDocs" :key="doc.id" class="doc-row">
@@ -1396,6 +1585,14 @@ onMounted(() => {
     <!-- approval dialog (atasan) -->
     <Dialog v-model:visible="approvalDialog" modal header="Proses Pengajuan Cuti" :style="{ width: '30rem', maxWidth: '95vw' }">
       <div v-if="approvalRow" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.9rem">
+        <!-- Pengajuan cuti pegawai sekolah melewati 2 tahap (lihat
+             StatusDisetujuiKepsek) -- beri tahu admin/administrator bahwa
+             ini adalah tahap AKHIR/final (Dinas), Kepala Sekolah sudah
+             menyetujui lebih dulu, supaya tidak keliru mengira ini
+             persetujuan pertama. -->
+        <Message v-if="approvalRow.status === 'disetujui_kepsek'" severity="info" :closable="false" style="font-size: 0.8rem; padding: 0.5rem 0.75rem">
+          Tahap 2 &ndash; Persetujuan Dinas (final). Kepala Sekolah {{ approvalRow.kepsek_nama ? `(${approvalRow.kepsek_nama})` : '' }} sudah menyetujui pengajuan ini di tahap 1.
+        </Message>
         <div><strong>Pegawai:</strong> {{ approvalRow.pegawai?.nama }}</div>
         <div><strong>Jenis Cuti:</strong> {{ approvalRow.jenis_cuti?.jenis }}</div>
         <div><strong>Tanggal:</strong> {{ formatDate(approvalRow.tgl_mulai) }} &ndash; {{ formatDate(approvalRow.tgl_selesai) }} ({{ approvalRow.jumlah_hari }} hari)</div>

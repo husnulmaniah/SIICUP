@@ -730,10 +730,32 @@ func (j JatahCuti) Sisa() int {
 // ============================================================
 
 const (
-	StatusPending      = "pending"
-	StatusDisetuju     = "disetujui"
-	StatusDitolak      = "ditolak"
-	StatusDikembalikan = "dikembalikan" // dikembalikan ke pegawai untuk diperbaiki (mis. berkas tidak sesuai), bukan ditolak final
+	StatusPending = "pending"
+	// StatusDisetujuiKepsek: KHUSUS pengajuan cuti pegawai SEKOLAH yang sudah
+	// punya Kepala Sekolah (Atasan) terisi di Data Pegawai -- permintaan
+	// pengguna: pengajuan cuti pegawai sekolah melewati DUA tahap
+	// persetujuan berurutan, Kepala Sekolah dulu baru Dinas
+	// (administrator/admin), bukan satu tahap langsung final seperti
+	// pegawai Dinas/Kantor. Status ini artinya tahap 1 (Kepala Sekolah)
+	// SUDAH menyetujui -- surat "Surat Rekomendasi Kepala Sekolah" & nomor
+	// urutnya sudah otomatis terbit (lihat KepsekNama dkk. & approvePengajuan
+	// di handlers/pengajuan_cuti.go) -- tapi pengajuan BELUM final, masih
+	// menunggu tahap 2 (persetujuan Dinas). Hanya role administrator/admin
+	// yang boleh memproses (approve/reject/kembalikan) pengajuan dengan
+	// status ini -- atasan (Kepala Sekolah) sudah menuntaskan bagiannya di
+	// tahap 1, tidak bisa lagi memproses di tahap 2 (lihat
+	// pengajuanStageGateOK). Begitu tahap 2 disetujui, status berubah lagi
+	// jadi StatusDisetuju (final) -- kuota cuti tahunan & snapshot
+	// penandatangan Kepala Dinas (TtdNama dkk.) BARU dipotong/diisi di tahap
+	// 2 ini, bukan di tahap 1, supaya tidak terpotong untuk pengajuan yang
+	// ternyata ditolak Dinas di tahap akhir. Pegawai Dinas/Kantor (atau
+	// pegawai sekolah yang Atasannya belum diisi administrator) TIDAK PERNAH
+	// melewati status ini -- tetap satu tahap (pending -> disetujui
+	// langsung) seperti sebelum fitur dua tahap ini ada.
+	StatusDisetujuiKepsek = "disetujui_kepsek"
+	StatusDisetuju        = "disetujui"
+	StatusDitolak         = "ditolak"
+	StatusDikembalikan    = "dikembalikan" // dikembalikan ke pegawai untuk diperbaiki (mis. berkas tidak sesuai), bukan ditolak final
 )
 
 type PengajuanCuti struct {
@@ -778,6 +800,55 @@ type PengajuanCuti struct {
 	DisetujuiOlehUsername string    `json:"disetujui_oleh_username" gorm:"column:disetujui_oleh_username;size:100"`
 	DisetujuiOlehRole     string    `json:"disetujui_oleh_role" gorm:"column:disetujui_oleh_role;size:20"`
 	CreatedAt             time.Time `json:"created_at"`
+
+	// Snapshot Kepala Sekolah (atasan langsung pegawai) pada "Surat
+	// Rekomendasi Kepala Sekolah" -- permintaan pengguna: begitu pegawai
+	// mengajukan cuti, Kepala Sekolah tinggal meng-ACC lewat menu Pengajuan
+	// Cuti seperti biasa, lalu surat ini otomatis siap diunduh TANPA pegawai
+	// perlu lagi mengupload hasil scan surat rekomendasi cetak/tanda tangan
+	// basah (lihat dokumenRequirementsForJenis yang sudah tidak lagi
+	// mewajibkan berkas "rekomendasi_kepsek", dan buildSuratRekomendasiKepsek
+	// di handlers/pengajuan_cuti_rekomendasi_kepsek.go). Diisi SEKALI oleh
+	// approvePengajuan (pengajuan_cuti.go) saat status berubah disetujui DAN
+	// pegawai bertempat tugas Sekolah (isSekolahPegawai), dari data
+	// Pegawai.Atasan SAAT ITU -- sama persis pola TtdNama dkk. di atas,
+	// termasuk dikosongkan lagi oleh returnPengajuan/updatePengajuan supaya
+	// persetujuan berikutnya menghitung ulang. Kosong berarti pengajuan ini
+	// belum pernah disetujui, ATAU pegawainya bukan dari sekolah (tidak
+	// punya Kepala Sekolah), ATAU atasan langsungnya belum diisi admin --
+	// frontend memakai kekosongan field ini untuk menyembunyikan tombol
+	// "Surat Rekomendasi Kepala Sekolah" sepenuhnya (lihat PengajuanCutiView.vue).
+	KepsekNama       string `json:"kepsek_nama" gorm:"column:kepsek_nama;size:150"`
+	KepsekNip        string `json:"kepsek_nip" gorm:"column:kepsek_nip;size:30"`
+	KepsekPangkatGol string `json:"kepsek_pangkat_gol" gorm:"column:kepsek_pangkat_gol;size:100"`
+	KepsekJabatan    string `json:"kepsek_jabatan" gorm:"column:kepsek_jabatan;size:150"`
+	// NomorUrutKepsek/TahunSuratKepsek: nomor urut OTOMATIS Surat
+	// Rekomendasi Kepala Sekolah (permintaan pengguna: "nomor suratnya juga
+	// akan otomatis") -- BEDA dari NomorSurat (Surat Rekomendasi Izin Cuti
+	// Kepala Dinas) di atas yang masih diisi manual oleh administrator.
+	// Mengikuti pola models.SuratRekomendasi.NomorUrut/Tahun: restart dari 1
+	// tiap tahun, terpisah PER SEKOLAH (lihat nextNomorUrutSuratKepsek &
+	// nomorSuratKepsekLengkap di pengajuan_cuti_rekomendasi_kepsek.go). 0
+	// berarti belum pernah dibuat.
+	NomorUrutKepsek  int `json:"nomor_urut_kepsek" gorm:"column:nomor_urut_kepsek;default:0"`
+	TahunSuratKepsek int `json:"tahun_surat_kepsek" gorm:"column:tahun_surat_kepsek;default:0"`
+	// TglApprovalKepsek/CatatanApprovalKepsek: timestamp & catatan KHUSUS
+	// tahap 1 (persetujuan Kepala Sekolah, lihat StatusDisetujuiKepsek di
+	// atas) untuk pengajuan cuti pegawai sekolah yang melalui dua tahap.
+	// Diisi SEKALI oleh approvePengajuan saat status berubah jadi
+	// StatusDisetujuiKepsek, dan SENGAJA TIDAK ikut tertimpa lagi oleh
+	// tindakan tahap 2 (Dinas) -- TglApproval/CatatanApproval di atas selalu
+	// merekam tindakan TERAKHIR/final (dipakai juga untuk pegawai
+	// Dinas/Kantor yang hanya satu tahap), sedangkan dua field ini khusus
+	// menyimpan jejak tahap 1 supaya status bar frontend bisa menampilkan
+	// KEDUA tahap sekaligus (lihat cutiStepperSteps di PengajuanCutiView.vue
+	// & pengajuanStageGateOK di handlers/pengajuan_cuti.go). Kosong berarti
+	// pengajuan ini belum pernah lewat tahap Kepala Sekolah (pegawai
+	// Dinas/Kantor, ATAU masih pending, ATAU ditolak/dikembalikan LANGSUNG
+	// di tahap 1 tanpa pernah disetujui). Dikosongkan lagi oleh
+	// returnPengajuan, sama seperti field snapshot lainnya.
+	TglApprovalKepsek     *time.Time `json:"tgl_approval_kepsek" gorm:"column:tgl_approval_kepsek"`
+	CatatanApprovalKepsek string     `json:"catatan_approval_kepsek" gorm:"column:catatan_approval_kepsek;size:255"`
 
 	// Dokumen kelengkapan yang diupload saat pengajuan dibuat (wajib untuk
 	// pengajuan mandiri oleh pegawai/atasan, opsional bila dibuatkan oleh admin).

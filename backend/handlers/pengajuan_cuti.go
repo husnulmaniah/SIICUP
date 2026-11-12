@@ -123,33 +123,33 @@ func sixDayWeekForPegawai(pegawai models.Pegawai) bool {
 // penting) are checked before the generic "tahunan" fallback, since e.g.
 // "Cuti Tahunan Umroh" contains both "tahunan" and "umroh".
 //
-// "Surat Rekomendasi Kepala Sekolah" only applies to pegawai whose tempat
-// tugas is a sekolah (they have a Kepala Sekolah to sign it) -- pegawai
-// posted at the Dinas itself never have to upload this document, so the
-// entry is omitted entirely when isSekolah is false.
+// "Surat Rekomendasi Kepala Sekolah" used to be a mandatory manual upload
+// here (for pegawai bertempat tugas Sekolah) -- permintaan pengguna: begitu
+// Kepala Sekolah (atasan langsung pegawai) meng-ACC pengajuan ini lewat menu
+// Pengajuan Cuti, surat itu sekarang dibuat OTOMATIS oleh sistem (lengkap
+// dengan nomor surat otomatis & tanda tangan QR), jadi TIDAK LAGI ada di
+// checklist ini -- lihat snapshot Kepsek.../NomorUrutKepsek di
+// approvePengajuan & buildSuratRekomendasiKepsek di
+// handlers/pengajuan_cuti_rekomendasi_kepsek.go. isSekolah TETAP diterima
+// sebagai parameter (dipanggil dengan isSekolahPegawai(pegawai) di
+// createPengajuan) walau sudah tidak dipakai di badan fungsi ini lagi --
+// dibiarkan untuk kompatibilitas pemanggil & kalau suatu saat ada lagi
+// syarat berkas yang hanya berlaku khusus pegawai sekolah.
 func dokumenRequirementsForJenis(jenisNama string, isSekolah bool) []dokumenRequirement {
-	rekomendasiKepsek := dokumenRequirement{Key: "rekomendasi_kepsek", Label: "Surat Rekomendasi Kepala Sekolah", Required: true}
-	withRekomendasiKepsek := func(reqs ...dokumenRequirement) []dokumenRequirement {
-		if !isSekolah {
-			return reqs
-		}
-		return append([]dokumenRequirement{rekomendasiKepsek}, reqs...)
-	}
-
 	j := strings.ToLower(jenisNama)
 	switch {
 	case strings.Contains(j, "melahirkan"):
-		return withRekomendasiKepsek(
-			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-			dokumenRequirement{Key: "keterangan_hpl", Label: "Surat Keterangan HPL (Rumah Sakit/Puskesmas)", Required: true},
-			dokumenRequirement{Key: "buku_kia", Label: "Buku KIA", Required: true},
-			dokumenRequirement{Key: "hasil_usg", Label: "Hasil USG", Required: false},
-		)
+		return []dokumenRequirement{
+			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+			{Key: "keterangan_hpl", Label: "Surat Keterangan HPL (Rumah Sakit/Puskesmas)", Required: true},
+			{Key: "buku_kia", Label: "Buku KIA", Required: true},
+			{Key: "hasil_usg", Label: "Hasil USG", Required: false},
+		}
 	case strings.Contains(j, "umroh"):
-		return withRekomendasiKepsek(
-			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-			dokumenRequirement{Key: "keterangan_travel", Label: "Surat Keterangan dari Travel Pemberangkatan", Required: true},
-		)
+		return []dokumenRequirement{
+			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+			{Key: "keterangan_travel", Label: "Surat Keterangan dari Travel Pemberangkatan", Required: true},
+		}
 	case strings.Contains(j, "sakit"):
 		return []dokumenRequirement{
 			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
@@ -157,14 +157,14 @@ func dokumenRequirementsForJenis(jenisNama string, isSekolah bool) []dokumenRequ
 			{Key: "keterangan_rawat_inap", Label: "Surat Keterangan Rawat Inap", Required: true},
 		}
 	case strings.Contains(j, "alasan penting"):
-		return withRekomendasiKepsek(
-			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-			dokumenRequirement{Key: "dokumen_pendukung", Label: "Dokumen Pendukung (surat ket. rawat inap keluarga / surat kematian / surat KUA / dokumen istri melahirkan)", Required: true},
-		)
+		return []dokumenRequirement{
+			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+			{Key: "dokumen_pendukung", Label: "Dokumen Pendukung (surat ket. rawat inap keluarga / surat kematian / surat KUA / dokumen istri melahirkan)", Required: true},
+		}
 	case strings.Contains(j, "tahunan"):
-		return withRekomendasiKepsek(
-			dokumenRequirement{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
-		)
+		return []dokumenRequirement{
+			{Key: "sk_terakhir", Label: "SK Terakhir", Required: true},
+		}
 	default:
 		return nil
 	}
@@ -286,14 +286,21 @@ func isAnnualLeave(jenis models.JenisCuti) bool {
 // existing pengajuan cuti the moment the page is refreshed (GET list/detail)
 // -- nobody needs to open and re-save the pengajuan by hand.
 //
-// Only "masih berjalan" statuses (menunggu/disetujui) are synced: a pengajuan
-// yang sudah ditolak/dikembalikan is a closed-out record and its historical
-// JumlahHari is left alone. When the affected pengajuan is an approved cuti
-// tahunan, the difference is also applied to the pegawai's jatah cuti tahunan
-// (kolom "terpakai") so a hari libur baru that falls inside an already
-// disetujui range is no longer counted against the quota either.
+// Only "masih berjalan" statuses (menunggu/disetujui Kepala Sekolah/
+// disetujui) are synced: a pengajuan yang sudah ditolak/dikembalikan is a
+// closed-out record and its historical JumlahHari is left alone.
+// StatusDisetujuiKepsek (tahap 1 pegawai sekolah sudah disetujui Kepala
+// Sekolah, menunggu tahap 2/Dinas) ikut disinkronkan juga -- kuotanya memang
+// belum dipotong di tahap ini (lihat approvePengajuan), jadi tidak ada
+// penyesuaian jatah cuti yang perlu dilakukan untuk status ini, tapi
+// JumlahHari-nya tetap harus akurat karena sudah tercetak di Surat
+// Rekomendasi Kepala Sekolah. When the affected pengajuan is an approved cuti
+// tahunan (StatusDisetuju, final), the difference is also applied to the
+// pegawai's jatah cuti tahunan (kolom "terpakai") so a hari libur baru that
+// falls inside an already disetujui range is no longer counted against the
+// quota either.
 func syncJumlahHariWithHolidays(db *gorm.DB, item *models.PengajuanCuti) {
-	if item.Pegawai == nil || (item.Status != models.StatusPending && item.Status != models.StatusDisetuju) {
+	if item.Pegawai == nil || (item.Status != models.StatusPending && item.Status != models.StatusDisetujuiKepsek && item.Status != models.StatusDisetuju) {
 		return
 	}
 	jenisNama := ""
@@ -325,7 +332,7 @@ func syncJumlahHariWithHolidays(db *gorm.DB, item *models.PengajuanCuti) {
 func ResyncActivePengajuanDays(db *gorm.DB) {
 	var items []models.PengajuanCuti
 	preloadPengajuan(db).
-		Where("status IN ?", []string{models.StatusPending, models.StatusDisetuju}).
+		Where("status IN ?", []string{models.StatusPending, models.StatusDisetujuiKepsek, models.StatusDisetuju}).
 		Find(&items)
 	for i := range items {
 		syncJumlahHariWithHolidays(db, &items[i])
@@ -391,6 +398,12 @@ func RegisterPengajuanCutiRoutes(mux *http.ServeMux, db *gorm.DB) {
 	// loadApprovedPengajuanForForm di formulir.go.
 	mux.Handle("GET /api/pengajuan-cuti/{id}/form/rekomendasi", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormRekomendasi(w, r, db) }))
 	mux.Handle("GET /api/pengajuan-cuti/{id}/form/cuti", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormCuti(w, r, db) }))
+	// "Surat Rekomendasi Kepala Sekolah" -- permintaan pengguna, dibuat
+	// OTOMATIS begitu pengajuan disetujui (lihat snapshot KepsekNama dkk. di
+	// approvePengajuan di atas & buildSuratRekomendasiKepsek di
+	// pengajuan_cuti_rekomendasi_kepsek.go), menggantikan upload manual
+	// "rekomendasi_kepsek" yang dulu wajib.
+	mux.Handle("GET /api/pengajuan-cuti/{id}/form/rekomendasi-kepsek", anyRole(func(w http.ResponseWriter, r *http.Request) { downloadFormRekomendasiKepsek(w, r, db) }))
 	// gabungan (Surat Rekomendasi + Formulir Cuti dalam SATU PDF 2 halaman)
 	// untuk tombol "Download Sekaligus" di akun pegawai -- lihat
 	// downloadFormGabungan & buildGabungan di formulir.go.
@@ -657,11 +670,28 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		name string
 		data []byte
 	}
+	// skTerakhirFromPegawai: true kalau syarat "sk_terakhir" dipenuhi dengan
+	// MENYALIN berkas yang sudah tersimpan di Data Pegawai (Pegawai.SkTerakhirFile),
+	// bukan upload baru kali ini -- permintaan pengguna: "cek pada data
+	// pegawai jika sknya sudah ada pada data pegawai maka munculkan sk
+	// terakhir yang sudah ada di data pegawai jika ingin di ganti maka
+	// buatkan inputan untuk mengupload kembali". Baris PengajuanDokumen
+	// jenis "sk_terakhir" tetap selalu dibuat (lihat di bawah, setelah item
+	// berhasil disimpan) supaya endpoint unduh/lihat dokumen yang sudah ada
+	// (downloadDokumenPengajuan) tidak perlu berubah sama sekali -- baik
+	// berkasnya baru diupload MAUPUN disalin dari Data Pegawai sama-sama
+	// berakhir sebagai baris PengajuanDokumen biasa.
+	var skTerakhirFromPegawai *dokumenRequirement
 	var pending []pendingDoc
 	var problems []string
 	for _, req := range dokumenRequirementsForJenis(jenis.Jenis, isSekolahPegawai(pegawai)) {
 		fh := formFileHeader(r, "dokumen_"+req.Key)
 		if fh == nil {
+			if req.Key == "sk_terakhir" && len(pegawai.SkTerakhirFile) > 0 {
+				reqCopy := req
+				skTerakhirFromPegawai = &reqCopy
+				continue
+			}
 			if req.Required && selfSubmit {
 				problems = append(problems, "berkas '"+req.Label+"' wajib diupload")
 			}
@@ -728,6 +758,26 @@ func createPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			File:        pd.data,
 		}
 		db.Create(&doc)
+		if pd.req.Key == "sk_terakhir" {
+			// Pegawai mengupload SK Terakhir BARU saat mengajukan cuti ini --
+			// perbarui juga salinan master di Data Pegawai supaya pengajuan
+			// cuti BERIKUTNYA otomatis memakai yang terbaru ini tanpa perlu
+			// upload ulang lagi (permintaan pengguna, lihat komentar
+			// skTerakhirFromPegawai di atas).
+			db.Model(&models.Pegawai{}).Where("id = ?", item.IDPegawai).Updates(map[string]interface{}{
+				"sk_terakhir_nama": pd.name,
+				"sk_terakhir_file": pd.data,
+			})
+		}
+	}
+	if skTerakhirFromPegawai != nil {
+		db.Create(&models.PengajuanDokumen{
+			IDPengajuan: item.ID,
+			Jenis:       skTerakhirFromPegawai.Key,
+			Label:       skTerakhirFromPegawai.Label,
+			NamaFile:    pegawai.SkTerakhirNama,
+			File:        pegawai.SkTerakhirFile,
+		})
 	}
 	preloadPengajuan(db).First(&item, item.ID)
 	utils.Created(w, "pengajuan cuti berhasil diajukan, menunggu persetujuan atasan", item)
@@ -796,9 +846,10 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// disimpan lagi. Validasi & baca semua file dulu sebelum menyentuh database
 	// supaya tidak ada perubahan sebagian jika salah satu berkas gagal.
 	type docReplace struct {
-		id   uint
-		name string
-		data []byte
+		id    uint
+		jenis string
+		name  string
+		data  []byte
 	}
 	var replacements []docReplace
 	if item.Status == models.StatusDikembalikan {
@@ -837,7 +888,7 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 				utils.Error(w, http.StatusBadRequest, "berkas '"+d.Label+"' yang dipilih kosong (0 byte) -- coba buka dulu berkasnya lalu pilih ulang")
 				return
 			}
-			replacements = append(replacements, docReplace{id: d.ID, name: fh.Filename, data: data})
+			replacements = append(replacements, docReplace{id: d.ID, jenis: d.Jenis, name: fh.Filename, data: data})
 		}
 		if len(stillMissing) > 0 {
 			utils.Error(w, http.StatusBadRequest, "silakan upload ulang berkas yang ditandai perlu diperbaiki: "+strings.Join(stillMissing, ", "))
@@ -852,6 +903,17 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		}).Error; err != nil {
 			utils.Error(w, http.StatusInternalServerError, "gagal menyimpan berkas pengganti: "+err.Error())
 			return
+		}
+		if rep.jenis == "sk_terakhir" {
+			// Pegawai mengganti SK Terakhir lewat upload ulang ini --
+			// perbarui juga salinan master di Data Pegawai, sama seperti
+			// jalur createPengajuan (lihat komentar skTerakhirFromPegawai
+			// di sana), supaya pengajuan cuti berikutnya otomatis memakai
+			// SK terbaru ini.
+			db.Model(&models.Pegawai{}).Where("id = ?", item.IDPegawai).Updates(map[string]interface{}{
+				"sk_terakhir_nama": rep.name,
+				"sk_terakhir_file": rep.data,
+			})
 		}
 	}
 
@@ -889,6 +951,16 @@ func updatePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		item.TtdJabatan = ""
 		item.DisetujuiOlehUsername = ""
 		item.DisetujuiOlehRole = ""
+		// Snapshot Surat Rekomendasi Kepala Sekolah juga dikosongkan -- lihat
+		// catatan lengkap pada field KepsekNama dkk. di models.go.
+		item.KepsekNama = ""
+		item.KepsekNip = ""
+		item.KepsekPangkatGol = ""
+		item.KepsekJabatan = ""
+		item.NomorUrutKepsek = 0
+		item.TahunSuratKepsek = 0
+		item.TglApprovalKepsek = nil
+		item.CatatanApprovalKepsek = ""
 	}
 
 	if err := db.Save(&item).Error; err != nil {
@@ -972,6 +1044,39 @@ type approvalPayload struct {
 	Catatan string `json:"catatan_approval"`
 }
 
+// pengajuanStageGateOK memeriksa apakah pengajuan ini boleh diproses
+// (approve/reject/kembalikan) SEKARANG oleh role yang memanggil, berdasarkan
+// status-nya SAAT INI:
+//   - pending: tahap 1 -- boleh atasan (Kepala Sekolah/atasan langsung) ATAU
+//     admin/administrator (override, pola lama).
+//   - StatusDisetujuiKepsek: tahap 2 (Dinas) -- Kepala Sekolah SUDAH
+//     menuntaskan bagiannya di tahap 1, jadi HANYA admin/administrator yang
+//     boleh memproses tahap ini, atasan ditolak dengan pesan yang jelas.
+//   - status lain (sudah final: disetujui/ditolak/dikembalikan): tidak boleh
+//     diproses lagi siapa pun -- sama seperti perilaku lama, harus pakai
+//     returnPengajuan dulu untuk mengembalikan ke pending.
+//
+// Mengirim response error sendiri & mengembalikan ok=false kalau tidak boleh
+// diproses sama sekali. isStage2=true menandakan tindakan ini tindakan tahap
+// 2 (Dinas) -- dipakai pemanggil (approve/reject/kembalikanPengajuan) untuk
+// memutuskan field snapshot mana yang diisi (lihat catatan pada
+// IDAtasanApprove/DisetujuiOlehUsername di handler masing-masing).
+func pengajuanStageGateOK(w http.ResponseWriter, claims *utils.Claims, item models.PengajuanCuti) (isStage2 bool, ok bool) {
+	switch item.Status {
+	case models.StatusPending:
+		return false, true
+	case models.StatusDisetujuiKepsek:
+		if claims.RoleName != "administrator" && claims.RoleName != "admin" {
+			utils.Error(w, http.StatusForbidden, "pengajuan ini sudah disetujui Kepala Sekolah, menunggu persetujuan Dinas (hanya administrator/admin yang dapat memproses tahap ini)")
+			return false, false
+		}
+		return true, true
+	default:
+		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya")
+		return false, false
+	}
+}
+
 func approvePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	id := r.PathValue("id")
@@ -993,43 +1098,125 @@ func approvePengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak dapat memproses pengajuan cuti milik sendiri, menunggu persetujuan administrator/admin")
 		return
 	}
-	if item.Status != models.StatusPending {
-		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya")
+	isStage2, ok := pengajuanStageGateOK(w, claims, item)
+	if !ok {
 		return
 	}
 	var p approvalPayload
 	_ = json.NewDecoder(r.Body).Decode(&p)
 
 	syncJumlahHariWithHolidays(db, &item)
-	if item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
-		if err := adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, item.JumlahHari); err != nil {
-			utils.Error(w, http.StatusBadRequest, err.Error())
+	now := time.Now()
+
+	if isStage2 {
+		// Tahap 2 (Dinas): pengajuan ini sudah disetujui Kepala Sekolah
+		// sebelumnya (StatusDisetujuiKepsek), sekarang administrator/admin
+		// menuntaskan/memfinalkan. Snapshot penandatangan Kepala Dinas DAN
+		// pemotongan kuota cuti tahunan baru terjadi DI SINI, bukan di tahap
+		// 1 -- supaya kuota tidak ikut terpotong untuk pengajuan yang
+		// ternyata ditolak Dinas di tahap akhir ini. Snapshot Surat
+		// Rekomendasi Kepala Sekolah (KepsekNama dkk.) TIDAK disentuh lagi,
+		// sudah diisi sejak tahap 1.
+		if item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
+			if err := adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, item.JumlahHari); err != nil {
+				utils.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		pengaturan := pengaturanSuratOrDefault(db)
+		item.TtdNama, item.TtdNip, item.TtdJabatan = resolveSignerInfo(db, pengaturan)
+		item.DisetujuiOlehUsername = claims.Username
+		item.DisetujuiOlehRole = claims.RoleName
+		item.Status = models.StatusDisetuju
+		item.TglApproval = &now
+		item.CatatanApproval = p.Catatan
+
+		if err := db.Save(&item).Error; err != nil {
+			utils.Error(w, http.StatusInternalServerError, "gagal menyetujui pengajuan: "+err.Error())
 			return
 		}
+		preloadPengajuan(db).First(&item, item.ID)
+		utils.Success(w, "pengajuan cuti disetujui Dinas, proses selesai", item)
+		return
 	}
 
-	// Ambil snapshot penandatangan (nama/NIP/jabatan Kepala Dinas atau
-	// pelaksana tugasnya) dari Pengaturan Formulir yang berlaku SEKARANG, dan
-	// bekukan ke pengajuan ini -- lihat catatan pada field TtdNama dkk. di
-	// models.go untuk alasannya. DisetujuiOlehUsername/Role merekam siapa
-	// yang meng-ACC di sistem (dipakai juga sebagai isi barcode/QR tanda
-	// tangan otomatis pada formulir cetak).
-	pengaturan := pengaturanSuratOrDefault(db)
-	item.TtdNama, item.TtdNip, item.TtdJabatan = resolveSignerInfo(db, pengaturan)
-	item.DisetujuiOlehUsername = claims.Username
-	item.DisetujuiOlehRole = claims.RoleName
+	// Tahap 1 (status masih pending): tentukan dulu apakah pengajuan ini
+	// perlu DUA tahap (Kepala Sekolah -> Dinas, khusus pegawai bertempat
+	// tugas Sekolah yang sudah punya Atasan/Kepala Sekolah terisi di Data
+	// Pegawai) atau cukup SATU tahap seperti sebelum fitur dua tahap ini ada
+	// (pegawai Dinas/Kantor, ATAU pegawai sekolah yang Atasannya belum
+	// diisi administrator -- fallback supaya tidak memblokir proses).
+	var pegawaiUntukKepsek models.Pegawai
+	twoStage := false
+	if err := db.Preload("UnitKerja").
+		Preload("Atasan.Jabatan").
+		Preload("Atasan.PangkatGol.Pangkat").
+		Preload("Atasan.PangkatGol.Gol").
+		First(&pegawaiUntukKepsek, item.IDPegawai).Error; err == nil &&
+		isSekolahPegawai(pegawaiUntukKepsek) && pegawaiUntukKepsek.Atasan != nil && pegawaiUntukKepsek.IDUnitKerja != nil {
+		twoStage = true
+	}
 
-	now := time.Now()
-	item.Status = models.StatusDisetuju
 	item.IDAtasanApprove = claims.IDPegawai
 	item.TglApproval = &now
 	item.CatatanApproval = p.Catatan
+
+	if twoStage {
+		// Kepala Sekolah meng-ACC -- BELUM final, menunggu tahap 2 (Dinas).
+		// Snapshot Surat Rekomendasi Kepala Sekolah (KepsekNama dkk.) sudah
+		// otomatis siap begitu tahap ini disimpan -- lihat catatan lengkap
+		// pada field-field itu di models.go.
+		item.Status = models.StatusDisetujuiKepsek
+		item.TglApprovalKepsek = &now
+		item.CatatanApprovalKepsek = p.Catatan
+
+		atasan := pegawaiUntukKepsek.Atasan
+		item.KepsekNama = atasan.Nama
+		item.KepsekNip = atasan.NIP
+		item.KepsekJabatan = "Kepala Sekolah"
+		if atasan.Jabatan != nil && strings.TrimSpace(atasan.Jabatan.Jabatan) != "" {
+			item.KepsekJabatan = atasan.Jabatan.Jabatan
+		}
+		if atasan.PangkatGol != nil {
+			pk, gol := "-", "-"
+			if atasan.PangkatGol.Pangkat != nil {
+				pk = atasan.PangkatGol.Pangkat.Pangkat
+			}
+			if atasan.PangkatGol.Gol != nil {
+				gol = atasan.PangkatGol.Gol.Gol
+			}
+			item.KepsekPangkatGol = pk + " / " + gol
+		}
+		item.TahunSuratKepsek = now.Year()
+		item.NomorUrutKepsek = nextNomorUrutSuratKepsek(db, *pegawaiUntukKepsek.IDUnitKerja, now.Year())
+	} else {
+		// Satu tahap saja (pegawai Dinas/Kantor, atau pegawai sekolah yang
+		// Atasannya belum diisi) -- langsung final, sama seperti sebelum
+		// fitur dua tahap ini ada: snapshot penandatangan Kepala Dinas &
+		// pemotongan kuota cuti tahunan terjadi langsung di tahap ini.
+		if item.JenisCuti != nil && isAnnualLeave(*item.JenisCuti) {
+			if err := adjustQuotaUsage(db, item.IDPegawai, item.TglMulai.Year(), item.JenisCuti.DefaultJatah, item.JumlahHari); err != nil {
+				utils.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		pengaturan := pengaturanSuratOrDefault(db)
+		item.TtdNama, item.TtdNip, item.TtdJabatan = resolveSignerInfo(db, pengaturan)
+		item.DisetujuiOlehUsername = claims.Username
+		item.DisetujuiOlehRole = claims.RoleName
+		item.Status = models.StatusDisetuju
+	}
+
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menyetujui pengajuan: "+err.Error())
 		return
 	}
 	preloadPengajuan(db).First(&item, item.ID)
-	utils.Success(w, "pengajuan cuti berhasil disetujui", item)
+	if twoStage {
+		utils.Success(w, "pengajuan cuti disetujui Kepala Sekolah, menunggu persetujuan Dinas", item)
+	} else {
+		utils.Success(w, "pengajuan cuti berhasil disetujui", item)
+	}
 }
 
 func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
@@ -1050,8 +1237,8 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak dapat memproses pengajuan cuti milik sendiri, menunggu persetujuan administrator/admin")
 		return
 	}
-	if item.Status != models.StatusPending {
-		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya")
+	isStage2, ok := pengajuanStageGateOK(w, claims, item)
+	if !ok {
 		return
 	}
 	var p approvalPayload
@@ -1059,9 +1246,18 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 	now := time.Now()
 	item.Status = models.StatusDitolak
-	item.IDAtasanApprove = claims.IDPegawai
 	item.TglApproval = &now
 	item.CatatanApproval = p.Catatan
+	// Tahap 2 (Dinas): JANGAN timpa IDAtasanApprove -- field itu tetap
+	// menyimpan identitas Kepala Sekolah yang menyetujui tahap 1, dipakai
+	// status bar frontend (lihat cutiStepperSteps di PengajuanCutiView.vue).
+	// Tahap 1 (atasan, atau admin yang override): catat seperti biasa.
+	if isStage2 {
+		item.DisetujuiOlehUsername = claims.Username
+		item.DisetujuiOlehRole = claims.RoleName
+	} else {
+		item.IDAtasanApprove = claims.IDPegawai
+	}
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menolak pengajuan: "+err.Error())
 		return
@@ -1074,6 +1270,9 @@ func rejectPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		jenisCutiNama = item.JenisCuti.Jenis
 	}
 	pesan := "Pengajuan " + jenisCutiNama + " Anda ditolak"
+	if isStage2 {
+		pesan = "Pengajuan " + jenisCutiNama + " Anda ditolak Dinas"
+	}
 	if p.Catatan != "" {
 		pesan += " dengan catatan: " + p.Catatan
 	}
@@ -1116,8 +1315,8 @@ func kembalikanPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusForbidden, "anda tidak dapat memproses pengajuan cuti milik sendiri, menunggu persetujuan administrator/admin")
 		return
 	}
-	if item.Status != models.StatusPending {
-		utils.Error(w, http.StatusBadRequest, "pengajuan ini sudah diproses sebelumnya")
+	isStage2, ok := pengajuanStageGateOK(w, claims, item)
+	if !ok {
 		return
 	}
 	var p kembalikanPayload
@@ -1142,15 +1341,27 @@ func kembalikanPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 
 	now := time.Now()
 	item.Status = models.StatusDikembalikan
-	item.IDAtasanApprove = claims.IDPegawai
 	item.TglApproval = &now
 	item.CatatanApproval = p.Catatan
+	// Tahap 2 (Dinas): JANGAN timpa IDAtasanApprove -- sama alasan dengan
+	// rejectPengajuan di atas (tetap menyimpan identitas Kepala Sekolah
+	// yang menyetujui tahap 1). Tahap 1: catat seperti biasa.
+	if isStage2 {
+		item.DisetujuiOlehUsername = claims.Username
+		item.DisetujuiOlehRole = claims.RoleName
+	} else {
+		item.IDAtasanApprove = claims.IDPegawai
+	}
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengembalikan pengajuan: "+err.Error())
 		return
 	}
 	preloadPengajuan(db).First(&item, item.ID)
-	utils.Success(w, "pengajuan cuti dikembalikan ke pegawai untuk diperbaiki", item)
+	msg := "pengajuan cuti dikembalikan ke pegawai untuk diperbaiki"
+	if isStage2 {
+		msg = "pengajuan cuti dikembalikan Dinas ke pegawai untuk diperbaiki"
+	}
+	utils.Success(w, msg, item)
 }
 
 // returnPengajuan reverts a pengajuan that was already disetujui/ditolak back
@@ -1198,6 +1409,16 @@ func returnPengajuan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	item.TtdJabatan = ""
 	item.DisetujuiOlehUsername = ""
 	item.DisetujuiOlehRole = ""
+	// Snapshot Surat Rekomendasi Kepala Sekolah juga dikosongkan -- lihat
+	// catatan lengkap pada field KepsekNama dkk. di models.go.
+	item.KepsekNama = ""
+	item.KepsekNip = ""
+	item.KepsekPangkatGol = ""
+	item.KepsekJabatan = ""
+	item.NomorUrutKepsek = 0
+	item.TahunSuratKepsek = 0
+	item.TglApprovalKepsek = nil
+	item.CatatanApprovalKepsek = ""
 	if err := db.Save(&item).Error; err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengembalikan pengajuan: "+err.Error())
 		return
