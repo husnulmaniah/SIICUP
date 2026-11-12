@@ -273,44 +273,32 @@ func validasiShiftKerjaPayload(db *gorm.DB, p shiftKerjaPayload, excludeID uint)
 			return fmt.Errorf("unit kerja '%s' sudah dipasangi shift lain ('%s') -- satu unit kerja hanya boleh punya satu shift, ubah/hapus shift yang lama dulu", namaUnit, shiftLain.NamaShift)
 		}
 	}
-	// Validasi IDJabatanList: pola PERSIS SAMA seperti IDUnitKerjaList di
-	// atas (cek ada/tidaknya di DB, lalu cek bentrok dengan shift lain lewat
-	// uniqueIndex IDJabatan pada ShiftKerjaJabatan).
-	jabatanSeen := map[uint]bool{}
+	// Validasi IDJabatanList: HANYA cek ada/tidaknya di DB -- TIDAK ADA LAGI
+	// cek bentrok dengan shift lain spt IDUnitKerjaList di atas, karena SATU
+	// jabatan SEKARANG BOLEH dipasangi ke LEBIH DARI SATU shift (mis.
+	// "Pengadministrasi Perkantoran" ada di semua sekolah [6 hari] maupun
+	// kantor dinas [5 hari] sekaligus, perlu shift berbeda tergantung unit
+	// kerja pegawainya) -- lihat komentar ShiftKerjaJabatan di models.go &
+	// shiftKerjaUntukJabatan di absensi.go untuk cara memilih shift yang
+	// tepat kalau satu jabatan ternyata ada di >1 shift.
 	jabatanUnik := make([]uint, 0, len(p.IDJabatanList))
-	for _, id := range p.IDJabatanList {
-		if id == 0 || jabatanSeen[id] {
-			continue
+	{
+		jabatanSeen := map[uint]bool{}
+		for _, id := range p.IDJabatanList {
+			if id == 0 || jabatanSeen[id] {
+				continue
+			}
+			jabatanSeen[id] = true
+			jabatanUnik = append(jabatanUnik, id)
 		}
-		jabatanSeen[id] = true
-		jabatanUnik = append(jabatanUnik, id)
 	}
 	if len(jabatanUnik) > 0 {
-		var jabatanList []models.Jabatan
-		if err := db.Where("id IN ?", jabatanUnik).Find(&jabatanList).Error; err != nil {
+		var jabatanCount int64
+		if err := db.Model(&models.Jabatan{}).Where("id IN ?", jabatanUnik).Count(&jabatanCount).Error; err != nil {
 			return fmt.Errorf("gagal memeriksa jabatan")
 		}
-		if len(jabatanList) != len(jabatanUnik) {
+		if int(jabatanCount) != len(jabatanUnik) {
 			return fmt.Errorf("ada jabatan yang tidak ditemukan")
-		}
-		jabatanByID := map[uint]models.Jabatan{}
-		for _, j := range jabatanList {
-			jabatanByID[j.ID] = j
-		}
-		var dupeJoins []models.ShiftKerjaJabatan
-		dupeQuery := db.Where("id_jabatan IN ?", jabatanUnik)
-		if excludeID > 0 {
-			dupeQuery = dupeQuery.Where("id_shift <> ?", excludeID)
-		}
-		if err := dupeQuery.Find(&dupeJoins).Error; err != nil {
-			return fmt.Errorf("gagal memeriksa jabatan")
-		}
-		if len(dupeJoins) > 0 {
-			bentrok := dupeJoins[0]
-			var shiftLain models.ShiftKerja
-			db.First(&shiftLain, bentrok.IDShift)
-			namaJabatan := jabatanByID[bentrok.IDJabatan].Jabatan
-			return fmt.Errorf("jabatan '%s' sudah dipasangi shift lain ('%s') -- satu jabatan hanya boleh punya satu shift, ubah/hapus shift yang lama dulu", namaJabatan, shiftLain.NamaShift)
 		}
 	}
 	if len(p.HariList) != 7 {

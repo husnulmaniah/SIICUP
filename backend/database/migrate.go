@@ -133,6 +133,29 @@ func Migrate(db *gorm.DB) {
 		}
 	}
 
+	// Jabatan tadinya (rilis pertama fitur Shift Kerja per Jabatan) dibatasi
+	// SATU jabatan hanya boleh dipasangi SATU shift (uniqueIndex di
+	// shift_kerja_jabatan.id_jabatan) -- ternyata banyak jabatan (mis.
+	// "Pengadministrasi Perkantoran") ada di SEMUA sekolah (6 hari kerja)
+	// MAUPUN di kantor dinas (5 hari kerja) sekaligus, jadi perlu bisa
+	// dipasangi shift BERBEDA tergantung unit kerja pegawainya -- lihat
+	// shiftKerjaUntukJabatan di handlers/absensi.go untuk cara memilih shift
+	// mana yang dipakai kalau satu jabatan ternyata ada di >1 shift.
+	// uniqueIndex lama dihapus di sini (AutoMigrate TIDAK PERNAH menghapus
+	// index lama walau tag structnya sudah diubah ke index biasa), lalu
+	// AutoMigrate dijalankan ulang KHUSUS model ini supaya index barunya
+	// (non-unique) langsung dibuat. Aman dijalankan berkali-kali -- begitu
+	// uniqueIndex lama sudah tidak ada, blok ini langsung dilewati.
+	if db.Migrator().HasIndex(&models.ShiftKerjaJabatan{}, "IDJabatan") {
+		if err := db.Migrator().DropIndex(&models.ShiftKerjaJabatan{}, "IDJabatan"); err != nil {
+			log.Printf("peringatan: gagal menghapus uniqueIndex lama shift_kerja_jabatan.id_jabatan: %v", err)
+		} else if err := db.AutoMigrate(&models.ShiftKerjaJabatan{}); err != nil {
+			log.Printf("peringatan: gagal membuat ulang index shift_kerja_jabatan.id_jabatan: %v", err)
+		} else {
+			log.Println("migrasi: uniqueIndex lama shift_kerja_jabatan.id_jabatan berhasil diganti jadi index biasa (satu jabatan kini boleh >1 shift)")
+		}
+	}
+
 	// Fitur "Jam Kerja Khusus" per Unit Kerja/Sekolah sudah dihapus dari UI
 	// (menu Master Data -> Unit Kerja) atas permintaan pengguna, karena
 	// jam kerja sekarang cukup diatur lewat 2 jendela waktu global di menu

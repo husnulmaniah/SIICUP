@@ -620,7 +620,7 @@ func buildRekapAbsensiPDF(
 			pola := "5 Hari Kerja (Senin - Jumat)"
 			var shiftPegawai *models.ShiftKerja
 			if pegawai.IDJabatan != nil {
-				shiftPegawai = shiftKerjaUntukJabatan(db, *pegawai.IDJabatan)
+				shiftPegawai = shiftKerjaUntukJabatan(db, *pegawai.IDJabatan, pegawai.IDUnitKerja)
 			}
 			if shiftPegawai == nil && pegawai.IDUnitKerja != nil {
 				shiftPegawai = shiftKerjaUntukUnitKerja(db, *pegawai.IDUnitKerja)

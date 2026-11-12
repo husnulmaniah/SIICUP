@@ -187,19 +187,53 @@ func shiftKerjaUntukUnitKerja(db *gorm.DB, idUnitKerja uint) *models.ShiftKerja 
 // kerjanya 6 hari) mengalahkan shift yang dipasang ke Unit Kerja tempatnya
 // ditugaskan (permintaan pengguna: "pengaturan shift kerja bisa di atur
 // berdasarkan jabatan krn jabatan penilik itu hari kerjanya 6 hari kerja").
-func shiftKerjaUntukJabatan(db *gorm.DB, idJabatan uint) *models.ShiftKerja {
+//
+// SATU jabatan SEKARANG BOLEH terpasang di LEBIH DARI SATU shift (mis.
+// "Pengadministrasi Perkantoran" ada di semua sekolah [6 hari] MAUPUN
+// kantor dinas [5 hari] sekaligus -- lihat komentar models.ShiftKerjaJabatan),
+// jadi idUnitKerja (unit kerja pegawai yang bersangkutan, boleh nil) ikut
+// dipakai untuk memilih shift mana yang paling tepat kalau jabatannya
+// ternyata ada di >1 shift:
+//  1. Kalau ADA shift yang mencakup jabatan INI *dan* unit kerja pegawai
+//     ini sekaligus (lewat shift_kerja_unit_kerja) -- itu yang dipakai,
+//     paling spesifik & tidak ambigu.
+//  2. Kalau tidak ada tapi jabatan ini ternyata cuma terpasang di SATU
+//     shift saja (apapun unit kerjanya -- spt kasus "Penilik" yang pola
+//     kerjanya sama di mana saja) -- shift itu yang dipakai.
+//  3. Kalau jabatan terpasang di >1 shift TAPI tidak satupun yang cocok
+//     unit kerja pegawai (ambigu, mis. admin lupa mengisi Unit Kerja pada
+//     salah satu shift) -- dianggap TIDAK ADA shift jabatan yang cocok
+//     (nil), supaya pegawai jatuh ke shiftKerjaUntukUnitKerja alih-alih
+//     salah pilih shift jabatan.
+func shiftKerjaUntukJabatan(db *gorm.DB, idJabatan uint, idUnitKerja *uint) *models.ShiftKerja {
 	if idJabatan == 0 {
 		return nil
 	}
-	var join models.ShiftKerjaJabatan
-	if err := db.Where("id_jabatan = ?", idJabatan).First(&join).Error; err != nil {
+	var joins []models.ShiftKerjaJabatan
+	if err := db.Where("id_jabatan = ?", idJabatan).Find(&joins).Error; err != nil || len(joins) == 0 {
 		return nil
 	}
-	var shift models.ShiftKerja
-	if err := db.Preload("HariList").First(&shift, join.IDShift).Error; err != nil {
-		return nil
+	ambilShift := func(idShift uint) *models.ShiftKerja {
+		var shift models.ShiftKerja
+		if err := db.Preload("HariList").First(&shift, idShift).Error; err != nil {
+			return nil
+		}
+		return &shift
 	}
-	return &shift
+	if len(joins) == 1 {
+		return ambilShift(joins[0].IDShift)
+	}
+	if idUnitKerja != nil {
+		shiftIDs := make([]uint, 0, len(joins))
+		for _, j := range joins {
+			shiftIDs = append(shiftIDs, j.IDShift)
+		}
+		var ukJoin models.ShiftKerjaUnitKerja
+		if err := db.Where("id_unit_kerja = ? AND id_shift IN ?", *idUnitKerja, shiftIDs).First(&ukJoin).Error; err == nil {
+			return ambilShift(ukJoin.IDShift)
+		}
+	}
+	return nil
 }
 
 // jamAbsenDariShift mengubah satu models.ShiftKerja (lengkap dengan
@@ -254,7 +288,7 @@ func jamAbsenDariShift(setting models.PengaturanAbsensi, pegawai models.Pegawai,
 // bersangkutan lewat AbsensiView.vue).
 func jamAbsenUntukPegawai(db *gorm.DB, setting models.PengaturanAbsensi, pegawai models.Pegawai) jamAbsenSet {
 	if pegawai.IDJabatan != nil {
-		if shift := shiftKerjaUntukJabatan(db, *pegawai.IDJabatan); shift != nil {
+		if shift := shiftKerjaUntukJabatan(db, *pegawai.IDJabatan, pegawai.IDUnitKerja); shift != nil {
 			return jamAbsenDariShift(setting, pegawai, shift)
 		}
 	}
@@ -1042,7 +1076,7 @@ func workingDaysInRange(db *gorm.DB, start, end time.Time, sixDayWeek bool) []ti
 func hariKerjaMingguanUntukPegawai(db *gorm.DB, pegawai models.Pegawai) map[int]bool {
 	var shift *models.ShiftKerja
 	if pegawai.IDJabatan != nil {
-		shift = shiftKerjaUntukJabatan(db, *pegawai.IDJabatan)
+		shift = shiftKerjaUntukJabatan(db, *pegawai.IDJabatan, pegawai.IDUnitKerja)
 	}
 	if shift == nil && pegawai.IDUnitKerja != nil {
 		shift = shiftKerjaUntukUnitKerja(db, *pegawai.IDUnitKerja)

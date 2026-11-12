@@ -104,16 +104,14 @@ const unitKerjaOptions = computed(() => {
   return unitKerjaList.value.filter((u) => !idTerpakai.has(u.id))
 })
 
-// jabatanOptions: padanan unitKerjaOptions di atas, tapi untuk Jabatan --
-// satu jabatan juga hanya boleh dipasangi satu shift.
-const jabatanOptions = computed(() => {
-  const idTerpakai = new Set(
-    shiftList.value
-      .filter((s) => s.id !== form.id)
-      .flatMap((s) => (s.jabatan_list || []).map((j) => j.id))
-  )
-  return jabatanList.value.filter((j) => !idTerpakai.has(j.id))
-})
+// jabatanOptions: BEDA dengan unitKerjaOptions di atas -- jabatan TIDAK
+// disaring dari shift lain yang sudah memakainya, karena SEKARANG satu
+// jabatan BOLEH dipasangi ke lebih dari satu shift sekaligus (mis.
+// "Pengadministrasi Perkantoran" ada di semua sekolah [6 hari] maupun
+// kantor dinas [5 hari], jadi perlu shift berbeda tergantung unit kerja
+// pegawainya -- lihat komentar shiftKerjaUntukJabatan di
+// backend/handlers/absensi.go untuk cara backend memilih shift yang tepat).
+const jabatanOptions = computed(() => jabatanList.value)
 
 // Dipanggil saat toggle "aktif" suatu hari dimatikan (dijadikan libur) --
 // mengosongkan field jam supaya tidak ada sisa jam lama yang tersimpan ke
@@ -319,9 +317,12 @@ function hapusTerpilih() {
           Begitu shift dipasang ke suatu unit kerja, SEMUA pegawai yang tempat kerjanya unit tersebut otomatis
           mengikuti jam & jendela kamera absen shift ini -- tidak perlu diatur satu per satu per pegawai. Shift juga
           bisa dipasang langsung ke suatu Jabatan (mis. "Penilik" yang hari kerjanya 6 hari) -- shift jabatan ini
-          mengalahkan shift unit kerja kalau pegawainya kebetulan berada di keduanya. Satu unit kerja atau satu
-          jabatan tetap hanya boleh dipasangi satu shift. Di luar jam yang ditetapkan (atau di hari yang ditandai
-          libur untuk shift ini), kamera absen otomatis tertutup.
+          mengalahkan shift unit kerja kalau pegawainya kebetulan berada di keduanya. Satu unit kerja hanya boleh
+          dipasangi satu shift, tapi satu Jabatan BOLEH dipasangi ke lebih dari satu shift sekaligus (mis.
+          "Pengadministrasi Perkantoran" yang ada di semua sekolah maupun kantor dinas dengan jam kerja
+          berbeda-beda) -- pasangkan juga Unit Kerja yang sesuai pada tiap shift supaya sistem tahu shift mana yang
+          berlaku untuk pegawai di unit kerja mana. Di luar jam yang ditetapkan (atau di hari yang ditandai libur
+          untuk shift ini), kamera absen otomatis tertutup.
         </p>
       </div>
       <div style="display: flex; gap: 0.6rem; flex-wrap: wrap">
@@ -412,7 +413,9 @@ function hapusTerpilih() {
             Opsional -- dipakai kalau jam kerja ditentukan oleh JABATAN pegawai, bukan unit kerja tempatnya ditugaskan
             (mis. "Penilik" yang hari kerjanya 6 hari walau kantornya sendiri ikut jadwal 5 hari). Kalau pegawai punya
             jabatan yang dipasangi shift DAN berada di unit kerja yang juga dipasangi shift lain, shift jabatan yang
-            dipakai. Hanya jabatan yang belum dipasangi shift lain yang muncul di sini.
+            dipakai. Satu jabatan BOLEH dipasangi ke lebih dari satu shift (mis. "Pengadministrasi Perkantoran" yang
+            ada di semua sekolah maupun kantor dinas) -- kalau begitu, pilih juga Unit Kerja yang sesuai pada
+            masing-masing shift supaya sistem tahu shift mana yang berlaku untuk pegawai di unit kerja mana.
           </small>
         </div>
       </div>

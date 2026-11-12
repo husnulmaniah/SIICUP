@@ -351,20 +351,30 @@ type ShiftKerjaUnitKerja struct {
 
 func (ShiftKerjaUnitKerja) TableName() string { return "shift_kerja_unit_kerja" }
 
-// ShiftKerjaJabatan adalah tabel penghubung shift_kerja <-> jabatan, pola
-// PERSIS SAMA dengan ShiftKerjaUnitKerja di atas (SATU shift boleh mencakup
-// BANYAK jabatan, tapi SATU jabatan hanya boleh muncul di SATU baris
-// manapun -- uniqueIndex di IDJabatan) -- permintaan pengguna: "shift kerja
-// bisa diatur berdasarkan jabatan karena jabatan Penilik itu hari kerjanya
-// 6 hari kerja" (walau unit kerja/kantor tempatnya mungkin ikut jadwal 5
-// hari biasa). Dicek SEBAGAI PRIORITAS PALING UTAMA pada jamAbsenUntukPegawai
-// di handlers/absensi.go, mengalahkan ShiftKerjaUnitKerja -- jabatan
-// dianggap lebih spesifik ke pegawainya sendiri dibanding unit kerja
-// tempatnya ditugaskan.
+// ShiftKerjaJabatan adalah tabel penghubung shift_kerja <-> jabatan --
+// permintaan pengguna: "shift kerja bisa diatur berdasarkan jabatan karena
+// jabatan Penilik itu hari kerjanya 6 hari kerja" (walau unit kerja/kantor
+// tempatnya mungkin ikut jadwal 5 hari biasa). Dicek SEBAGAI PRIORITAS
+// PALING UTAMA pada jamAbsenUntukPegawai di handlers/absensi.go, mengalahkan
+// ShiftKerjaUnitKerja -- jabatan dianggap lebih spesifik ke pegawainya
+// sendiri dibanding unit kerja tempatnya ditugaskan.
+//
+// SATU jabatan SEKARANG BOLEH dipasangi LEBIH DARI SATU shift (IDJabatan
+// BUKAN lagi uniqueIndex, hanya index biasa -- lihat migrasi di
+// database/migrate.go yang menghapus uniqueIndex lama) -- banyak jabatan
+// (mis. "Pengadministrasi Perkantoran") ada di SEMUA sekolah (6 hari kerja)
+// MAUPUN di kantor dinas (5 hari kerja) sekaligus, jadi butuh shift yang
+// beda-beda tergantung unit kerja pegawainya, bukan satu shift tunggal utk
+// jabatan itu. Cara memilih shift mana yang dipakai kalau satu jabatan
+// ternyata terpasang di >1 shift: lihat komentar shiftKerjaUntukJabatan di
+// handlers/absensi.go (diprioritaskan shift yang unit-kerja-nya JUGA cocok
+// dengan unit kerja pegawai; kalau jabatan cuma ada di SATU shift saja --
+// spt kasus Penilik -- shift itu yang langsung dipakai apapun unit
+// kerjanya).
 type ShiftKerjaJabatan struct {
 	ID        uint `json:"id" gorm:"primaryKey"`
 	IDShift   uint `json:"id_shift" gorm:"column:id_shift;not null;index"`
-	IDJabatan uint `json:"id_jabatan" gorm:"column:id_jabatan;not null;uniqueIndex"`
+	IDJabatan uint `json:"id_jabatan" gorm:"column:id_jabatan;not null;index"`
 }
 
 func (ShiftKerjaJabatan) TableName() string { return "shift_kerja_jabatan" }
