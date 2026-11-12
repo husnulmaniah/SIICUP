@@ -109,6 +109,19 @@ func pegawaiExcelColumns(db *gorm.DB) []utils.ExcelColumn {
 		{Header: "Email", Example: "budi@instansi.go.id",
 			Get: func(i interface{}) string { return i.(models.Pegawai).Email },
 			Set: func(i interface{}, raw string) error { i.(*models.Pegawai).Email = raw; return nil }},
+		// Agama: kolom teks biasa (tanpa tabel referensi), sama seperti
+		// "Tempat Tugas" di atas -- field-nya di form Data Pegawai & Profil
+		// Saya memang cuma select statis (lihat agamaOptions di
+		// frontend/src/config/tables.js), BUKAN relasi ke tabel lain, jadi
+		// nilainya disimpan & dibaca langsung sebagai string tanpa lookup.
+		// Sebelumnya kolom ini TIDAK ADA di export/template Excel walau
+		// field "agama" sudah ada di model & form sejak lama -- inilah yang
+		// membuat Excel yang diunduh terlihat "belum diperbarui" (permintaan
+		// pengguna: "download excel pada data pegawai kolom agama belum di
+		// perbaharui").
+		{Header: "Agama", Example: "Islam",
+			Get: func(i interface{}) string { return i.(models.Pegawai).Agama },
+			Set: func(i interface{}, raw string) error { i.(*models.Pegawai).Agama = raw; return nil }},
 		{Header: "Status", Example: "Aktif",
 			Get: func(i interface{}) string {
 				p := i.(models.Pegawai)
@@ -1364,7 +1377,7 @@ func importPegawai(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		}
 	}
 	cols := pegawaiExcelColumns(db)
-	// column indexes: 0 NIP,1 Nama,2 Jabatan,3 UnitKerja,4 Pangkat,5 Golongan,6 TempatTugas,7 TMT,8 NoHP,9 Email,10 Status,11 NIP Atasan
+	// column indexes: 0 NIP,1 Nama,2 Jabatan,3 UnitKerja,4 Pangkat,5 Golongan,6 TempatTugas,7 TMT,8 NoHP,9 Email,10 Agama,11 Status,12 NIP Atasan
 
 	type rowError struct {
 		Row    int      `json:"row"`
