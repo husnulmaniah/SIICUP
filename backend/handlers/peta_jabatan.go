@@ -534,6 +534,29 @@ type tambahJabatanPetaSekolahPayload struct {
 // (idempoten, tidak menimpa K yang mungkin sudah ada) -- supaya baris itu
 // langsung muncul (lihat formasiIndukExists di hitungPetaJabatanSekolah) &
 // bisa langsung diatur Kebutuhan (K)-nya lewat "Atur K" seperti baris lain.
+// jabatanKepsekBolehDitambahkan: daftar jabatan yang boleh ditambahkan
+// Kepala Sekolah (role "atasan") sendiri lewat tombol "Tambah Jabatan" --
+// permintaan pengguna: "pada tambahan jabatan di peta jabatan kepala
+// sekolah jabatan yang muncul hanya GURU AHLI MADYA, GURU AHLI PERTAMA,
+// PENGADMINISTRASI PERKANTORAN DAN OPERATOR LAYANAN OPERASIONAL, hanya
+// dinas yang bisa menambahkan jabatan di luar dari itu pada unit kerja
+// tersebut dinas disini yaitu administrator" -- administrator/admin (Dinas)
+// SENGAJA TIDAK dibatasi daftar ini, tetap boleh menambahkan jabatan apa
+// saja (lihat tambahJabatanPetaSekolahHandler di bawah). Dicocokkan
+// case-insensitive & trimmed (lihat kepsekBolehTambahJabatan) supaya tidak
+// gagal cuma karena beda kapitalisasi/spasi pada data master Jabatan.
+var jabatanKepsekBolehDitambahkan = map[string]bool{
+	"guru ahli utama":              true,
+	"guru ahli madya":              true,
+	"guru ahli pertama":            true,
+	"pengadministrasi perkantoran": true,
+	"operator layanan operasional": true,
+}
+
+func kepsekBolehTambahJabatan(namaJabatan string) bool {
+	return jabatanKepsekBolehDitambahkan[strings.ToLower(strings.TrimSpace(namaJabatan))]
+}
+
 func tambahJabatanPetaSekolahHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	claims, _ := middleware.GetClaims(r)
 	var p tambahJabatanPetaSekolahPayload
@@ -552,6 +575,16 @@ func tambahJabatanPetaSekolahHandler(w http.ResponseWriter, r *http.Request, db 
 	var jabatan models.Jabatan
 	if err := db.First(&jabatan, "id = ?", p.IDJabatan).Error; err != nil {
 		utils.Error(w, http.StatusBadRequest, "jabatan tidak ditemukan")
+		return
+	}
+	// Kepala Sekolah (role "atasan") hanya boleh menambahkan jabatan dari
+	// daftar terbatas di atas -- HANYA Dinas (administrator/admin) yang
+	// boleh menambahkan jabatan lain di luar itu. Pengecekan ini SENGAJA
+	// ditegakkan di backend juga (bukan cuma menyembunyikan opsi di
+	// frontend, lihat tambahJabatanOptions di PetaJabatanView.vue) supaya
+	// tidak bisa dilewati dengan memanggil API ini langsung.
+	if claims.RoleName == "atasan" && !kepsekBolehTambahJabatan(jabatan.Jabatan) {
+		utils.Error(w, http.StatusForbidden, "Kepala Sekolah hanya dapat menambahkan jabatan: Guru Ahli Utama, Guru Ahli Madya, Guru Ahli Pertama, Pengadministrasi Perkantoran, atau Operator Layanan Operasional. Untuk jabatan lain, hubungi Dinas (administrator).")
 		return
 	}
 	_, created, err := ensureFormasiJabatan(db, p.IDUnitKerja, p.IDJabatan, nil)

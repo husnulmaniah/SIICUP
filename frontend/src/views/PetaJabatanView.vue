@@ -304,12 +304,34 @@ async function sinkronkanData() {
 // Opsi dropdown memakai refJabatan (daftar master Jabatan) yang sudah
 // dimuat untuk dialog "Ajukan Kenaikan Pangkat", dikurangi jabatan yang
 // SUDAH tampil di tabel sekolah ini supaya tidak menawarkan yang sudah ada.
+// JABATAN_KEPSEK_BOLEH_DITAMBAHKAN -- permintaan pengguna: "pada tambahan
+// jabatan di peta jabatan kepala sekolah jabatan yang muncul hanya GURU
+// AHLI MADYA, GURU AHLI PERTAMA, PENGADMINISTRASI PERKANTORAN DAN OPERATOR
+// LAYANAN OPERASIONAL, hanya dinas yang bisa menambahkan jabatan di luar
+// dari itu ... dinas disini yaitu administrator". Kepala Sekolah (role
+// "atasan") hanya ditawarkan jabatan dari daftar ini; administrator/admin
+// (auth.canManageMaster, Dinas) TIDAK dibatasi, tetap melihat semua jabatan
+// master seperti biasa. Backend (tambahJabatanPetaSekolahHandler, lihat
+// jabatanKepsekBolehDitambahkan di handlers/peta_jabatan.go) menegakkan
+// batasan yang SAMA secara independen -- filter di sini murni supaya Kepala
+// Sekolah tidak usah melihat/memilih opsi yang nanti ditolak backend.
+const JABATAN_KEPSEK_BOLEH_DITAMBAHKAN = new Set([
+  'guru ahli utama',
+  'guru ahli madya',
+  'guru ahli pertama',
+  'pengadministrasi perkantoran',
+  'operator layanan operasional',
+])
 const tambahJabatanDialog = ref(false)
 const tambahJabatanPilihan = ref(null)
 const tambahJabatanSubmitting = ref(false)
 const tambahJabatanOptions = computed(() => {
   const sudahAda = new Set((petaData.value?.rows || []).map((r) => r.id_jabatan))
-  return jabatanOptions.value.filter((j) => !sudahAda.has(j.value))
+  let opts = jabatanOptions.value.filter((j) => !sudahAda.has(j.value))
+  if (!auth.canManageMaster) {
+    opts = opts.filter((j) => JABATAN_KEPSEK_BOLEH_DITAMBAHKAN.has((j.label || '').trim().toLowerCase()))
+  }
+  return opts
 })
 function openTambahJabatan() {
   tambahJabatanPilihan.value = null
