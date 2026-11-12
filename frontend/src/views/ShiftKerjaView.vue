@@ -47,6 +47,7 @@ function hariKosong() {
 const shiftList = ref([])
 const loading = ref(true)
 const unitKerjaList = ref([])
+const jabatanList = ref([])
 
 async function loadShiftList() {
   loading.value = true
@@ -70,9 +71,23 @@ async function loadUnitKerja() {
   }
 }
 
+// loadJabatan: daftar Jabatan untuk dropdown "Jabatan" pada form (lihat
+// jabatanOptions di bawah) -- permintaan pengguna: shift kerja bisa diatur
+// langsung berdasarkan Jabatan (mis. "Penilik" yang hari kerjanya 6 hari),
+// bukan cuma lewat Unit Kerja seperti sebelumnya.
+async function loadJabatan() {
+  try {
+    const { data } = await http.get('/ref/jabatan')
+    jabatanList.value = data.data || []
+  } catch (e) {
+    // non-kritikal -- dropdown jabatan akan tampil kosong
+  }
+}
+
 onMounted(() => {
   loadShiftList()
   loadUnitKerja()
+  loadJabatan()
 })
 
 // unit kerja yang boleh dipilih di dropdown: yang belum dipasangi shift lain,
@@ -87,6 +102,17 @@ const unitKerjaOptions = computed(() => {
       .flatMap((s) => (s.unit_kerja_list || []).map((u) => u.id))
   )
   return unitKerjaList.value.filter((u) => !idTerpakai.has(u.id))
+})
+
+// jabatanOptions: padanan unitKerjaOptions di atas, tapi untuk Jabatan --
+// satu jabatan juga hanya boleh dipasangi satu shift.
+const jabatanOptions = computed(() => {
+  const idTerpakai = new Set(
+    shiftList.value
+      .filter((s) => s.id !== form.id)
+      .flatMap((s) => (s.jabatan_list || []).map((j) => j.id))
+  )
+  return jabatanList.value.filter((j) => !idTerpakai.has(j.id))
 })
 
 // Dipanggil saat toggle "aktif" suatu hari dimatikan (dijadikan libur) --
@@ -120,13 +146,14 @@ const form = reactive({
   nama_shift: '',
   kategori_shift: null,
   id_unit_kerja_list: [],
+  id_jabatan_list: [],
   hari_list: hariKosong(),
 })
 
 function bukaTambah() {
   dialogMode.value = 'tambah'
   formErrors.value = ''
-  Object.assign(form, { id: null, nama_shift: '', kategori_shift: null, id_unit_kerja_list: [], hari_list: hariKosong() })
+  Object.assign(form, { id: null, nama_shift: '', kategori_shift: null, id_unit_kerja_list: [], id_jabatan_list: [], hari_list: hariKosong() })
   dialogVisible.value = true
 }
 
@@ -140,6 +167,7 @@ function bukaUbah(item) {
     nama_shift: item.nama_shift,
     kategori_shift: item.kategori_shift,
     id_unit_kerja_list: (item.unit_kerja_list || []).map((u) => u.id),
+    id_jabatan_list: (item.jabatan_list || []).map((j) => j.id),
     hari_list: URUTAN_HARI_TAMPILAN.map((hari) => {
       const h = hariTersimpan[hari]
       return h
@@ -181,7 +209,7 @@ function jamValid(v) {
 function validasiForm() {
   if (!form.nama_shift?.trim()) return 'Nama shift wajib diisi'
   if (!form.kategori_shift) return 'Kategori shift wajib dipilih'
-  if (!form.id_unit_kerja_list?.length) return 'Minimal satu unit kerja wajib dipilih'
+  if (!form.id_unit_kerja_list?.length && !form.id_jabatan_list?.length) return 'Minimal satu unit kerja atau satu jabatan wajib dipilih'
   for (const h of form.hari_list) {
     if (!h.aktif) continue
     const label = NAMA_HARI[h.hari]
@@ -215,6 +243,7 @@ async function submitForm() {
     nama_shift: form.nama_shift.trim(),
     kategori_shift: form.kategori_shift,
     id_unit_kerja_list: form.id_unit_kerja_list,
+    id_jabatan_list: form.id_jabatan_list,
     hari_list: form.hari_list.map((h) => ({ ...h })),
   }
   try {
@@ -238,9 +267,22 @@ function namaUnitKerjaList(item) {
   return (item.unit_kerja_list || []).map((u) => u.unit).join(', ') || '-'
 }
 
+// namaJabatanList: padanan namaUnitKerjaList di atas, tapi untuk
+// JabatanList (lihat jabatanOptions).
+function namaJabatanList(item) {
+  return (item.jabatan_list || []).map((j) => j.jabatan).join(', ') || '-'
+}
+
+function berlakuUntukLabel(item) {
+  const bagian = []
+  if ((item.unit_kerja_list || []).length) bagian.push(`Unit Kerja: ${namaUnitKerjaList(item)}`)
+  if ((item.jabatan_list || []).length) bagian.push(`Jabatan: ${namaJabatanList(item)}`)
+  return bagian.join(' | ') || '-'
+}
+
 function konfirmasiHapus(item) {
   confirm.require({
-    message: `Hapus shift kerja "${item.nama_shift}"? Pegawai di unit kerja "${namaUnitKerjaList(item)}" akan otomatis kembali memakai jam kerja lama (jam unit kerja atau default sekolah/dinas).`,
+    message: `Hapus shift kerja "${item.nama_shift}"? Pegawai yang mengikuti shift ini (${berlakuUntukLabel(item)}) akan otomatis kembali memakai jam kerja lama (jam unit kerja atau default sekolah/dinas).`,
     header: 'Konfirmasi Hapus',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: 'Ya, Hapus',
@@ -273,11 +315,13 @@ function hapusTerpilih() {
       <div>
         <h2 style="margin: 0 0 0.35rem 0">Shift Kerja</h2>
         <p class="text-muted" style="max-width: 60rem">
-          Atur jam masuk, istirahat & pulang per hari untuk satu atau beberapa Unit Kerja sekaligus. Begitu shift
-          dipasang ke suatu unit kerja, SEMUA pegawai yang tempat kerjanya unit tersebut otomatis mengikuti jam &
-          jendela kamera absen shift ini -- tidak perlu diatur satu per satu per pegawai. Satu unit kerja tetap hanya
-          boleh dipasangi satu shift. Di luar jam yang ditetapkan (atau di hari yang ditandai libur untuk shift ini),
-          kamera absen otomatis tertutup.
+          Atur jam masuk, istirahat & pulang per hari untuk satu atau beberapa Unit Kerja dan/atau Jabatan sekaligus.
+          Begitu shift dipasang ke suatu unit kerja, SEMUA pegawai yang tempat kerjanya unit tersebut otomatis
+          mengikuti jam & jendela kamera absen shift ini -- tidak perlu diatur satu per satu per pegawai. Shift juga
+          bisa dipasang langsung ke suatu Jabatan (mis. "Penilik" yang hari kerjanya 6 hari) -- shift jabatan ini
+          mengalahkan shift unit kerja kalau pegawainya kebetulan berada di keduanya. Satu unit kerja atau satu
+          jabatan tetap hanya boleh dipasangi satu shift. Di luar jam yang ditetapkan (atau di hari yang ditandai
+          libur untuk shift ini), kamera absen otomatis tertutup.
         </p>
       </div>
       <div style="display: flex; gap: 0.6rem; flex-wrap: wrap">
@@ -301,6 +345,9 @@ function hapusTerpilih() {
       <Column field="kategori_shift" header="Kategori" />
       <Column header="Unit Kerja">
         <template #body="{ data }">{{ namaUnitKerjaList(data) }}</template>
+      </Column>
+      <Column header="Jabatan">
+        <template #body="{ data }">{{ namaJabatanList(data) }}</template>
       </Column>
       <Column header="Hari Kerja">
         <template #body="{ data }">
@@ -348,6 +395,25 @@ function hapusTerpilih() {
             style="width: 100%"
           />
           <small class="text-muted">Bisa pilih lebih dari satu unit kerja. Hanya unit kerja yang belum dipasangi shift lain yang muncul di sini.</small>
+        </div>
+        <div>
+          <div class="field-label">Jabatan</div>
+          <MultiSelect
+            v-model="form.id_jabatan_list"
+            :options="jabatanOptions"
+            optionLabel="jabatan"
+            optionValue="id"
+            filter
+            display="chip"
+            placeholder="Pilih jabatan (opsional, bisa lebih dari satu)"
+            style="width: 100%"
+          />
+          <small class="text-muted">
+            Opsional -- dipakai kalau jam kerja ditentukan oleh JABATAN pegawai, bukan unit kerja tempatnya ditugaskan
+            (mis. "Penilik" yang hari kerjanya 6 hari walau kantornya sendiri ikut jadwal 5 hari). Kalau pegawai punya
+            jabatan yang dipasangi shift DAN berada di unit kerja yang juga dipasangi shift lain, shift jabatan yang
+            dipakai. Hanya jabatan yang belum dipasangi shift lain yang muncul di sini.
+          </small>
         </div>
       </div>
 

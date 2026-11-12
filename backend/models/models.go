@@ -316,12 +316,21 @@ const (
 // perhitungan jam ataupun status hari kerja/libur apa pun; hari kerja/libur
 // ditentukan sepenuhnya lewat HariList[].Aktif per hari.
 type ShiftKerja struct {
-	ID            uint             `json:"id" gorm:"primaryKey"`
-	NamaShift     string           `json:"nama_shift" gorm:"column:nama_shift;size:100;not null"`
-	KategoriShift string           `json:"kategori_shift" gorm:"column:kategori_shift;size:30;not null"`
-	UnitKerjaList []UnitKerja      `json:"unit_kerja_list" gorm:"-"`
-	HariList      []ShiftKerjaHari `json:"hari_list,omitempty" gorm:"foreignKey:IDShift;references:ID"`
-	CreatedAt     time.Time        `json:"created_at" gorm:"autoCreateTime"`
+	ID            uint        `json:"id" gorm:"primaryKey"`
+	NamaShift     string      `json:"nama_shift" gorm:"column:nama_shift;size:100;not null"`
+	KategoriShift string      `json:"kategori_shift" gorm:"column:kategori_shift;size:30;not null"`
+	UnitKerjaList []UnitKerja `json:"unit_kerja_list" gorm:"-"`
+	// JabatanList: TAMBAHAN selain UnitKerjaList di atas -- shift ini juga
+	// bisa dipasang langsung ke SATU ATAU LEBIH Jabatan (mis. "Penilik" yang
+	// hari kerjanya 6 hari walau unit kerjanya sendiri ikut jadwal 5 hari)
+	// -- lihat komentar ShiftKerjaJabatan & jamAbsenUntukPegawai di
+	// handlers/absensi.go untuk urutan prioritasnya terhadap UnitKerjaList.
+	// Sama seperti UnitKerjaList, TIDAK dipetakan lewat many2many bawaan
+	// GORM (gorm:"-"), diisi manual oleh handler (lihat isiJabatanList di
+	// handlers/shift_kerja.go).
+	JabatanList []Jabatan        `json:"jabatan_list" gorm:"-"`
+	HariList    []ShiftKerjaHari `json:"hari_list,omitempty" gorm:"foreignKey:IDShift;references:ID"`
+	CreatedAt   time.Time        `json:"created_at" gorm:"autoCreateTime"`
 }
 
 func (ShiftKerja) TableName() string { return "shift_kerja" }
@@ -341,6 +350,24 @@ type ShiftKerjaUnitKerja struct {
 }
 
 func (ShiftKerjaUnitKerja) TableName() string { return "shift_kerja_unit_kerja" }
+
+// ShiftKerjaJabatan adalah tabel penghubung shift_kerja <-> jabatan, pola
+// PERSIS SAMA dengan ShiftKerjaUnitKerja di atas (SATU shift boleh mencakup
+// BANYAK jabatan, tapi SATU jabatan hanya boleh muncul di SATU baris
+// manapun -- uniqueIndex di IDJabatan) -- permintaan pengguna: "shift kerja
+// bisa diatur berdasarkan jabatan karena jabatan Penilik itu hari kerjanya
+// 6 hari kerja" (walau unit kerja/kantor tempatnya mungkin ikut jadwal 5
+// hari biasa). Dicek SEBAGAI PRIORITAS PALING UTAMA pada jamAbsenUntukPegawai
+// di handlers/absensi.go, mengalahkan ShiftKerjaUnitKerja -- jabatan
+// dianggap lebih spesifik ke pegawainya sendiri dibanding unit kerja
+// tempatnya ditugaskan.
+type ShiftKerjaJabatan struct {
+	ID        uint `json:"id" gorm:"primaryKey"`
+	IDShift   uint `json:"id_shift" gorm:"column:id_shift;not null;index"`
+	IDJabatan uint `json:"id_jabatan" gorm:"column:id_jabatan;not null;uniqueIndex"`
+}
+
+func (ShiftKerjaJabatan) TableName() string { return "shift_kerja_jabatan" }
 
 // ShiftKategoriPilihan adalah daftar TETAP pilihan kategori_shift yang boleh
 // disimpan (lihat validasi pada handlers/shift_kerja.go) -- dicocokkan persis

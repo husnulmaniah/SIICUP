@@ -91,6 +91,54 @@ func isiUnitKerjaList(db *gorm.DB, items []*models.ShiftKerja) error {
 	return nil
 }
 
+// isiJabatanList adalah padanan isiUnitKerjaList di atas, tapi untuk
+// JabatanList (lihat komentar models.ShiftKerjaJabatan) -- dipanggil
+// berpasangan dengan isiUnitKerjaList di setiap handler di bawah supaya
+// response selalu membawa KEDUA daftar (unit kerja & jabatan) sekaligus.
+func isiJabatanList(db *gorm.DB, items []*models.ShiftKerja) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]uint, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
+	var joins []models.ShiftKerjaJabatan
+	if err := db.Where("id_shift IN ?", ids).Find(&joins).Error; err != nil {
+		return err
+	}
+	if len(joins) == 0 {
+		return nil
+	}
+	jabatanIDs := make([]uint, 0, len(joins))
+	for _, j := range joins {
+		jabatanIDs = append(jabatanIDs, j.IDJabatan)
+	}
+	var daftar []models.Jabatan
+	if err := db.Where("id IN ?", jabatanIDs).Find(&daftar).Error; err != nil {
+		return err
+	}
+	jabatanByID := map[uint]models.Jabatan{}
+	for _, j := range daftar {
+		jabatanByID[j.ID] = j
+	}
+	jabatanIDsByShift := map[uint][]uint{}
+	for _, j := range joins {
+		jabatanIDsByShift[j.IDShift] = append(jabatanIDsByShift[j.IDShift], j.IDJabatan)
+	}
+	for _, it := range items {
+		list := make([]models.Jabatan, 0)
+		for _, jid := range jabatanIDsByShift[it.ID] {
+			if j, ok := jabatanByID[jid]; ok {
+				list = append(list, j)
+			}
+		}
+		sort.Slice(list, func(a, b int) bool { return list[a].Jabatan < list[b].Jabatan })
+		it.JabatanList = list
+	}
+	return nil
+}
+
 func listShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var items []models.ShiftKerja
 	if err := shiftKerjaPreload(db).Order("nama_shift asc").Find(&items).Error; err != nil {
@@ -105,6 +153,10 @@ func listShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data unit kerja shift")
 		return
 	}
+	if err := isiJabatanList(db, ptrs); err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data jabatan shift")
+		return
+	}
 	utils.Success(w, "ok", items)
 }
 
@@ -117,6 +169,10 @@ func getShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	if err := isiUnitKerjaList(db, []*models.ShiftKerja{&item}); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data unit kerja shift")
+		return
+	}
+	if err := isiJabatanList(db, []*models.ShiftKerja{&item}); err != nil {
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data jabatan shift")
 		return
 	}
 	utils.Success(w, "ok", item)
@@ -141,10 +197,15 @@ type shiftKerjaHariPayload struct {
 }
 
 type shiftKerjaPayload struct {
-	NamaShift       string                  `json:"nama_shift"`
-	KategoriShift   string                  `json:"kategori_shift"`
-	IDUnitKerjaList []uint                  `json:"id_unit_kerja_list"`
-	HariList        []shiftKerjaHariPayload `json:"hari_list"`
+	NamaShift       string `json:"nama_shift"`
+	KategoriShift   string `json:"kategori_shift"`
+	IDUnitKerjaList []uint `json:"id_unit_kerja_list"`
+	// IDJabatanList: TAMBAHAN selain IDUnitKerjaList di atas -- lihat
+	// komentar models.ShiftKerjaJabatan. Boleh kosong asal IDUnitKerjaList
+	// terisi, dan sebaliknya (lihat validasiShiftKerjaPayload: yang wajib
+	// adalah SALAH SATU dari keduanya terisi, bukan keduanya sekaligus).
+	IDJabatanList []uint                  `json:"id_jabatan_list"`
+	HariList      []shiftKerjaHariPayload `json:"hari_list"`
 }
 
 // validasiShiftKerjaPayload memvalidasi payload create/update: nama &
@@ -172,8 +233,8 @@ func validasiShiftKerjaPayload(db *gorm.DB, p shiftKerjaPayload, excludeID uint)
 	if !kategoriValid {
 		return fmt.Errorf("kategori shift tidak valid")
 	}
-	if len(p.IDUnitKerjaList) == 0 {
-		return fmt.Errorf("minimal satu unit kerja wajib dipilih")
+	if len(p.IDUnitKerjaList) == 0 && len(p.IDJabatanList) == 0 {
+		return fmt.Errorf("minimal satu unit kerja atau satu jabatan wajib dipilih")
 	}
 	idSeen := map[uint]bool{}
 	idUnik := make([]uint, 0, len(p.IDUnitKerjaList))
@@ -184,31 +245,73 @@ func validasiShiftKerjaPayload(db *gorm.DB, p shiftKerjaPayload, excludeID uint)
 		idSeen[id] = true
 		idUnik = append(idUnik, id)
 	}
-	var unitList []models.UnitKerja
-	if err := db.Where("id IN ?", idUnik).Find(&unitList).Error; err != nil {
-		return fmt.Errorf("gagal memeriksa unit kerja")
+	if len(idUnik) > 0 {
+		var unitList []models.UnitKerja
+		if err := db.Where("id IN ?", idUnik).Find(&unitList).Error; err != nil {
+			return fmt.Errorf("gagal memeriksa unit kerja")
+		}
+		if len(unitList) != len(idUnik) {
+			return fmt.Errorf("ada unit kerja yang tidak ditemukan")
+		}
+		unitByID := map[uint]models.UnitKerja{}
+		for _, u := range unitList {
+			unitByID[u.ID] = u
+		}
+		var dupeJoins []models.ShiftKerjaUnitKerja
+		dupeQuery := db.Where("id_unit_kerja IN ?", idUnik)
+		if excludeID > 0 {
+			dupeQuery = dupeQuery.Where("id_shift <> ?", excludeID)
+		}
+		if err := dupeQuery.Find(&dupeJoins).Error; err != nil {
+			return fmt.Errorf("gagal memeriksa unit kerja")
+		}
+		if len(dupeJoins) > 0 {
+			bentrok := dupeJoins[0]
+			var shiftLain models.ShiftKerja
+			db.First(&shiftLain, bentrok.IDShift)
+			namaUnit := unitByID[bentrok.IDUnitKerja].Unit
+			return fmt.Errorf("unit kerja '%s' sudah dipasangi shift lain ('%s') -- satu unit kerja hanya boleh punya satu shift, ubah/hapus shift yang lama dulu", namaUnit, shiftLain.NamaShift)
+		}
 	}
-	if len(unitList) != len(idUnik) {
-		return fmt.Errorf("ada unit kerja yang tidak ditemukan")
+	// Validasi IDJabatanList: pola PERSIS SAMA seperti IDUnitKerjaList di
+	// atas (cek ada/tidaknya di DB, lalu cek bentrok dengan shift lain lewat
+	// uniqueIndex IDJabatan pada ShiftKerjaJabatan).
+	jabatanSeen := map[uint]bool{}
+	jabatanUnik := make([]uint, 0, len(p.IDJabatanList))
+	for _, id := range p.IDJabatanList {
+		if id == 0 || jabatanSeen[id] {
+			continue
+		}
+		jabatanSeen[id] = true
+		jabatanUnik = append(jabatanUnik, id)
 	}
-	unitByID := map[uint]models.UnitKerja{}
-	for _, u := range unitList {
-		unitByID[u.ID] = u
-	}
-	var dupeJoins []models.ShiftKerjaUnitKerja
-	dupeQuery := db.Where("id_unit_kerja IN ?", idUnik)
-	if excludeID > 0 {
-		dupeQuery = dupeQuery.Where("id_shift <> ?", excludeID)
-	}
-	if err := dupeQuery.Find(&dupeJoins).Error; err != nil {
-		return fmt.Errorf("gagal memeriksa unit kerja")
-	}
-	if len(dupeJoins) > 0 {
-		bentrok := dupeJoins[0]
-		var shiftLain models.ShiftKerja
-		db.First(&shiftLain, bentrok.IDShift)
-		namaUnit := unitByID[bentrok.IDUnitKerja].Unit
-		return fmt.Errorf("unit kerja '%s' sudah dipasangi shift lain ('%s') -- satu unit kerja hanya boleh punya satu shift, ubah/hapus shift yang lama dulu", namaUnit, shiftLain.NamaShift)
+	if len(jabatanUnik) > 0 {
+		var jabatanList []models.Jabatan
+		if err := db.Where("id IN ?", jabatanUnik).Find(&jabatanList).Error; err != nil {
+			return fmt.Errorf("gagal memeriksa jabatan")
+		}
+		if len(jabatanList) != len(jabatanUnik) {
+			return fmt.Errorf("ada jabatan yang tidak ditemukan")
+		}
+		jabatanByID := map[uint]models.Jabatan{}
+		for _, j := range jabatanList {
+			jabatanByID[j.ID] = j
+		}
+		var dupeJoins []models.ShiftKerjaJabatan
+		dupeQuery := db.Where("id_jabatan IN ?", jabatanUnik)
+		if excludeID > 0 {
+			dupeQuery = dupeQuery.Where("id_shift <> ?", excludeID)
+		}
+		if err := dupeQuery.Find(&dupeJoins).Error; err != nil {
+			return fmt.Errorf("gagal memeriksa jabatan")
+		}
+		if len(dupeJoins) > 0 {
+			bentrok := dupeJoins[0]
+			var shiftLain models.ShiftKerja
+			db.First(&shiftLain, bentrok.IDShift)
+			namaJabatan := jabatanByID[bentrok.IDJabatan].Jabatan
+			return fmt.Errorf("jabatan '%s' sudah dipasangi shift lain ('%s') -- satu jabatan hanya boleh punya satu shift, ubah/hapus shift yang lama dulu", namaJabatan, shiftLain.NamaShift)
+		}
 	}
 	if len(p.HariList) != 7 {
 		return fmt.Errorf("ketentuan jam kerja wajib diisi untuk ketujuh hari (Minggu s.d Sabtu)")
@@ -308,6 +411,21 @@ func unitKerjaJoinDariPayload(idShift uint, idList []uint) []models.ShiftKerjaUn
 	return out
 }
 
+// jabatanJoinDariPayload adalah padanan unitKerjaJoinDariPayload di atas,
+// untuk IDJabatanList.
+func jabatanJoinDariPayload(idShift uint, idList []uint) []models.ShiftKerjaJabatan {
+	seen := map[uint]bool{}
+	out := make([]models.ShiftKerjaJabatan, 0, len(idList))
+	for _, id := range idList {
+		if id == 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, models.ShiftKerjaJabatan{IDShift: idShift, IDJabatan: id})
+	}
+	return out
+}
+
 func createShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	var p shiftKerjaPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -327,8 +445,16 @@ func createShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			return err
 		}
 		joinList := unitKerjaJoinDariPayload(item.ID, p.IDUnitKerjaList)
-		if err := tx.Create(&joinList).Error; err != nil {
-			return err
+		if len(joinList) > 0 {
+			if err := tx.Create(&joinList).Error; err != nil {
+				return err
+			}
+		}
+		jabatanList := jabatanJoinDariPayload(item.ID, p.IDJabatanList)
+		if len(jabatanList) > 0 {
+			if err := tx.Create(&jabatanList).Error; err != nil {
+				return err
+			}
 		}
 		hariList := hariListDariPayload(item.ID, p.HariList)
 		return tx.Create(&hariList).Error
@@ -339,6 +465,7 @@ func createShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	shiftKerjaPreload(db).First(&item, item.ID)
 	isiUnitKerjaList(db, []*models.ShiftKerja{&item})
+	isiJabatanList(db, []*models.ShiftKerja{&item})
 	utils.Created(w, "shift kerja berhasil ditambahkan", item)
 }
 
@@ -365,18 +492,29 @@ func updateShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		}).Error; err != nil {
 			return err
 		}
-		// ganti seluruh baris hari & pasangan unit kerja lama dengan yang
-		// baru -- lebih sederhana & aman dibanding mencocokkan baris mana
-		// yang berubah satu per satu, dan jumlahnya selalu kecil.
+		// ganti seluruh baris hari & pasangan unit kerja/jabatan lama dengan
+		// yang baru -- lebih sederhana & aman dibanding mencocokkan baris
+		// mana yang berubah satu per satu, dan jumlahnya selalu kecil.
 		if err := tx.Where("id_shift = ?", item.ID).Delete(&models.ShiftKerjaHari{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("id_shift = ?", item.ID).Delete(&models.ShiftKerjaUnitKerja{}).Error; err != nil {
 			return err
 		}
-		joinList := unitKerjaJoinDariPayload(item.ID, p.IDUnitKerjaList)
-		if err := tx.Create(&joinList).Error; err != nil {
+		if err := tx.Where("id_shift = ?", item.ID).Delete(&models.ShiftKerjaJabatan{}).Error; err != nil {
 			return err
+		}
+		joinList := unitKerjaJoinDariPayload(item.ID, p.IDUnitKerjaList)
+		if len(joinList) > 0 {
+			if err := tx.Create(&joinList).Error; err != nil {
+				return err
+			}
+		}
+		jabatanList := jabatanJoinDariPayload(item.ID, p.IDJabatanList)
+		if len(jabatanList) > 0 {
+			if err := tx.Create(&jabatanList).Error; err != nil {
+				return err
+			}
 		}
 		hariList := hariListDariPayload(item.ID, p.HariList)
 		return tx.Create(&hariList).Error
@@ -387,6 +525,7 @@ func updateShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	}
 	shiftKerjaPreload(db).First(&item, "id = ?", id)
 	isiUnitKerjaList(db, []*models.ShiftKerja{&item})
+	isiJabatanList(db, []*models.ShiftKerja{&item})
 	utils.Success(w, "shift kerja berhasil diperbarui", item)
 }
 
@@ -404,11 +543,14 @@ func deleteShiftKerja(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		if err := tx.Where("id_shift = ?", item.ID).Delete(&models.ShiftKerjaUnitKerja{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("id_shift = ?", item.ID).Delete(&models.ShiftKerjaJabatan{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&item).Error
 	})
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal menghapus shift kerja: "+err.Error())
 		return
 	}
-	utils.Success(w, "shift kerja berhasil dihapus -- pegawai di unit kerja terkait otomatis kembali memakai jam kerja lama (jam unit kerja atau default sekolah/dinas)", nil)
+	utils.Success(w, "shift kerja berhasil dihapus -- pegawai di unit kerja/jabatan terkait otomatis kembali memakai jam kerja lama (jam unit kerja atau default sekolah/dinas)", nil)
 }

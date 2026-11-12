@@ -19,6 +19,7 @@ func Migrate(db *gorm.DB) {
 		&models.ShiftKerja{},
 		&models.ShiftKerjaHari{},
 		&models.ShiftKerjaUnitKerja{},
+		&models.ShiftKerjaJabatan{},
 		&models.Status{},
 		&models.Pangkat{},
 		&models.Golongan{},

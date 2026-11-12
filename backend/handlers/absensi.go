@@ -179,13 +179,67 @@ func shiftKerjaUntukUnitKerja(db *gorm.DB, idUnitKerja uint) *models.ShiftKerja 
 	return &shift
 }
 
+// shiftKerjaUntukJabatan adalah padanan shiftKerjaUntukUnitKerja di atas,
+// tapi mencari lewat tabel penghubung shift_kerja_jabatan (lihat komentar
+// models.ShiftKerjaJabatan) -- dicek LEBIH DULU daripada
+// shiftKerjaUntukUnitKerja pada jamAbsenUntukPegawai di bawah, supaya shift
+// yang dipasang langsung ke Jabatan pegawai (mis. "Penilik" yang hari
+// kerjanya 6 hari) mengalahkan shift yang dipasang ke Unit Kerja tempatnya
+// ditugaskan (permintaan pengguna: "pengaturan shift kerja bisa di atur
+// berdasarkan jabatan krn jabatan penilik itu hari kerjanya 6 hari kerja").
+func shiftKerjaUntukJabatan(db *gorm.DB, idJabatan uint) *models.ShiftKerja {
+	if idJabatan == 0 {
+		return nil
+	}
+	var join models.ShiftKerjaJabatan
+	if err := db.Where("id_jabatan = ?", idJabatan).First(&join).Error; err != nil {
+		return nil
+	}
+	var shift models.ShiftKerja
+	if err := db.Preload("HariList").First(&shift, join.IDShift).Error; err != nil {
+		return nil
+	}
+	return &shift
+}
+
+// jamAbsenDariShift mengubah satu models.ShiftKerja (lengkap dengan
+// HariList) jadi jamAbsenSet untuk HARI INI, dipakai bersama oleh
+// pengecekan shift-per-jabatan maupun shift-per-unit-kerja di
+// jamAbsenUntukPegawai supaya logikanya tidak dobel ditulis.
+func jamAbsenDariShift(setting models.PengaturanAbsensi, pegawai models.Pegawai, shift *models.ShiftKerja) jamAbsenSet {
+	today := int(absensiNow().Weekday())
+	for _, h := range shift.HariList {
+		if h.Hari != today {
+			continue
+		}
+		if !h.Aktif {
+			return jamAbsenSet{Libur: true}
+		}
+		return jamPulangOverride(setting, pegawai, jamAbsenSet{
+			MulaiPagi:   h.JamMulaiPagi,
+			BatasPagi:   h.JamBatasPagi,
+			TutupPagi:   h.JamTutupPagi,
+			MulaiPulang: h.JamMulaiPulang,
+			TutupPulang: h.JamTutupPulang,
+		})
+	}
+	// Shift terpasang tapi entah kenapa baris hari ini tidak ditemukan
+	// (seharusnya tidak terjadi -- validasi create/update mewajibkan
+	// ketujuh hari terisi). Anggap libur (fail CLOSED, bukan fail open)
+	// supaya tidak diam-diam membuka absen tanpa batasan jam sama sekali.
+	return jamAbsenSet{Libur: true}
+}
+
 // jamAbsenUntukPegawai memilih set jendela waktu absen yang berlaku untuk
-// seorang pegawai, dengan urutan prioritas: (1) Shift Kerja yang terpasang
-// pada unit kerja pegawai (menu Master Data -> Shift Kerja, jam per hari
-// bisa berbeda-beda -- lihat models.ShiftKerja/ShiftKerjaHari), lalu kalau
-// unit kerjanya belum dipasangi Shift Kerja sama sekali, (2) jam kerja
-// KHUSUS unit kerja/sekolah pegawai (UnitKerja.JamMulaiPagi dkk, cara lama,
-// hanya dipakai kalau KELIMA field itu diisi lengkap -- lihat komentar pada
+// seorang pegawai, dengan urutan prioritas: (0) Shift Kerja yang terpasang
+// LANGSUNG pada Jabatan pegawai (lihat shiftKerjaUntukJabatan di atas --
+// paling spesifik, mengalahkan segalanya di bawah termasuk shift unit
+// kerja), lalu (1) Shift Kerja yang terpasang pada unit kerja pegawai (menu
+// Master Data -> Shift Kerja, jam per hari bisa berbeda-beda -- lihat
+// models.ShiftKerja/ShiftKerjaHari), lalu kalau unit kerjanya belum
+// dipasangi Shift Kerja sama sekali, (2) jam kerja KHUSUS unit kerja/sekolah
+// pegawai (UnitKerja.JamMulaiPagi dkk, cara lama, hanya dipakai kalau KELIMA
+// field itu diisi lengkap -- lihat komentar pada
 // models.UnitKerja), lalu (3) fallback ke set Sekolah "global" di
 // PengaturanAbsensi kalau pegawai ini berstatus sekolah (lihat
 // isSekolahPegawai di handlers/pengajuan_cuti.go -- PRIORITAS UTAMA-nya
@@ -199,30 +253,14 @@ func shiftKerjaUntukUnitKerja(db *gorm.DB, idUnitKerja uint) *models.ShiftKerja 
 // getPengaturanAbsensiHandler (untuk ditampilkan ke pegawai yang
 // bersangkutan lewat AbsensiView.vue).
 func jamAbsenUntukPegawai(db *gorm.DB, setting models.PengaturanAbsensi, pegawai models.Pegawai) jamAbsenSet {
+	if pegawai.IDJabatan != nil {
+		if shift := shiftKerjaUntukJabatan(db, *pegawai.IDJabatan); shift != nil {
+			return jamAbsenDariShift(setting, pegawai, shift)
+		}
+	}
 	if pegawai.IDUnitKerja != nil {
 		if shift := shiftKerjaUntukUnitKerja(db, *pegawai.IDUnitKerja); shift != nil {
-			today := int(absensiNow().Weekday())
-			for _, h := range shift.HariList {
-				if h.Hari != today {
-					continue
-				}
-				if !h.Aktif {
-					return jamAbsenSet{Libur: true}
-				}
-				return jamPulangOverride(setting, pegawai, jamAbsenSet{
-					MulaiPagi:   h.JamMulaiPagi,
-					BatasPagi:   h.JamBatasPagi,
-					TutupPagi:   h.JamTutupPagi,
-					MulaiPulang: h.JamMulaiPulang,
-					TutupPulang: h.JamTutupPulang,
-				})
-			}
-			// Shift terpasang tapi entah kenapa baris hari ini tidak
-			// ditemukan (seharusnya tidak terjadi -- validasi create/update
-			// mewajibkan ketujuh hari terisi). Anggap libur (fail CLOSED,
-			// bukan fail open) supaya tidak diam-diam membuka absen tanpa
-			// batasan jam sama sekali.
-			return jamAbsenSet{Libur: true}
+			return jamAbsenDariShift(setting, pegawai, shift)
 		}
 	}
 	if uk := pegawai.UnitKerja; uk != nil &&
