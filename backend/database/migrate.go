@@ -2,6 +2,7 @@ package database
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"cuti-app/models"
@@ -156,6 +157,29 @@ func Migrate(db *gorm.DB) {
 		}
 	}
 
+	// Jabatan yang kadung duplikat (hanya beda besar/kecil huruf, mis.
+	// "Penelaah Teknis Kebijakan" vs "PENELAAH TEKNIS KEBIJAKAN") digabung
+	// & diseragamkan jadi huruf kapital di sini -- lihat mergeJabatanDuplikat
+	// di bawah. Dijalankan SETELAH blok di atas (uniqueIndex lama
+	// shift_kerja_jabatan.id_jabatan sudah dilonggarkan) supaya baris yang
+	// dialihkan ke jabatan yang dipertahankan tidak mentok constraint lama.
+	// Pencegahan duplikat BARU ke depannya ditangani models.Jabatan.
+	// BeforeSave (models/models.go), bukan di sini -- blok ini HANYA
+	// membereskan data lama yang sudah kadung ada sebelum hook itu dipasang.
+	mergeJabatanDuplikat(db)
+
+	// uniqueIndex case-insensitive pada nama jabatan -- jaminan TERAKHIR di
+	// level database supaya tidak ada duplikat baru lolos lewat jalur
+	// manapun (termasuk jalur UPDATE/map yang tidak tersentuh hook model
+	// models.Jabatan.BeforeSave, lihat komentar CrudConfig.BeforeUpdatePayload
+	// di handlers/crud_generic.go), bukan cuma mengandalkan validasi di kode
+	// Go. HARUS dibuat SETELAH mergeJabatanDuplikat di atas selesai
+	// membereskan duplikat lama -- index ini gagal dibuat kalau masih ada
+	// duplikat tersisa di tabel. IF NOT EXISTS -- aman dijalankan berkali-kali.
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_jabatan_upper_unik ON jabatan (UPPER(jabatan))`).Error; err != nil {
+		log.Printf("peringatan: gagal membuat uniqueIndex case-insensitive idx_jabatan_upper_unik (kemungkinan masih ada duplikat tersisa): %v", err)
+	}
+
 	// Fitur "Jam Kerja Khusus" per Unit Kerja/Sekolah sudah dihapus dari UI
 	// (menu Master Data -> Unit Kerja) atas permintaan pengguna, karena
 	// jam kerja sekarang cukup diatur lewat 2 jendela waktu global di menu
@@ -288,4 +312,117 @@ func Migrate(db *gorm.DB) {
 	SeedPetaJabatanDinas(db)
 
 	log.Println("migrasi database berhasil")
+}
+
+// mergeJabatanDuplikat menggabungkan baris models.Jabatan yang "kembar" --
+// namanya SAMA PERSIS kalau besar/kecil hurufnya diabaikan (mis. "Penelaah
+// Teknis Kebijakan" vs "PENELAAH TEKNIS KEBIJAKAN") -- jadi SATU baris saja,
+// lalu menyeragamkan SEMUA nama jabatan (termasuk yang tidak duplikat) ke
+// HURUF KAPITAL. Permintaan pengguna: "pada kolom jabatan mengapa bisa ada
+// inputan yang sama... tolong diperbaiki agar jabatan tdk duplikat pakai yg
+// menggunakan huruf kapital". Baris dengan ID PALING KECIL pada tiap grup
+// duplikat yang dipertahankan (anggapannya: baris paling lama/pertama kali
+// dibuat); baris lain di grup yang sama digabungkan ke situ.
+//
+// SEMUA tabel yang mengacu ke Jabatan.ID dialihkan dulu ke ID yang
+// dipertahankan SEBELUM baris duplikatnya dihapus, supaya tidak ada acuan
+// yatim piatu: pegawai.id_jabatan, shift_kerja_jabatan.id_jabatan,
+// sub_jabatan.id_jabatan, formasi_jabatan.id_jabatan. Tabel sub_jabatan &
+// formasi_jabatan punya uniqueIndex gabungan (unit kerja + jabatan [+
+// nama/sub_jabatan]) -- kalau baris duplikat yang dialihkan ternyata
+// SUDAH ADA kembarannya persis di ID yang dipertahankan (unit kerja &
+// kolom pembeda lainnya sama), UPDATE-nya SENGAJA dilewati (guard NOT
+// EXISTS) supaya tidak mentok constraint itu, lalu baris yang gagal
+// dialihkan itu dihapus saja (bukan acuan yatim piatu -- kembarannya pada
+// ID yang dipertahankan sudah mewakili kombinasi yang sama).
+//
+// Aman dijalankan berkali-kali -- begitu semua grup sudah digabung &
+// semua nama sudah huruf kapital, fungsi ini tidak menemukan apa-apa lagi
+// untuk dikerjakan. Dipanggil SETELAH uniqueIndex lama
+// shift_kerja_jabatan.id_jabatan dilonggarkan (lihat pemanggil di atas).
+func mergeJabatanDuplikat(db *gorm.DB) {
+	var rows []models.Jabatan
+	if err := db.Order("id asc").Find(&rows).Error; err != nil {
+		log.Printf("peringatan: gagal membaca data jabatan untuk migrasi duplikat: %v", err)
+		return
+	}
+
+	groups := map[string][]models.Jabatan{}
+	var order []string
+	for _, j := range rows {
+		key := strings.ToUpper(strings.TrimSpace(j.Jabatan))
+		if key == "" {
+			continue
+		}
+		if _, ada := groups[key]; !ada {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], j)
+	}
+
+	digabung := 0
+	for _, upper := range order {
+		group := groups[upper]
+		keep := group[0] // ID paling kecil (rows sudah "id asc")
+
+		if keep.Jabatan != upper {
+			// db.Exec (SQL mentah) SENGAJA dipakai di sini, BUKAN
+			// db.Model(&models.Jabatan{}).Update(...) -- yang terakhir itu
+			// akan memicu hook models.Jabatan.BeforeSave di atas lewat
+			// struct Dest yang KOSONG (ID=0, Jabatan=""), yang salah
+			// mengira baris ini baru/belum ada ID-nya (cek pengecualian diri
+			// sendiri ikut terlewat) DAN masih bisa menabrak baris
+			// duplikatnya sendiri yang BELUM SEMPAT dihapus (urutan
+			// penggabungan ada di bawah) -- db.Exec melewati seluruh
+			// callback/hook GORM sama sekali, aman dipakai di migrasi massal
+			// seperti ini.
+			if err := db.Exec(`UPDATE jabatan SET jabatan = ? WHERE id = ?`, upper, keep.ID).Error; err != nil {
+				log.Printf("peringatan: gagal menyeragamkan huruf kapital jabatan id=%d: %v", keep.ID, err)
+			}
+		}
+
+		for _, dupe := range group[1:] {
+			db.Exec(`UPDATE pegawai SET id_jabatan = ? WHERE id_jabatan = ?`, keep.ID, dupe.ID)
+
+			db.Exec(`
+				UPDATE shift_kerja_jabatan SET id_jabatan = ? WHERE id_jabatan = ?
+				AND NOT EXISTS (
+					SELECT 1 FROM shift_kerja_jabatan s2
+					WHERE s2.id_shift = shift_kerja_jabatan.id_shift AND s2.id_jabatan = ?
+				)
+			`, keep.ID, dupe.ID, keep.ID)
+			db.Exec(`DELETE FROM shift_kerja_jabatan WHERE id_jabatan = ?`, dupe.ID)
+
+			db.Exec(`
+				UPDATE sub_jabatan SET id_jabatan = ? WHERE id_jabatan = ?
+				AND NOT EXISTS (
+					SELECT 1 FROM sub_jabatan s2
+					WHERE s2.id_unit_kerja = sub_jabatan.id_unit_kerja
+					  AND s2.id_jabatan = ? AND s2.nama = sub_jabatan.nama
+				)
+			`, keep.ID, dupe.ID, keep.ID)
+			db.Exec(`DELETE FROM sub_jabatan WHERE id_jabatan = ?`, dupe.ID)
+
+			db.Exec(`
+				UPDATE formasi_jabatan SET id_jabatan = ? WHERE id_jabatan = ?
+				AND NOT EXISTS (
+					SELECT 1 FROM formasi_jabatan f2
+					WHERE f2.id_unit_kerja = formasi_jabatan.id_unit_kerja
+					  AND f2.id_jabatan = ?
+					  AND f2.id_sub_jabatan IS NOT DISTINCT FROM formasi_jabatan.id_sub_jabatan
+				)
+			`, keep.ID, dupe.ID, keep.ID)
+			db.Exec(`DELETE FROM formasi_jabatan WHERE id_jabatan = ?`, dupe.ID)
+
+			if err := db.Exec(`DELETE FROM jabatan WHERE id = ?`, dupe.ID).Error; err != nil {
+				log.Printf("peringatan: gagal menghapus jabatan duplikat id=%d ('%s') setelah digabung ke id=%d: %v", dupe.ID, dupe.Jabatan, keep.ID, err)
+				continue
+			}
+			digabung++
+			log.Printf("migrasi: jabatan duplikat id=%d ('%s') digabung ke id=%d ('%s')", dupe.ID, dupe.Jabatan, keep.ID, upper)
+		}
+	}
+	if digabung > 0 {
+		log.Printf("migrasi: %d baris jabatan duplikat berhasil digabung & nama jabatan diseragamkan ke huruf kapital", digabung)
+	}
 }

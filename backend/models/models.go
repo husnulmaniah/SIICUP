@@ -2,7 +2,11 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ============================================================
@@ -52,6 +56,46 @@ type Jabatan struct {
 }
 
 func (Jabatan) TableName() string { return "jabatan" }
+
+// BeforeSave menyeragamkan nama Jabatan jadi HURUF KAPITAL & menolak
+// duplikat yang HANYA beda besar/kecil huruf (mis. "Penelaah Teknis
+// Kebijakan" vs "PENELAAH TEKNIS KEBIJAKAN" dianggap SAMA) -- permintaan
+// pengguna: "pada kolom jabatan mengapa bisa ada inputan yang sama...
+// tolong diperbaiki agar jabatan tdk duplikat pakai yg menggunakan huruf
+// kapital". GORM memanggil hook ini otomatis untuk Create MAUPUN Update
+// (termasuk Update lewat map seperti updateCrud di
+// handlers/crud_generic.go -- GORM menyinkronkan field yang diisi lewat map
+// ke struct model ini SEBELUM memanggil hook, jadi j.Jabatan di sini sudah
+// mencerminkan nilai BARU yang sedang disimpan), jadi berlaku di SEMUA
+// jalur simpan: form tambah/ubah di menu Jabatan, maupun import Excel.
+// tx.Statement.SetColumn dipakai (bukan cuma mengubah field j.Jabatan
+// langsung) supaya nilai yang BENAR-BENAR tertulis ke database tetap ikut
+// ternormalisasi walau sumber datanya map (bukan struct) seperti pada
+// Update di atas. Data LAMA yang sudah kadung duplikat/belum huruf kapital
+// digabungkan & diseragamkan sekali lewat migrasi mergeJabatanDuplikat di
+// database/migrate.go -- hook ini hanya mencegah duplikat BARU ke depannya.
+func (j *Jabatan) BeforeSave(tx *gorm.DB) error {
+	normalized := strings.ToUpper(strings.TrimSpace(j.Jabatan))
+	if normalized == "" {
+		return fmt.Errorf("nama jabatan wajib diisi")
+	}
+	j.Jabatan = normalized
+	tx.Statement.SetColumn("Jabatan", normalized)
+
+	query := tx.Session(&gorm.Session{NewDB: true}).Model(&Jabatan{}).
+		Where("UPPER(jabatan) = ?", normalized)
+	if j.ID != 0 {
+		query = query.Where("id <> ?", j.ID)
+	}
+	var dupeID uint
+	if err := query.Select("id").Limit(1).Scan(&dupeID).Error; err != nil {
+		return fmt.Errorf("gagal memeriksa duplikat jabatan: %w", err)
+	}
+	if dupeID != 0 {
+		return fmt.Errorf("jabatan '%s' sudah ada -- tidak boleh duplikat (beda besar/kecil huruf tetap dianggap sama)", normalized)
+	}
+	return nil
+}
 
 // Kecamatan: daftar kecamatan tempat unit kerja/sekolah berada -- dipakai
 // mengelompokkan UnitKerja (lihat di bawah) supaya administrator bisa

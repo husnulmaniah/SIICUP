@@ -23,7 +23,27 @@ type CrudConfig[T any] struct {
 	Preloads     []string            // GORM relations to preload
 	OrderBy      string              // default: "id asc"
 	FileBaseName string              // e.g. "jabatan" -> template_jabatan.xlsx / data_jabatan.xlsx
-	BeforeSave   func(item *T) error // optional hook run before create/update save
+	// BeforeSave: optional hook run before CREATE (createCrud) and CREATE-via-
+	// import (importCrud's non-UpsertMatch branch) only -- NOT called by
+	// updateCrud (see BeforeUpdatePayload below for the update equivalent).
+	BeforeSave func(item *T) error
+	// BeforeUpdatePayload: opsional -- kalau diisi, dipanggil di updateCrud
+	// SEBELUM payload (map mentah hasil decode body request) diterapkan lewat
+	// db.Model(&existing).Updates(payload). BEDA dengan BeforeSave di atas
+	// (yang TIDAK PERNAH dipanggil updateCrud) -- field ini ada KHUSUS karena
+	// hook model GORM semacam BeforeSave/BeforeUpdate pada struct model T itu
+	// sendiri (lihat models.Jabatan.BeforeSave) TIDAK bisa diandalkan untuk
+	// memvalidasi/menormalkan nilai BARU pada alur Updates(map) seperti ini:
+	// GORM baru menyalin nilai dari payload map ke struct Dest SETELAH hook
+	// model dipanggil (lihat urutan callback ConvertToAssignments vs
+	// BeforeUpdate pada vendor/gorm.io/gorm/callbacks/update.go), jadi hook
+	// model hanya akan melihat nilai LAMA, bukan nilai baru yang sedang
+	// disimpan -- bisa-bisa malah menimpa balik nilai baru yang diketik
+	// pengguna dengan nilai lama lewat tx.Statement.SetColumn. Hook di sini
+	// memotong SEBELUM itu semua terjadi -- langsung memvalidasi/menormalkan
+	// payload map mentahnya sendiri (mis. menyeragamkan payload["jabatan"] ke
+	// huruf kapital kalau key itu ADA di payload -- lihat master_routes.go).
+	BeforeUpdatePayload func(payload map[string]interface{}) error
 	// AfterChange runs right after a create, update, delete, or import (once,
 	// after the whole batch) successfully commits. It doesn't need to know
 	// which row changed -- it's for side effects that depend on "this table's
@@ -289,6 +309,12 @@ func updateCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 		return
 	}
 	delete(payload, "id")
+	if cfg.BeforeUpdatePayload != nil {
+		if err := cfg.BeforeUpdatePayload(payload); err != nil {
+			utils.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	// old: salinan nilai SEBELUM Updates, dipakai cfg.AfterSave di bawah
 	// membandingkan lama vs baru -- SENGAJA diambil lewat query baru
 	// (bukan sekadar "old := existing") karena field pointer (*uint, dst)

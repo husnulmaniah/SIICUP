@@ -144,6 +144,30 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 	handlers.RegisterCrud(mux, db, "/api/jabatan", handlers.CrudConfig[models.Jabatan]{
 		FileBaseName: "jabatan",
 		SearchFields: []string{"jabatan"},
+		// BeforeUpdatePayload: menyeragamkan nama jabatan ke HURUF KAPITAL
+		// saat diedit lewat form "Ubah" -- permintaan pengguna: "...tolong
+		// diperbaiki agar jabatan tdk duplikat pakai yg menggunakan huruf
+		// kapital". Jalur CREATE (tambah baru & import Excel) sudah
+		// ditangani otomatis oleh hook models.Jabatan.BeforeSave (dipanggil
+		// GORM sendiri, tidak perlu diulang di sini) -- field ini KHUSUS
+		// untuk jalur UPDATE yang tidak tersentuh hook model itu (lihat
+		// komentar lengkap CrudConfig.BeforeUpdatePayload di
+		// handlers/crud_generic.go). Penolakan DUPLIKAT pada edit tetap
+		// dijamin di level database lewat uniqueIndex case-insensitive
+		// idx_jabatan_upper_unik (lihat database/migrate.go).
+		BeforeUpdatePayload: func(payload map[string]interface{}) error {
+			raw, ada := payload["jabatan"]
+			if !ada {
+				return nil
+			}
+			s, _ := raw.(string)
+			normalized := strings.ToUpper(strings.TrimSpace(s))
+			if normalized == "" {
+				return fmt.Errorf("nama jabatan wajib diisi")
+			}
+			payload["jabatan"] = normalized
+			return nil
+		},
 		Columns: []utils.ExcelColumn{
 			{Header: "Nama Jabatan", Required: true, Example: "Kepala Bidang",
 				Get: func(i interface{}) string { return i.(models.Jabatan).Jabatan },
