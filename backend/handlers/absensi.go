@@ -1022,6 +1022,73 @@ func workingDaysInRange(db *gorm.DB, start, end time.Time, sixDayWeek bool) []ti
 	return workingDaysWithHolidaySet(start, end, sixDayWeek, holidaySetInRange(db, start, end))
 }
 
+// hariKerjaMingguanUntukPegawai mengembalikan pola hari kerja MINGGUAN
+// (map[int]bool, key = time.Weekday int: 0=Minggu...6=Sabtu, value = hari
+// itu hari kerja atau tidak) untuk SATU pegawai, dengan urutan prioritas:
+// (1) Shift Kerja yang terpasang pada Jabatan pegawai, (2) Shift Kerja yang
+// terpasang pada Unit Kerja pegawai -- pola hari kerjanya diambil langsung
+// diambil dari HariList shift itu sendiri (Aktif per hari), BUKAN sekadar
+// tebakan 5/6 hari, supaya jumlah hari kerja yang dipakai utk menghitung
+// jatah cuti (pengajuan_cuti.go), rentang Surat Kolektif
+// (pengajuan_surat_kolektif.go), rekap & PDF absen (absensi_admin.go,
+// absensi_pdf.go) SELALU konsisten dengan jam & jendela kamera absen yang
+// sebenarnya berlaku bagi pegawai itu (permintaan pengguna: shift kerja
+// berdasarkan jabatan, mis. "Penilik" 6 hari kerja, harus ikut dihitung di
+// sini juga -- sebelumnya rekap/cuti/surat kolektif cuma mengenal status
+// sekolah/dinas, tidak tahu-menahu soal Shift Kerja sama sekali). (3)
+// Fallback ke pola lama 5/6 hari berdasar sixDayWeekForPegawai (sekolah = 6
+// hari, dinas/kantor = 5 hari) untuk pegawai yang belum dipasangi Shift
+// Kerja sama sekali -- perilaku 100% sama seperti sebelum Shift Kerja ada.
+func hariKerjaMingguanUntukPegawai(db *gorm.DB, pegawai models.Pegawai) map[int]bool {
+	var shift *models.ShiftKerja
+	if pegawai.IDJabatan != nil {
+		shift = shiftKerjaUntukJabatan(db, *pegawai.IDJabatan)
+	}
+	if shift == nil && pegawai.IDUnitKerja != nil {
+		shift = shiftKerjaUntukUnitKerja(db, *pegawai.IDUnitKerja)
+	}
+	if shift != nil {
+		set := map[int]bool{}
+		for _, h := range shift.HariList {
+			set[h.Hari] = h.Aktif
+		}
+		return set
+	}
+	sixDayWeek := sixDayWeekForPegawai(pegawai)
+	return map[int]bool{
+		0: false,                                    // Minggu selalu libur
+		1: true, 2: true, 3: true, 4: true, 5: true, // Senin-Jumat
+		6: sixDayWeek, // Sabtu kerja hanya kalau 6 hari kerja
+	}
+}
+
+// workingDaysWithHariSet adalah versi UMUM workingDaysWithHolidaySet yang
+// menerima pola hari kerja per-pegawai (lihat hariKerjaMingguanUntukPegawai)
+// alih-alih sekadar boolean sixDayWeek -- dipakai begitu pegawainya sendiri
+// sudah diketahui, lewat workingDaysForPegawai di bawah.
+func workingDaysWithHariSet(start, end time.Time, hariSet map[int]bool, holidaySet map[string]bool) []time.Time {
+	var days []time.Time
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		if !hariSet[int(d.Weekday())] {
+			continue
+		}
+		if holidaySet[d.Format("2006-01-02")] {
+			continue
+		}
+		days = append(days, d)
+	}
+	return days
+}
+
+// workingDaysForPegawai menggabungkan hariKerjaMingguanUntukPegawai +
+// workingDaysWithHariSet -- pengganti kombinasi sixDayWeekForPegawai +
+// workingDaysWithHolidaySet/workingDaysInRange di seluruh handler (rekap
+// absen, PDF, dashboard) supaya hari kerja yang dihitung ikut Shift Kerja
+// yang terpasang pada Jabatan/Unit Kerja pegawai.
+func workingDaysForPegawai(db *gorm.DB, pegawai models.Pegawai, start, end time.Time, holidaySet map[string]bool) []time.Time {
+	return workingDaysWithHariSet(start, end, hariKerjaMingguanUntukPegawai(db, pegawai), holidaySet)
+}
+
 // absenMasuk mencatat absen masuk pegawai: menerima multipart/form-data
 // dengan field file "foto" (hasil auto-capture kamera setelah kedipan mata
 // terdeteksi), "lat"/"lng" (titik koordinat GPS), dan "kedipan_ok"
@@ -1511,10 +1578,15 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		tercover = append(tercover, tercoverEntryFromDokumen(d, jenisLookup))
 	}
 
-	sixDayWeek := sixDayWeekForPegawai(pegawai)
+	// holidaySetBulan dihitung sekali (bukan per-panggilan workingDaysInRange
+	// spt sebelumnya) supaya tidak query tgl_merah berulang 3x; pola hari
+	// kerjanya sendiri sekarang ikut Shift Kerja pegawai (lihat
+	// hariKerjaMingguanUntukPegawai/workingDaysForPegawai di atas), bukan
+	// cuma tebakan sekolah=6/dinas=5 hari lewat sixDayWeekForPegawai lagi.
+	holidaySetBulan := holidaySetInRange(db, start, end)
 	terlewat := []string{}
 	if !start.After(limit) {
-		for _, d := range workingDaysInRange(db, start, limit, sixDayWeek) {
+		for _, d := range workingDaysForPegawai(db, pegawai, start, limit, holidaySetBulan) {
 			key := d.Format("2006-01-02")
 			if !hadirSet[key] && !tercoverSet[key] {
 				terlewat = append(terlewat, key)
@@ -1524,13 +1596,13 @@ func riwayatAbsenSaya(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	// dihitung untuk SELURUH bulan (start..end, bukan dibatasi limit/hari
 	// ini) supaya angkanya tetap utuh sebagai "target" hari kerja bulan
 	// tersebut, sama untuk bulan berjalan maupun bulan yang sudah lewat.
-	totalHariKerja := len(workingDaysInRange(db, start, end, sixDayWeek))
+	totalHariKerja := len(workingDaysForPegawai(db, pegawai, start, end, holidaySetBulan))
 
 	// tanggal_bisa_diajukan: sama seperti terlewat, tapi SELURUH bulan
 	// (start..end) -- lihat komentar TanggalBisaDiajukan pada
 	// riwayatAbsenResponse untuk alasannya.
 	bisaDiajukan := []string{}
-	for _, d := range workingDaysInRange(db, start, end, sixDayWeek) {
+	for _, d := range workingDaysForPegawai(db, pegawai, start, end, holidaySetBulan) {
 		key := d.Format("2006-01-02")
 		if !hadirSet[key] && !tercoverSet[key] {
 			bisaDiajukan = append(bisaDiajukan, key)
