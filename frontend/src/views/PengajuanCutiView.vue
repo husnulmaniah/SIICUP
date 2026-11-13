@@ -1182,7 +1182,19 @@ onMounted(() => {
         >
           <template #empty><div style="padding: 1.5rem; text-align: center; color: var(--p-text-muted-color)">Tidak ada data</div></template>
           <Column selectionMode="multiple" headerStyle="width: 3rem" :exportable="false"></Column>
-          <Column v-if="!viewingOwn" field="pegawai.nama" header="Pegawai" />
+          <!-- NIP ditampilkan di bawah nama (bukan kolom terpisah) supaya admin/
+               administrator bisa langsung membedakan pegawai yang namanya
+               sama/mirip tanpa perlu buka detail -- permintaan pengguna:
+               "pada pengajuan cuti dari administrator maupun admin munculkan
+               nip di bawah nama pegawai yg mengajukan cuti". Pola & gaya
+               (font-size 0.78rem, warna var(--p-text-muted-color)) disamakan
+               persis dengan kolom "Nama" di SuratRekomendasiView.vue. -->
+          <Column v-if="!viewingOwn" field="pegawai.nama" header="Pegawai">
+            <template #body="{ data }">
+              <div>{{ data.pegawai?.nama }}</div>
+              <div style="font-size: 0.78rem; color: var(--p-text-muted-color, #64748b)">{{ data.pegawai?.nip }}</div>
+            </template>
+          </Column>
           <Column field="jenis_cuti.jenis" header="Jenis Cuti" />
           <Column header="Tanggal">
             <template #body="{ data }">{{ formatDate(data.tgl_mulai) }} &ndash; {{ formatDate(data.tgl_selesai) }}</template>
