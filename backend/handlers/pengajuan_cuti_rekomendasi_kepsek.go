@@ -84,14 +84,43 @@ func buildSignatureQRKepsek(item models.PengajuanCuti, pegawai models.Pegawai, n
 }
 
 // buildSuratRekomendasiKepsek draws the "Surat Rekomendasi Kepala Sekolah"
-// PDF. pegawai MUST already be preloaded with Jabatan, UnitKerja and
-// PangkatGol.Pangkat/PangkatGol.Gol (lihat downloadFormRekomendasiKepsek di
-// bawah) -- item.KepsekNama dkk./NomorUrutKepsek/TahunSuratKepsek are the
-// frozen snapshot from approvePengajuan; kosong (letter belum pernah
-// disetujui sebagai pegawai sekolah) ditampilkan sebagai "-"/nomor kosong,
-// sama seperti pola surat lain di aplikasi ini saat datanya belum lengkap.
+// PDF sebagai dokumen SATU HALAMAN tersendiri (dipakai oleh
+// downloadFormRekomendasiKepsek di bawah) -- thin wrapper di atas
+// buildSuratRekomendasiKepsekPage, mengikuti pola buildSuratRekomendasi/
+// buildSuratRekomendasiPage di formulir.go (lihat komentar di sana).
+// pegawai MUST already be preloaded with Jabatan, UnitKerja dan
+// PangkatGol.Pangkat/PangkatGol.Gol -- lihat komentar
+// buildSuratRekomendasiKepsekPage di bawah untuk detailnya.
 func buildSuratRekomendasiKepsek(item models.PengajuanCuti, pegawai models.Pegawai) ([]byte, error) {
 	doc := utils.NewPDFDoc()
+	if err := buildSuratRekomendasiKepsekPage(doc, item, pegawai); err != nil {
+		return nil, err
+	}
+	return doc.Output()
+}
+
+// buildSuratRekomendasiKepsekPage draws the "Surat Rekomendasi Kepala
+// Sekolah" page onto an EXISTING doc instead of always creating its own
+// single-page PDFDoc -- padanan buildSuratRekomendasiPage/
+// buildFormulirCutiPage di formulir.go, dipakai oleh buildGabungan di sana
+// supaya pengajuan cuti pegawai SEKOLAH ikut mendapat lembar ketiga ini saat
+// diunduh lewat "form/gabungan" (permintaan pengguna: "pada pengajuan
+// pegawai ketika diklik download maka yg akan terdownload 3 lembar yg
+// sekarang 2 lembar tambahkan surat rekomendasi kepala sekolah di lembar
+// ketiganya"). HANYA relevan untuk pegawai bertempat tugas Sekolah
+// (isSekolahPegawai) -- buildGabungan yang memastikan ini sebelum memanggil
+// fungsi ini, bukan fungsi ini sendiri, supaya tetap bisa dipanggil langsung
+// oleh downloadFormRekomendasiKepsek (yang sudah menjaga hal itu sendiri di
+// pemanggilnya).
+//
+// pegawai MUST already be preloaded with Jabatan, UnitKerja dan
+// PangkatGol.Pangkat/PangkatGol.Gol (lihat downloadFormRekomendasiKepsek &
+// downloadFormGabungan di formulir.go) -- item.KepsekNama dkk./
+// NomorUrutKepsek/TahunSuratKepsek are the frozen snapshot from
+// approvePengajuan; kosong (letter belum pernah disetujui sebagai pegawai
+// sekolah) ditampilkan sebagai "-"/nomor kosong, sama seperti pola surat
+// lain di aplikasi ini saat datanya belum lengkap.
+func buildSuratRekomendasiKepsekPage(doc *utils.PDFDoc, item models.PengajuanCuti, pegawai models.Pegawai) error {
 	p := utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
 	doc.AddPage(p)
 
@@ -240,7 +269,7 @@ func buildSuratRekomendasiKepsek(item models.PengajuanCuti, pegawai models.Pegaw
 	p.SetFont(false, 12)
 	p.Text(sigX, y, "NIP: "+namaOrDash(item.KepsekNip)+".")
 
-	return doc.Output()
+	return nil
 }
 
 // downloadFormRekomendasiKepsek menangani GET

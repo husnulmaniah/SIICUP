@@ -513,6 +513,21 @@ func buildGabungan(item models.PengajuanCuti, pegawai models.Pegawai, signerNama
 	if err := buildFormulirCutiPage(doc, item, pegawai, signerNama, signerNip, signerJabatan, jatah); err != nil {
 		return nil, err
 	}
+	// Lembar ketiga: Surat Rekomendasi Kepala Sekolah -- HANYA untuk pegawai
+	// bertempat tugas Sekolah (dua tahap persetujuan: Kepala Sekolah dulu,
+	// baru Dinas); pegawai Dinas/Kantor tidak punya Kepala Sekolah jadi tetap
+	// 2 lembar seperti semula. Permintaan pengguna: "pada pengajuan pegawai
+	// ketika diklik download maka yg akan terdownload 3 lembar yg sekarang 2
+	// lembar tambahkan surat rekomendasi kepala sekolah di lembar
+	// ketiganya". pegawai di sini harus sudah di-preload PangkatGol.Pangkat/
+	// .Gol tambahan (lihat downloadFormGabungan di bawah) -- buildGabungan
+	// sendiri tidak mengecek itu, mengikuti pola fungsi build* lain di file
+	// ini yang selalu mengandalkan preload dari pemanggil.
+	if isSekolahPegawai(pegawai) {
+		if err := buildSuratRekomendasiKepsekPage(doc, item, pegawai); err != nil {
+			return nil, err
+		}
+	}
 	return doc.Output()
 }
 
@@ -1127,17 +1142,28 @@ func downloadFormCuti(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	writePDFResponse(w, r, pdfBytes, fmt.Sprintf("formulir_cuti_%s.pdf", pegawai.NIP))
 }
 
-// downloadFormGabungan serves BOTH forms as one 2-halaman PDF (Surat
-// Rekomendasi di halaman 1, Formulir Cuti di halaman 2) untuk tombol
-// "Download Sekaligus" -- supaya pegawai tidak perlu mengunduh dua berkas
-// terpisah. Sama seperti downloadFormRekomendasi/downloadFormCuti, hanya
-// bisa diakses setelah pengajuan disetujui (lihat loadApprovedPengajuanForForm)
-// dan otomatis tersedia tanpa admin perlu upload apa pun -- keduanya sudah
-// memuat stempel QR tanda tangan otomatis.
+// downloadFormGabungan serves the forms as one PDF (Surat Rekomendasi di
+// halaman 1, Formulir Cuti di halaman 2, DITAMBAH Surat Rekomendasi Kepala
+// Sekolah di halaman 3 KHUSUS pegawai sekolah -- lihat buildGabungan) untuk
+// tombol "Download Sekaligus" -- supaya pegawai tidak perlu mengunduh
+// berkas-berkas itu terpisah. Sama seperti downloadFormRekomendasi/
+// downloadFormCuti, hanya bisa diakses setelah pengajuan disetujui (lihat
+// loadApprovedPengajuanForForm) dan otomatis tersedia tanpa admin perlu
+// upload apa pun -- semuanya sudah memuat stempel QR tanda tangan otomatis.
 func downloadFormGabungan(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	item, pegawai, ok := loadApprovedPengajuanForForm(w, r, db)
 	if !ok {
 		return
+	}
+	// loadApprovedPengajuanForForm hanya memuat Jabatan & UnitKerja (cukup
+	// untuk Surat Rekomendasi/Formulir Cuti) -- lembar ketiga (Surat
+	// Rekomendasi Kepala Sekolah, HANYA untuk pegawai sekolah) butuh
+	// pegawai.PangkatGol.Pangkat/.Gol juga, jadi dimuat tambahan di sini
+	// (bukan di loadApprovedPengajuanForForm, supaya downloadFormRekomendasi/
+	// downloadFormCuti yang berbagi fungsi itu tidak ikut kena query ekstra
+	// yang tidak mereka perlukan).
+	if isSekolahPegawai(pegawai) {
+		db.Preload("Jabatan").Preload("UnitKerja").Preload("PangkatGol.Pangkat").Preload("PangkatGol.Gol").First(&pegawai, pegawai.ID)
 	}
 	signerNama, signerNip, signerJabatan := resolveItemSignerTrio(db, item)
 	year := item.TglMulai.Year()
