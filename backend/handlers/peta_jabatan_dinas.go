@@ -341,6 +341,25 @@ func createStrukturDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm
 		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Cek duplikat nama TANPA peduli huruf besar/kecil sebelum membuat baris
+	// UnitKerja baru -- sebelumnya tidak ada pengecekan ini sama sekali,
+	// sehingga menambah node lewat Peta Jabatan Dinas dengan nama yang
+	// sebenarnya sudah ada di Master Data Unit Kerja (mis. sudah ada
+	// "BIDANG PAUD DAN PNF" dari input manual, lalu di Peta Jabatan diketik
+	// ulang sebagai "Bidang PAUD dan PNF") diam-diam membuat BARIS KEDUA yang
+	// terpisah untuk kantor yang sama -- menyebabkan data dobel yang
+	// berantakan di Shift Kerja, filter kecamatan, dsb (permintaan pengguna:
+	// "ketika pemetaan peta jabatan muncul unit kerja yang huruf kecil
+	// sehingga terjadi duplikat"). Sekarang ditolak lebih awal dengan pesan
+	// yang menunjuk ke baris lama supaya administrator memakai/memindahkan
+	// ke situ, bukan membuat baru.
+	var dupeUnit models.UnitKerja
+	if err := db.Where("LOWER(unit) = LOWER(?)", p.Unit).First(&dupeUnit).Error; err == nil {
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf(
+			"unit kerja dengan nama \"%s\" sudah ada (ID #%d, \"%s\") -- gunakan unit kerja yang sudah ada itu, jangan buat baru, supaya data tidak dobel (nama dicocokkan tanpa membedakan huruf besar/kecil)",
+			p.Unit, dupeUnit.ID, dupeUnit.Unit))
+		return
+	}
 	tempatKerja := models.TempatKerjaDinas
 	item := models.UnitKerja{
 		Unit:              p.Unit,
@@ -390,6 +409,17 @@ func updateStrukturDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm
 		nama := strings.TrimSpace(*p.Unit)
 		if nama == "" {
 			utils.Error(w, http.StatusBadRequest, "nama unit tidak boleh kosong")
+			return
+		}
+		// Sama seperti createStrukturDinasHandler -- cek duplikat nama
+		// (case-insensitive) terhadap BARIS LAIN sebelum mengganti nama,
+		// supaya rename tidak diam-diam menabrak/menduplikasi unit kerja
+		// yang sudah ada dengan ejaan huruf besar/kecil berbeda.
+		var dupeUnit models.UnitKerja
+		if err := db.Where("LOWER(unit) = LOWER(?) AND id <> ?", nama, item.ID).First(&dupeUnit).Error; err == nil {
+			utils.Error(w, http.StatusBadRequest, fmt.Sprintf(
+				"unit kerja dengan nama \"%s\" sudah ada (ID #%d, \"%s\") -- pilih nama lain, atau pindahkan/hapus salah satunya dulu supaya tidak dobel",
+				nama, dupeUnit.ID, dupeUnit.Unit))
 			return
 		}
 		item.Unit = nama

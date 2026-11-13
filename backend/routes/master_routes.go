@@ -155,7 +155,7 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 		// handlers/crud_generic.go). Penolakan DUPLIKAT pada edit tetap
 		// dijamin di level database lewat uniqueIndex case-insensitive
 		// idx_jabatan_upper_unik (lihat database/migrate.go).
-		BeforeUpdatePayload: func(payload map[string]interface{}) error {
+		BeforeUpdatePayload: func(id string, payload map[string]interface{}) error {
 			raw, ada := payload["jabatan"]
 			if !ada {
 				return nil
@@ -244,6 +244,61 @@ func RegisterMasterRoutes(mux *http.ServeMux, db *gorm.DB) {
 		// form satu-satu.
 		AfterSave: func(db *gorm.DB, old *models.UnitKerja, item *models.UnitKerja) {
 			syncAtasanUnitKerja(db, old, item)
+		},
+		// BeforeSave & BeforeUpdatePayload di bawah: menolak nama Unit Kerja
+		// yang bentrok dengan baris lain TANPA peduli huruf besar/kecil --
+		// permintaan pengguna: data Unit Kerja jadi dobel ("BIDANG PAUD DAN
+		// PNF" vs "Bidang PAUD dan PNF") gara-gara menu Peta Jabatan Dinas
+		// (lihat createStrukturDinasHandler/updateStrukturDinasHandler di
+		// handlers/peta_jabatan_dinas.go, yang sudah diberi pengecekan sama)
+		// bisa membuat baris baru lewat nama yang sebenarnya sudah ada di
+		// Master Data biasa ini. Sengaja TIDAK menyeragamkan ke huruf kapital
+		// seperti models.Jabatan.BeforeSave (lihat migrate.go) -- beda dari
+		// Jabatan, ejaan/kapitalisasi nama Unit Kerja ikut tercetak apa
+		// adanya di kop surat & dokumen resmi (lihat handlers/kop_surat.go),
+		// jadi cukup DITOLAK kalau bentrok, bukan diam-diam diubah kapitalnya.
+		// Import Excel tetap aman tanpa hook ini (lihat UpsertMatch di bawah,
+		// yang MEMPERBARUI baris lama alih-alih membuat baru kalau nama sudah
+		// cocok) -- BeforeSave di sini hanya menutup jalur CREATE biasa
+		// (form "Tambah" & import baris yang namanya belum ada sama sekali).
+		BeforeSave: func(item *models.UnitKerja) error {
+			nama := strings.TrimSpace(item.Unit)
+			if nama == "" {
+				return fmt.Errorf("nama unit kerja wajib diisi")
+			}
+			var dupe models.UnitKerja
+			if err := db.Where("LOWER(unit) = LOWER(?)", nama).First(&dupe).Error; err == nil {
+				return fmt.Errorf(
+					"unit kerja dengan nama \"%s\" sudah ada (ID #%d, \"%s\") -- gunakan unit kerja yang sudah ada itu, jangan buat baru, supaya data tidak dobel",
+					nama, dupe.ID, dupe.Unit)
+			}
+			return nil
+		},
+		// BeforeUpdatePayload: padanan BeforeSave di atas untuk jalur edit
+		// (lihat komentar lengkap CrudConfig.BeforeUpdatePayload di
+		// handlers/crud_generic.go perihal kenapa jalur ini perlu hook
+		// terpisah) -- parameter id dipakai mengecualikan BARIS ITU SENDIRI
+		// dari pengecekan, supaya menyimpan ulang form edit tanpa mengubah
+		// nama (form generik mengirim seluruh isi form, termasuk nama
+		// lamanya sendiri) tidak ikut ketangkap sebagai "duplikat".
+		BeforeUpdatePayload: func(id string, payload map[string]interface{}) error {
+			raw, ada := payload["unit"]
+			if !ada {
+				return nil
+			}
+			s, _ := raw.(string)
+			nama := strings.TrimSpace(s)
+			if nama == "" {
+				return fmt.Errorf("nama unit kerja wajib diisi")
+			}
+			var dupe models.UnitKerja
+			if err := db.Where("LOWER(unit) = LOWER(?) AND id <> ?", nama, id).First(&dupe).Error; err == nil {
+				return fmt.Errorf(
+					"unit kerja dengan nama \"%s\" sudah ada (ID #%d, \"%s\") -- pilih nama lain, atau pindahkan/hapus salah satunya dulu supaya tidak dobel",
+					nama, dupe.ID, dupe.Unit)
+			}
+			payload["unit"] = nama
+			return nil
 		},
 		// UpsertMatch: cocokkan baris Excel ke baris UnitKerja yang SUDAH ADA
 		// lewat NAMA Unit Kerja (case-insensitive, lihat komentar lengkap pada

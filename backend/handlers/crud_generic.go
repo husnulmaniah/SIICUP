@@ -43,7 +43,15 @@ type CrudConfig[T any] struct {
 	// memotong SEBELUM itu semua terjadi -- langsung memvalidasi/menormalkan
 	// payload map mentahnya sendiri (mis. menyeragamkan payload["jabatan"] ke
 	// huruf kapital kalau key itu ADA di payload -- lihat master_routes.go).
-	BeforeUpdatePayload func(payload map[string]interface{}) error
+	// Parameter id (string ID baris yang sedang diedit, dari r.PathValue)
+	// disertakan supaya hook bisa mengecualikan BARIS ITU SENDIRI saat
+	// memvalidasi duplikat (mis. cek nama Unit Kerja yang sama persis TAPI
+	// beda ID lain -- lihat BeforeUpdatePayload untuk /api/unit-kerja di
+	// master_routes.go) -- tanpa ini, edit field APAPUN pada satu baris yang
+	// payload-nya ikut membawa nama lamanya sendiri (form edit generik
+	// biasanya mengirim seluruh isi form, bukan cuma field yang berubah)
+	// akan SELALU ketangkap "duplikat" oleh dirinya sendiri.
+	BeforeUpdatePayload func(id string, payload map[string]interface{}) error
 	// AfterChange runs right after a create, update, delete, or import (once,
 	// after the whole batch) successfully commits. It doesn't need to know
 	// which row changed -- it's for side effects that depend on "this table's
@@ -310,7 +318,7 @@ func updateCrud[T any](w http.ResponseWriter, r *http.Request, db *gorm.DB, cfg 
 	}
 	delete(payload, "id")
 	if cfg.BeforeUpdatePayload != nil {
-		if err := cfg.BeforeUpdatePayload(payload); err != nil {
+		if err := cfg.BeforeUpdatePayload(id, payload); err != nil {
 			utils.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
