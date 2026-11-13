@@ -448,10 +448,20 @@ func updateStrukturDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm
 
 // deleteStrukturDinasHandler menangani DELETE
 // /api/peta-jabatan/dinas/struktur/{id} -- SENGAJA menolak menghapus node
-// akar, node yang masih punya anak, ATAU node yang masih ditempati pegawai
-// (Pegawai.IDUnitKerja), supaya administrator tidak bisa diam-diam
-// menghilangkan cabang pohon yang masih "hidup" -- harus beres-beres
-// (pindahkan pegawai & hapus anaknya dulu) secara eksplisit.
+// akar, node yang masih punya anak, node yang masih ditempati pegawai
+// (Pegawai.IDUnitKerja), node yang masih tercantum di daftar Unit Kerja pada
+// suatu Shift Kerja (ShiftKerjaUnitKerja.IDUnitKerja), ATAU node yang masih
+// punya data Sub-Jabatan (SubJabatan.IDUnitKerja), supaya administrator
+// tidak bisa diam-diam menghilangkan cabang pohon yang masih "hidup" --
+// harus beres-beres (pindahkan pegawai, lepas dari Shift Kerja, hapus/
+// pindahkan Sub-Jabatan, hapus anaknya dulu) secara eksplisit. Dua
+// pengecekan Shift Kerja & Sub-Jabatan ditambahkan belakangan (permintaan
+// pengguna, dalam rangka membersihkan data Unit Kerja yang dobel karena
+// bug lama di createStrukturDinasHandler/updateStrukturDinasHandler) --
+// sebelumnya tombol hapus ini bisa menghapus unit yang masih dipakai di
+// kedua tabel itu tanpa peringatan sama sekali, mengandalkan constraint FK
+// di database (kalau ada) untuk mencegahnya dan memberi error yang tidak
+// jelas kalaupun tertolak.
 func deleteStrukturDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	id := r.PathValue("id")
 	var item models.UnitKerja
@@ -477,6 +487,24 @@ func deleteStrukturDinasHandler(w http.ResponseWriter, r *http.Request, db *gorm
 	db.Model(&models.Pegawai{}).Where("id_unit_kerja = ?", item.ID).Count(&jumlahPegawai)
 	if jumlahPegawai > 0 {
 		utils.Error(w, http.StatusBadRequest, "pindahkan seluruh pegawai di unit ini dahulu sebelum menghapus")
+		return
+	}
+	var shiftUnit models.ShiftKerjaUnitKerja
+	if err := db.Where("id_unit_kerja = ?", item.ID).First(&shiftUnit).Error; err == nil {
+		namaShift := ""
+		var shift models.ShiftKerja
+		if db.First(&shift, "id = ?", shiftUnit.IDShift).Error == nil {
+			namaShift = shift.NamaShift
+		}
+		utils.Error(w, http.StatusBadRequest, fmt.Sprintf(
+			"unit ini masih tercantum di daftar Unit Kerja pada Shift Kerja \"%s\" -- lepas dulu dari shift itu (menu Shift Kerja) sebelum menghapus",
+			namaShift))
+		return
+	}
+	var jumlahSub int64
+	db.Model(&models.SubJabatan{}).Where("id_unit_kerja = ?", item.ID).Count(&jumlahSub)
+	if jumlahSub > 0 {
+		utils.Error(w, http.StatusBadRequest, "unit ini masih punya data Sub-Jabatan -- hapus atau pindahkan dulu lewat menu Peta Jabatan sebelum menghapus unit ini")
 		return
 	}
 	db.Where("id_unit_kerja = ?", item.ID).Delete(&models.FormasiJabatan{})
