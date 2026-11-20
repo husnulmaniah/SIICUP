@@ -1173,7 +1173,7 @@ func drawParagraphWithBoldPhrase(p *utils.PDFPage, x, yTop, maxWidth, lineHeight
 }
 
 // beritaAcaraKolom/drawBeritaAcaraTable: tabel lampiran daftar pegawai pada
-// Berita Acara Kolektif (halaman 2) -- gaya & cara gambar SAMA PERSIS
+// Berita Acara Kolektif (halaman 2 dst.) -- gaya & cara gambar SAMA PERSIS
 // dengan drawKp4Table di kp4_pdf.go (header tebal dibungkus multi-baris
 // kalau perlu, baris data dipotong satu baris karena isinya singkat/diskrit
 // seperti nama/NIP, bukan paragraf).
@@ -1182,7 +1182,21 @@ type beritaAcaraKolom struct {
 	Lebar float64
 }
 
-func drawBeritaAcaraTable(p *utils.PDFPage, x, yTop float64, kolom []beritaAcaraKolom, rows [][]string) float64 {
+// drawBeritaAcaraTable menggambar header tabel lalu SEBANYAK MUNGKIN baris
+// dari rows, berhenti SEBELUM baris mana pun akan melewati maxY (batas
+// bawah halaman) -- TIDAK PERNAH menggambar di luar batas itu. Mengembalikan
+// y akhir & berapa baris dari rows yang benar-benar berhasil digambar (bisa
+// < len(rows) kalau terpotong batas maxY; caller -- lihat
+// drawBeritaAcaraLampiran di bawah -- yang menyambung sisanya ke halaman
+// baru). SEBELUMNYA fungsi ini menggambar SELURUH rows tanpa batas apa pun
+// ke satu halaman tunggal, sehingga baris yang tidak muat digambar DI LUAR
+// halaman (bukan terpotong rapi, melainkan benar-benar tidak pernah
+// terlihat sama sekali di PDF yang diunduh) begitu daftar pegawainya lebih
+// panjang dari yang muat di satu lembar A4 -- permintaan pengguna:
+// "pembuatan berita acara sesuaikan jumlah kertas dengan jumlah org yg di
+// buatkan berita acara krn yg di input namanya lebih dri 50 sementara yang
+// di download hanya batas 2 lembar".
+func drawBeritaAcaraTable(p *utils.PDFPage, x, yTop, maxY float64, kolom []beritaAcaraKolom, rows [][]string) (float64, int) {
 	const headerFont = 9.5
 	const bodyFont = 9.5
 	const pad = 4.0
@@ -1217,7 +1231,11 @@ func drawBeritaAcaraTable(p *utils.PDFPage, x, yTop float64, kolom []beritaAcara
 
 	p.SetFont(false, bodyFont)
 	rowH := bodyFont + 2*pad + 2
+	drawn := 0
 	for _, row := range rows {
+		if y+rowH > maxY {
+			break
+		}
 		cx = x
 		for i, k := range kolom {
 			p.Rect(cx, y, k.Lebar, rowH)
@@ -1240,8 +1258,59 @@ func drawBeritaAcaraTable(p *utils.PDFPage, x, yTop float64, kolom []beritaAcara
 			cx += k.Lebar
 		}
 		y += rowH
+		drawn++
 	}
-	return y
+	return y, drawn
+}
+
+// drawBeritaAcaraLampiran menggambar tabel lampiran LINTAS SEBANYAK
+// HALAMAN YANG DIPERLUKAN, menyambung otomatis ke halaman baru (mengulang
+// header tabel di tiap halaman lanjutan, dengan label kecil "(lanjutan)")
+// setiap kali drawBeritaAcaraTable kehabisan ruang sebelum seluruh rows
+// habis -- inilah yang membuat jumlah lembar PDF menyesuaikan jumlah
+// pegawai, bukan dipatok 1 halaman lampiran seperti sebelumnya. p/y adalah
+// halaman & posisi y TEMPAT TABEL MULAI digambar (setelah judul lampiran &
+// Nomor/Tanggal pada halaman pertama) -- mengembalikan halaman & posisi y
+// TEMPAT TABEL BERHENTI (baris terakhir selesai), supaya pemanggil
+// (buildBeritaAcaraPDF) bisa memutuskan apakah blok tanda tangan masih muat
+// di halaman itu atau perlu halaman baru lagi.
+func drawBeritaAcaraLampiran(doc *utils.PDFDoc, p *utils.PDFPage, marginX, y float64, kolom []beritaAcaraKolom, rows [][]string) (*utils.PDFPage, float64) {
+	// bottomMargin: jarak aman ke tepi bawah kertas -- SAMA dengan marginX
+	// atas yang dipakai halaman lampiran pertama (48.0, lihat
+	// buildBeritaAcaraPDF), supaya tabel tidak pernah mepet ke tepi kertas.
+	const bottomMargin = 48.0
+	maxY := utils.PageHeightA4 - bottomMargin
+
+	sisa := rows
+	for {
+		yEnd, drawn := drawBeritaAcaraTable(p, marginX, y, maxY, kolom, sisa)
+		sisa = sisa[drawn:]
+		if len(sisa) == 0 {
+			return p, yEnd
+		}
+		// baris SISA belum habis tapi halaman ini sudah penuh (termasuk
+		// kasus drawn == 0 -- halaman baru saja dibuka tapi SATU baris pun
+		// tidak muat, mis. kolom header sendiri sudah memakan hampir
+		// seluruh halaman; dijaga di sini supaya tidak pernah jadi infinite
+		// loop) -- lanjut ke halaman baru, header tabel diulang otomatis
+		// oleh drawBeritaAcaraTable di halaman itu.
+		p = utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
+		doc.AddPage(p)
+		y = 48.0
+		p.SetFont(true, 11)
+		p.Text(marginX, y, "Lampiran Daftar Nama Pegawai (lanjutan)")
+		y += 15.0 * 1.2
+		if drawn == 0 {
+			// pengaman anti-infinite-loop MURNI -- seharusnya tidak pernah
+			// tercapai selama kolom lampiran yang dipakai berita acara
+			// tetap seperti sekarang (headerH jauh di bawah maxY-48, jauh
+			// lebih kecil dari satu halaman A4 penuh). Kalau SATU baris pun
+			// tidak muat di halaman yang baru saja dibuka kosong, melanjutkan
+			// loop tidak akan pernah membantu -- hentikan di sini saja
+			// daripada membuat halaman kosong tanpa akhir.
+			return p, y
+		}
+	}
 }
 
 // pegawaiPangkatGolText/pegawaiJabatanText/pegawaiUnitKerjaText: ekstrak
@@ -1598,8 +1667,24 @@ func buildBeritaAcaraPDF(jenis string, pegawaiList []models.Pegawai, signer beri
 			pegawaiJabatanText(pg),
 		})
 	}
-	y2 = drawBeritaAcaraTable(p2, marginX, y2, kolom, rows) + lineH*1.8
+	p2, y2 = drawBeritaAcaraLampiran(doc, p2, marginX, y2, kolom, rows)
+	y2 += lineH * 1.8
 
+	// blok tanda tangan: kalau sisa ruang di halaman TERAKHIR tabel (bisa
+	// halaman ke-2, ke-3, dst. sekarang -- lihat drawBeritaAcaraLampiran di
+	// atas) sudah tidak cukup lagi (perkiraan aman ~300pt untuk
+	// "Kolonodale,.../Mengetahui,/jabatan (maks 2 baris)/QR 90x90/nama/
+	// NIP", lihat drawTtdBlock di atas), pindah ke halaman baru supaya tidak
+	// ketumpuk/terpotong di bagian bawah tabel -- SEBELUMNYA selalu
+	// digambar langsung di p2 tanpa pengecekan ini sama sekali, karena dulu
+	// p2 memang selalu satu-satunya halaman lampiran sehingga ruang
+	// sisanya selalu sama.
+	const ttdReserve = 300.0
+	if y2+ttdReserve > utils.PageHeightA4 {
+		p2 = utils.NewPDFPage(utils.PageWidthA4, utils.PageHeightA4)
+		doc.AddPage(p2)
+		y2 = 48.0
+	}
 	drawTtdBlock(p2, y2)
 
 	return doc.Output()
