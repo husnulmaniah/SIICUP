@@ -398,7 +398,34 @@ const canReuseBuktiDukung = computed(() => {
   return satuSatunya != null && editingItem.value.pegawai[0]?.id_pegawai === satuSatunya && !!editingItem.value.pegawai[0]?.ada_bukti_dukung
 })
 
-async function submitBuat() {
+// hapusSatuDariKolektif: dipakai tombol "x" pada panel "Pegawai Terpilih"
+// di bawah MultiSelect kolektif -- cara EKSPLISIT & disengaja untuk
+// melepas satu nama, berbeda dari meng-klik baris di dalam dropdown
+// pencarian (yang gampang ketekan TIDAK SENGAJA kalau orang itu kebetulan
+// ikut muncul lagi di hasil pencarian kata kunci lain -- lihat catatan
+// panjang pada panel reviewnya di template).
+function hapusSatuDariKolektif(id) {
+  form.value.id_pegawai_kolektif = form.value.id_pegawai_kolektif.filter((v) => v !== id)
+}
+
+// submitBuat: validasi dulu, lalu KHUSUS kolektif minta konfirmasi eksplisit
+// yang menyebutkan JUMLAH pegawai sebelum benar-benar mengirim (doSubmit) --
+// permintaan pengguna setelah laporan nyata: memilih 50+ pegawai lewat
+// pencarian berkali-kali (ketik kata kunci, centang, ganti kata kunci,
+// centang lagi, dst.) ternyata hanya 34 yang benar-benar tersimpan di
+// form.id_pegawai_kolektif begitu sampai ke PDF -- kemungkinan besar karena
+// orang yang SUDAH terpilih dari pencarian sebelumnya ikut terbawa/tampil
+// lagi (tetap tercentang) di hasil pencarian kata kunci BERIKUTNYA (lihat
+// gabungDenganTerpilih di makePegawaiPicker, yang SENGAJA menggabungkan
+// SELURUH pilihan lama ke setiap hasil pencarian baru supaya chip-nya tetap
+// terbaca -- efek sampingnya, baris itu gampang KETEKAN TIDAK SENGAJA sambil
+// mencari nama lain, yang artinya MELEPAS centangnya tanpa disadari). Bug
+// pastinya di sisi pemilihan itu sendiri sulit dipastikan 100% tanpa bisa
+// merekam ulang kejadiannya persis, jadi perbaikan di sini difokuskan pada
+// memberi KESEMPATAN TERAKHIR untuk ketahuan sebelum terlanjur tersimpan:
+// panel "Pegawai Terpilih" (daftar lengkap, bukan cuma chip yang kepotong
+// "+30 lagi" karena maxSelectedLabels) + konfirmasi jumlah final ini.
+function submitBuat() {
   if (idPegawaiTerpilih.value.length === 0) {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Pilih minimal satu pegawai', life: 4000 })
     return
@@ -419,6 +446,22 @@ async function submitBuat() {
     toast.add({ severity: 'warn', summary: 'Belum lengkap', detail: 'Bukti dukung (foto/scan pendukung alasan terpilih) wajib dilampirkan untuk Berita Acara individu', life: 5000 })
     return
   }
+  if (form.value.jenis === 'kolektif') {
+    const n = idPegawaiTerpilih.value.length
+    confirm.require({
+      message: `Berita Acara ini akan dibuat untuk ${n} pegawai -- cocokkan sekali lagi dengan panel "Pegawai Terpilih" di atas (periksa jumlahnya, jangan hanya mengandalkan chip yang bisa terpotong "+N lagi"). Lanjutkan?`,
+      header: 'Konfirmasi Jumlah Pegawai',
+      icon: 'pi pi-exclamation-triangle',
+      acceptLabel: 'Ya, Lanjutkan',
+      rejectLabel: 'Batal, Periksa Lagi',
+      accept: () => doSubmitBerita(),
+    })
+    return
+  }
+  doSubmitBerita()
+}
+
+async function doSubmitBerita() {
   submitting.value = true
   try {
     const fd = new FormData()
@@ -653,6 +696,38 @@ onMounted(() => {
           @filter="pegawaiPicker.onFilter"
         />
         <small class="text-muted">Boleh mencampur pegawai dari unit kerja yang berbeda dalam satu Berita Acara.</small>
+
+        <!-- Panel "Pegawai Terpilih": daftar LENGKAP (bukan cuma chip yang
+             kepotong "+N lagi" karena maxSelectedLabels) supaya admin bisa
+             memastikan jumlah & nama yang benar-benar terpilih sebelum
+             menyimpan -- permintaan pengguna setelah laporan nyata: memilih
+             50+ pegawai lewat pencarian berkali-kali (ketik kata kunci,
+             centang beberapa, ganti kata kunci, centang lagi, dst.) ternyata
+             hanya 34 yang tersimpan sampai ke PDF. Penyebab paling mungkin:
+             orang yang SUDAH tercentang dari pencarian sebelumnya ikut
+             tampil lagi (tetap tercentang) di hasil pencarian kata kunci
+             BERIKUTNYA (lihat gabungDenganTerpilih di makePegawaiPicker),
+             sehingga gampang KETEKAN TIDAK SENGAJA sambil mencari nama lain
+             -- yang artinya melepas centangnya tanpa disadari, tanpa ada
+             cara mudah untuk langsung ketahuan. pegawaiPicker.terpilihCache
+             dipakai sebagai sumber nama di sini (bukan options yang berubah-
+             ubah ikut pencarian) karena SELALU berisi objek pegawai yang
+             SEDANG terpilih, dalam urutan yang sama dengan
+             form.id_pegawai_kolektif (lihat ingatTerpilih). Tombol "x" di
+             sini (hapusSatuDariKolektif) adalah cara EKSPLISIT & disengaja
+             untuk melepas satu nama -- beda dari meng-klik baris di dalam
+             dropdown pencarian yang rawan tidak sengaja seperti di atas. -->
+        <div v-if="form.id_pegawai_kolektif.length > 0" class="terpilih-review">
+          <div class="terpilih-review-header">Pegawai Terpilih ({{ form.id_pegawai_kolektif.length }}) -- periksa sebelum menyimpan</div>
+          <div class="terpilih-review-list">
+            <div v-for="(opt, idx) in pegawaiPicker.terpilihCache.value" :key="opt.value" class="terpilih-review-row">
+              <span>{{ idx + 1 }}. {{ opt.label }}</span>
+              <button type="button" class="terpilih-review-remove" title="Hapus dari daftar" @click="hapusSatuDariKolektif(opt.value)">
+                <i class="pi pi-times"></i>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="form-field" v-if="isDinasOnly">
@@ -866,6 +941,57 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
+}
+
+/* panel "Pegawai Terpilih" pada MultiSelect kolektif -- lihat catatan
+   panjang pada template (dialog Buat/Edit Berita Acara) perihal kenapa
+   panel ini ditambahkan (sebagian nama sempat hilang tanpa disadari saat
+   memilih lewat pencarian berkali-kali). */
+.terpilih-review {
+  margin-top: 0.5rem;
+  border: 1px solid var(--p-content-border-color, #e2e8f0);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.terpilih-review-header {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--p-content-background, #f8fafc);
+  border-bottom: 1px solid var(--p-content-border-color, #e2e8f0);
+}
+
+.terpilih-review-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.terpilih-review-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.terpilih-review-row:not(:last-child) {
+  border-bottom: 1px dashed var(--p-content-border-color, #e2e8f0);
+}
+
+.terpilih-review-remove {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--p-text-muted-color, #64748b);
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  line-height: 1;
+}
+
+.terpilih-review-remove:hover {
+  color: var(--p-red-500, #ef4444);
 }
 
 .form-field {
